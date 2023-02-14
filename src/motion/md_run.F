@@ -95,6 +95,7 @@ MODULE md_run
    USE thermostat_methods,              ONLY: create_thermostats
    USE thermostat_types,                ONLY: release_thermostats,&
                                               thermostats_type
+   USE nonequilibrium_types,            ONLY: NE_type, create_NE_type
    USE velocity_verlet_control,         ONLY: velocity_verlet
    USE virial_methods,                  ONLY: virial_evaluate
    USE virial_types,                    ONLY: virial_type
@@ -208,6 +209,7 @@ CONTAINS
       TYPE(thermal_regions_type), POINTER                :: thermal_regions
       TYPE(thermostats_type), POINTER                    :: thermostats
       TYPE(virial_type), POINTER                         :: virial
+      TYPE(NE_type), POINTER                             :: nevar
 
       CALL timeset(routineN, handle)
       CPASSERT(ASSOCIATED(globenv))
@@ -217,7 +219,7 @@ CONTAINS
                md_ener, thermostats, barostat, reftraj, force_env_section, &
                reftraj_section, work_section, atomic_kinds, &
                local_particles, time, fe_env, free_energy_section, &
-               constraint_section, thermal_regions, virial, subsys_i)
+               constraint_section, thermal_regions, virial, subsys_i, nevar)
       logger => cp_get_default_logger()
       para_env => force_env%para_env
 
@@ -253,6 +255,9 @@ CONTAINS
       CALL create_thermostats(thermostats, md_section, force_env, simpar, para_env, &
                               globenv, global_section)
 
+      ! If requested setup nonequilibrium
+      CALL create_NE_type(nevar, simpar, md_section, force_env)
+
       ! If requested setup Barostat
       CALL create_barostat_type(barostat, md_section, force_env, simpar, globenv)
 
@@ -267,7 +272,8 @@ CONTAINS
                                              pos=my_pos, act=my_act)
       END IF
 
-      CALL set_md_env(md_env, thermostats=thermostats, barostat=barostat, thermal_regions=thermal_regions)
+      CALL set_md_env(md_env, thermostats=thermostats, &
+                      barostat=barostat, thermal_regions=thermal_regions, nevar=nevar)
 
       CALL get_md_env(md_env, ehrenfest_md=ehrenfest_md)
 

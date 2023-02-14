@@ -113,6 +113,10 @@ MODULE input_constants
                                                do_thermo_gle = 103, &
                                                do_thermo_al = 104
 
+   ! Nonequilibrium colour/Poisseuille flow
+   INTEGER, PARAMETER, PUBLIC               :: do_ne_colour=100, &
+                                               do_ne_field=101
+
    ! MD initialisation method
    INTEGER, PARAMETER, PUBLIC               :: md_init_default = 1, &
                                                md_init_vib = 2

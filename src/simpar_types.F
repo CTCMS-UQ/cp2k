@@ -89,6 +89,8 @@ MODULE simpar_types
       REAL(KIND=dp) :: soften_delta
       ! MD initialisation method
       INTEGER       :: initialization_method
+      ! NEMD fo colour/Poisseuille flow
+      LOGICAL       :: do_NEforce
    END TYPE simpar_type
 
    PUBLIC :: simpar_type, &

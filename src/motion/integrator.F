@@ -65,7 +65,8 @@ MODULE integrator
    USE integrator_utils,                ONLY: &
         allocate_old, allocate_tmp, damp_v, damp_veps, deallocate_old, get_s_ds, &
         old_variables_type, rattle_roll_setup, set, tmp_variables_type, update_dealloc_tmp, &
-        update_pv, update_veps, variable_timestep, vv_first, vv_second
+        update_pv, update_veps, variable_timestep, vv_first, vv_second, &
+        vv_first_NE, vv_second_NE
    USE kinds,                           ONLY: dp,&
                                               max_line_length
    USE md_environment_types,            ONLY: get_md_env,&
@@ -100,6 +101,7 @@ MODULE integrator
                                               apply_thermostat_particles,&
                                               apply_thermostat_shells
    USE thermostat_types,                ONLY: thermostat_type
+   USE nonequilibrium_types,            ONLY: NE_type
    USE virial_methods,                  ONLY: virial_evaluate
    USE virial_types,                    ONLY: virial_type
 #include "../base/base_uses.f90"
@@ -420,6 +422,7 @@ CONTAINS
       TYPE(thermostat_type), POINTER                     :: thermostat_coeff, thermostat_shell
       TYPE(tmp_variables_type), POINTER                  :: tmp
       TYPE(virial_type), POINTER                         :: virial
+      TYPE(NE_type), POINTER                             :: nevar ! JR
 
       NULLIFY (thermostat_coeff, tmp)
       NULLIFY (subsys, simpar, para_env, cell, gci, force_env, virial)
@@ -428,7 +431,7 @@ CONTAINS
                core_particle_set, thermostat_shell, dft_control, itimes)
       CALL get_md_env(md_env=md_env, simpar=simpar, force_env=force_env, &
                       thermostat_coeff=thermostat_coeff, thermostat_shell=thermostat_shell, &
-                      para_env=para_env, ehrenfest_md=ehrenfest_md, itimes=itimes)
+                      para_env=para_env, ehrenfest_md=ehrenfest_md, itimes=itimes, nevar=nevar)
       dt = simpar%dt
       CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell)
 
@@ -478,6 +481,12 @@ CONTAINS
       CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                     core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
+      !JR NE type
+      IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
+
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
                                                      nparticle_kind, shell_adiabatic)
@@ -509,6 +518,12 @@ CONTAINS
          v_old(:, :) = tmp%vel
          CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
                         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
+         !JR NE type!
+         IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
+                                    local_particles, particle_set, &
+                                    core_particle_set, shell_particle_set, &
+                                    nparticle_kind, shell_adiabatic, dt,nevar)
+
          CALL update_dealloc_tmp(tmp, particle_set, shell_particle_set, &
                                  core_particle_set, para_env, shell_adiabatic, vel=.TRUE., &
                                  should_deall_vel=.FALSE.)
@@ -541,6 +556,11 @@ CONTAINS
          ! Velocity Verlet (second part)
          CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
                         core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
+
+         IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
+                                    local_particles, particle_set, &
+                                    core_particle_set, shell_particle_set, &
+                                    nparticle_kind, shell_adiabatic, dt,nevar)
 
          IF (simpar%constraint) CALL rattle_control(gci, local_molecules, molecule_set, &
                                                     molecule_kind_set, particle_set, tmp%vel, dt, simpar%shake_tol, &
@@ -745,6 +765,7 @@ CONTAINS
                                                             thermostat_shell, thermostat_slow
       TYPE(tmp_variables_type), POINTER                  :: tmp
       TYPE(virial_type), POINTER                         :: virial
+      TYPE(NE_type), POINTER                             :: nevar ! JR
 
       NULLIFY (gci, force_env, thermostat_coeff, tmp, &
                thermostat_fast, thermostat_slow, thermostat_shell, cell, shell_particles, &
@@ -756,7 +777,7 @@ CONTAINS
       CALL get_md_env(md_env=md_env, simpar=simpar, force_env=force_env, &
                       thermostat_fast=thermostat_fast, thermostat_slow=thermostat_slow, &
                       thermostat_coeff=thermostat_coeff, thermostat_shell=thermostat_shell, &
-                      para_env=para_env, itimes=itimes)
+                      para_env=para_env, itimes=itimes, nevar=nevar)
       dt = simpar%dt
 
       CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell)
@@ -836,6 +857,11 @@ CONTAINS
       CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                     core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
+      !JR NE type
+      IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
                                                      nparticle_kind, shell_adiabatic)
@@ -869,6 +895,11 @@ CONTAINS
       ! Velocity Verlet (second part)
       CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
                      core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
+
+      IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
 
       IF (simpar%constraint) CALL rattle_control(gci, local_molecules, molecule_set, &
                                                  molecule_kind_set, particle_set, tmp%vel, dt, simpar%shake_tol, &
@@ -953,6 +984,7 @@ CONTAINS
                                                             thermostat_shell
       TYPE(tmp_variables_type), POINTER                  :: tmp
       TYPE(virial_type), POINTER                         :: virial
+      TYPE(NE_type), POINTER                             :: nevar ! JR
 
       NULLIFY (gci, force_env, thermostat_coeff, tmp, &
                thermostat_part, thermostat_shell, cell, shell_particles, &
@@ -964,7 +996,7 @@ CONTAINS
       CALL get_md_env(md_env=md_env, simpar=simpar, force_env=force_env, &
                       thermostat_part=thermostat_part, thermostat_coeff=thermostat_coeff, &
                       thermostat_shell=thermostat_shell, para_env=para_env, &
-                      itimes=itimes)
+                      itimes=itimes, nevar=nevar)
       dt = simpar%dt
 
       CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell)
@@ -1041,6 +1073,11 @@ CONTAINS
       CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                     core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
+      IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
+
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
                                                      nparticle_kind, shell_adiabatic)
@@ -1112,6 +1149,11 @@ CONTAINS
       ! Velocity Verlet (second part)
       CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
                      core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
+
+      IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
 
       IF (simpar%constraint) CALL rattle_control(gci, local_molecules, molecule_set, &
                                                  molecule_kind_set, particle_set, tmp%vel, dt, simpar%shake_tol, &
@@ -1204,6 +1246,7 @@ CONTAINS
                                                             thermostat_shell
       TYPE(tmp_variables_type), POINTER                  :: tmp
       TYPE(virial_type), POINTER                         :: virial
+      TYPE(NE_type), POINTER                             :: nevar ! JR
 
       NULLIFY (gci, thermostat_baro, thermostat_part, thermostat_shell, force_env)
       NULLIFY (atomic_kinds, cell, para_env, subsys, local_molecules, local_particles)
@@ -1215,7 +1258,7 @@ CONTAINS
       CALL get_md_env(md_env=md_env, simpar=simpar, force_env=force_env, &
                       thermostat_part=thermostat_part, thermostat_baro=thermostat_baro, &
                       thermostat_shell=thermostat_shell, npt=npt, first_time=first_time, &
-                      para_env=para_env, itimes=itimes)
+                      para_env=para_env, itimes=itimes, nevar=nevar)
       dt = simpar%dt
       infree = 1.0_dp/REAL(simpar%nfree, KIND=dp)
 
@@ -1353,11 +1396,23 @@ CONTAINS
             CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                           core_particle_set, shell_particle_set, nparticle_kind, &
                           shell_adiabatic, dt, lfixd_list=lfixd_list)
+
+            IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
+
             CALL release_local_fixd_list(lfixd_list)
          ELSE
             CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                           core_particle_set, shell_particle_set, nparticle_kind, &
                           shell_adiabatic, dt)
+
+            IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
+
          END IF
 
          IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, &
@@ -1404,6 +1459,11 @@ CONTAINS
       CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
                      core_particle_set, shell_particle_set, nparticle_kind, &
                      shell_adiabatic, dt)
+
+      IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
 
       IF (simpar%constraint) THEN
          roll_tol_thrs = simpar%roll_tol
@@ -1719,6 +1779,7 @@ CONTAINS
       TYPE(simpar_type), POINTER                         :: simpar
       TYPE(tmp_variables_type), POINTER                  :: tmp
       TYPE(virial_type), POINTER                         :: virial
+      TYPE(NE_type), POINTER                             :: nevar ! JR
 
       NULLIFY (gci, force_env)
       NULLIFY (atomic_kinds, cell, para_env, subsys, local_molecules, local_particles)
@@ -1728,7 +1789,7 @@ CONTAINS
       NULLIFY (simpar, virial, itimes)
 
       CALL get_md_env(md_env=md_env, simpar=simpar, force_env=force_env, npt=npt, &
-                      first_time=first_time, para_env=para_env, itimes=itimes)
+                      first_time=first_time, para_env=para_env, itimes=itimes, nevar=nevar)
       dt = simpar%dt
       infree = 1.0_dp/REAL(simpar%nfree, dp)
 
@@ -1832,6 +1893,11 @@ CONTAINS
          CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                        core_particle_set, shell_particle_set, nparticle_kind, &
                        shell_adiabatic, dt)
+          
+          IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
 
          IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, &
                                                         atomic_kind_set, local_particles, particle_set, core_particle_set, &
@@ -2220,6 +2286,7 @@ CONTAINS
                                                             thermostat_shell
       TYPE(tmp_variables_type), POINTER                  :: tmp
       TYPE(virial_type), POINTER                         :: virial
+      TYPE(NE_type), POINTER                             :: nevar ! JR
 
       NULLIFY (gci, thermostat_baro, thermostat_part, thermostat_shell, force_env)
       NULLIFY (atomic_kinds, cell, para_env, subsys, local_molecules, local_particles)
@@ -2231,7 +2298,7 @@ CONTAINS
       CALL get_md_env(md_env=md_env, simpar=simpar, force_env=force_env, &
                       thermostat_part=thermostat_part, thermostat_baro=thermostat_baro, &
                       thermostat_shell=thermostat_shell, npt=npt, first_time=first_time, &
-                      para_env=para_env, barostat=barostat, itimes=itimes)
+                      para_env=para_env, barostat=barostat, itimes=itimes, nevar=nevar)
       dt = simpar%dt
       infree = 1.0_dp/REAL(simpar%nfree, KIND=dp)
 
@@ -2348,6 +2415,11 @@ CONTAINS
          CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                        core_particle_set, shell_particle_set, nparticle_kind, &
                        shell_adiabatic, dt, u=tmp%u)
+         
+         IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
 
          IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, &
                                                         atomic_kind_set, local_particles, particle_set, core_particle_set, &
@@ -2396,6 +2468,11 @@ CONTAINS
       CALL vv_second(tmp, atomic_kind_set, local_particles, particle_set, &
                      core_particle_set, shell_particle_set, nparticle_kind, &
                      shell_adiabatic, dt, tmp%u)
+
+      IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 core_particle_set, shell_particle_set, &
+                                 nparticle_kind, shell_adiabatic, dt,nevar)
 
       IF (simpar%constraint) THEN
          roll_tol_thrs = simpar%roll_tol
