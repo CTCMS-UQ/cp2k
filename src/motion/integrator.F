@@ -484,8 +484,7 @@ CONTAINS
       !JR NE type
       IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
 
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
@@ -521,8 +520,7 @@ CONTAINS
          !JR NE type!
          IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
                                     local_particles, particle_set, &
-                                    core_particle_set, shell_particle_set, &
-                                    nparticle_kind, shell_adiabatic, dt,nevar)
+                                    nparticle_kind, dt,nevar)
 
          CALL update_dealloc_tmp(tmp, particle_set, shell_particle_set, &
                                  core_particle_set, para_env, shell_adiabatic, vel=.TRUE., &
@@ -559,8 +557,7 @@ CONTAINS
 
          IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
                                     local_particles, particle_set, &
-                                    core_particle_set, shell_particle_set, &
-                                    nparticle_kind, shell_adiabatic, dt,nevar)
+                                    nparticle_kind, dt,nevar)
 
          IF (simpar%constraint) CALL rattle_control(gci, local_molecules, molecule_set, &
                                                     molecule_kind_set, particle_set, tmp%vel, dt, simpar%shake_tol, &
@@ -860,8 +857,7 @@ CONTAINS
       !JR NE type
       IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
                                                      nparticle_kind, shell_adiabatic)
@@ -898,8 +894,7 @@ CONTAINS
 
       IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
 
       IF (simpar%constraint) CALL rattle_control(gci, local_molecules, molecule_set, &
                                                  molecule_kind_set, particle_set, tmp%vel, dt, simpar%shake_tol, &
@@ -1075,8 +1070,7 @@ CONTAINS
 
       IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
 
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
@@ -1152,8 +1146,7 @@ CONTAINS
 
       IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
 
       IF (simpar%constraint) CALL rattle_control(gci, local_molecules, molecule_set, &
                                                  molecule_kind_set, particle_set, tmp%vel, dt, simpar%shake_tol, &
@@ -1399,8 +1392,7 @@ CONTAINS
 
             IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
 
             CALL release_local_fixd_list(lfixd_list)
          ELSE
@@ -1410,8 +1402,7 @@ CONTAINS
 
             IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
 
          END IF
 
@@ -1462,8 +1453,7 @@ CONTAINS
 
       IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
 
       IF (simpar%constraint) THEN
          roll_tol_thrs = simpar%roll_tol
@@ -1896,8 +1886,7 @@ CONTAINS
           
           IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
 
          IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, &
                                                         atomic_kind_set, local_particles, particle_set, core_particle_set, &
@@ -2418,8 +2407,7 @@ CONTAINS
          
          IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
 
          IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, &
                                                         atomic_kind_set, local_particles, particle_set, core_particle_set, &
@@ -2471,8 +2459,7 @@ CONTAINS
 
       IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
-                                 core_particle_set, shell_particle_set, &
-                                 nparticle_kind, shell_adiabatic, dt,nevar)
+                                 nparticle_kind, dt,nevar)
 
       IF (simpar%constraint) THEN
          roll_tol_thrs = simpar%roll_tol

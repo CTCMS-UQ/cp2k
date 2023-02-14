@@ -66,7 +66,7 @@ CONTAINS
       TYPE(simpar_type), POINTER                         :: simpar
       TYPE(cp_subsys_type), POINTER                      :: subsys
 
-      LOGICAL                                            :: check, explicit, shell_present
+      LOGICAL                                            :: explicit, shell_present
       TYPE(atomic_kind_list_type), POINTER               :: atomic_kinds
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(particle_list_type), POINTER                  :: particles, shell_particles
@@ -161,9 +161,9 @@ CONTAINS
           END IF
 
           IF (nevar%type_of_NE.eq.do_ne_colour) THEN
-          	WRITE ( iw, '( A,T69,A )' ) ' NON-EQUILIBRIUM| Type of thermostat','Colour Field'
+            WRITE ( iw, '( A,T69,A )' ) ' NON-EQUILIBRIUM| Type of thermostat','Colour Field'
           ELSE
-						WRITE ( iw, '( A,T65,A )' ) ' NON-EQUILIBRIUM| Type of thermostat','Poiseuille Field'
+            WRITE ( iw, '( A,T65,A )' ) ' NON-EQUILIBRIUM| Type of thermostat','Poiseuille Field'
           END IF
 
           WRITE ( iw, '( A,A5,A,T69,F12.9 )' ) &
@@ -179,7 +179,7 @@ CONTAINS
           DO i=1,size(particles%els(:))
             WRITE ( iw, '( I6,T79,I2 )' ) i, particles%els(i)%ccharge
           END DO
-				  WRITE(iw,'(/,/)')
+          WRITE(iw,'(/,/)')
         END IF
         
         CALL cp_print_key_finished_output(iw, logger, nevar%section,"PRINT%NE_INFO")

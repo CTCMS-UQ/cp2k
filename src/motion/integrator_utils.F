@@ -1335,19 +1335,15 @@ CONTAINS
 !> \author James Reid [JR] and Emily Kahl [EVK], The University of QLD (2023)
 ! *****************************************************************************
   SUBROUTINE vv_first_NE ( tmp, atomic_kind_set, local_particles, particle_set, &
-       core_particle_set, shell_particle_set, nparticle_kind,&
-       shell_adiabatic, dt, nevar)
+       nparticle_kind, dt, nevar)
 
     TYPE(tmp_variables_type), POINTER        :: tmp
     TYPE(atomic_kind_type), DIMENSION(:), &
-      POINTER                                :: atomic_kind_set
+    POINTER                                  :: atomic_kind_set
     TYPE(distribution_1d_type), POINTER      :: local_particles
     TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: particle_set, &
-                                                core_particle_set, &
-                                                shell_particle_set
+    POINTER                                  :: particle_set
     INTEGER, INTENT(IN)                      :: nparticle_kind
-    LOGICAL, INTENT(IN)                      :: shell_adiabatic
     REAL(KIND=dp)                            :: dt
 
     CHARACTER(len=*), PARAMETER :: routineN = 'vv_first', &
@@ -1355,13 +1351,11 @@ CONTAINS
 
     INTEGER                                  :: iparticle, iparticle_kind, &
                                                 iparticle_local, &
-                                                nparticle_local, shell_index, &
-                                                natoms,countch
+                                                nparticle_local
     LOGICAL                                  :: is_shell
-    REAL(KIND=dp)                            :: dm, dmc, dms, dsc(3), &
-                                                dvsc(3), fac_massc, &
-                                                fac_masss, mass, field
-    REAL(KIND=dp)                            :: f_mass
+    REAL(KIND=dp)                            :: dsc(3), &
+                                                dvsc(3)
+    REAL(KIND=dp)                            :: mass, f_mass
     TYPE(atomic_kind_type), POINTER          :: atomic_kind
     TYPE(shell_kind_type), POINTER           :: shell
     TYPE(NE_type), POINTER                   :: nevar
@@ -1383,50 +1377,49 @@ CONTAINS
 
              nparticle_local = local_particles%n_el(iparticle_kind)
        IF (mass/=0.0_dp) THEN
-          dm = 0.5_dp*dt/mass
-                DO iparticle_local=1,nparticle_local
-                   iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
+            DO iparticle_local=1,nparticle_local
+               iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
 
-                   if (particle_set(iparticle)%ccharge.ne.0) then
-                   f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
-                   tmp%vel (1,iparticle) = &
-                        tmp%vel (1,iparticle)+&
-                        particle_set(iparticle)%ccharge*f_mass*nevar%FX &
-                        *tmp%scale_v(1) * tmp%poly_v(1)
-                   tmp%vel (2,iparticle) = &
-                        tmp%vel (2,iparticle)+&
-                        particle_set(iparticle)%ccharge*f_mass*nevar%FY&
-                        *tmp%scale_v(2) * tmp%poly_v(2)
-                   tmp%vel (3,iparticle) = &
-                        tmp%vel (3,iparticle)+&
-                        particle_set(iparticle)%ccharge*f_mass*nevar%FZ &
-                        *tmp%scale_v(3) * tmp%poly_v(3)
-                   tmp%pos (1,iparticle) = &
-                        tmp%pos (1,iparticle)+&
-                        particle_set(iparticle)%ccharge*f_mass*nevar%FX*dt &
-                        * tmp%scale_r(1) * tmp%poly_r(1)
-                   tmp%pos (2,iparticle) = &
-                        tmp%pos (2,iparticle)+&
-                        particle_set(iparticle)%ccharge*f_mass*nevar%FY*dt &
-                        * tmp%scale_r(2) * tmp%poly_r(2)
-                   tmp%pos (3,iparticle) = &
-                        tmp%pos (3,iparticle)+&
-                        particle_set(iparticle)%ccharge*f_mass*nevar%FZ*dt &
-                        * tmp%scale_r(3) * tmp%poly_r(3)
+               IF (particle_set(iparticle)%ccharge.ne.0) THEN
+               f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
+               tmp%vel (1,iparticle) = &
+                    tmp%vel (1,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FX &
+                    *tmp%scale_v(1) * tmp%poly_v(1)
+               tmp%vel (2,iparticle) = &
+                    tmp%vel (2,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FY&
+                    *tmp%scale_v(2) * tmp%poly_v(2)
+               tmp%vel (3,iparticle) = &
+                    tmp%vel (3,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FZ &
+                    *tmp%scale_v(3) * tmp%poly_v(3)
+               tmp%pos (1,iparticle) = &
+                    tmp%pos (1,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FX*dt &
+                    * tmp%scale_r(1) * tmp%poly_r(1)
+               tmp%pos (2,iparticle) = &
+                    tmp%pos (2,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FY*dt &
+                    * tmp%scale_r(2) * tmp%poly_r(2)
+               tmp%pos (3,iparticle) = &
+                    tmp%pos (3,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FZ*dt &
+                    * tmp%scale_r(3) * tmp%poly_r(3)
 
-                   tmp%max_vel = MAX(tmp%max_vel,&
-                        ABS(tmp%vel (1,iparticle)),ABS(tmp%vel (2,iparticle)),ABS(tmp%vel (3,iparticle)))
-                   tmp%max_dr = MAX(tmp%max_dr,&
-                        ABS(particle_set(iparticle)%r(1)-tmp%pos (1,iparticle)),&
-                        ABS(particle_set(iparticle)%r(2)-tmp%pos (2,iparticle)),&
-                        ABS(particle_set(iparticle)%r(3)-tmp%pos (3,iparticle)))
-                   tmp%max_dvel = MAX(tmp%max_dvel,&
-                        ABS(particle_set(iparticle)%v(1)-tmp%vel (1,iparticle)),&
-                        ABS(particle_set(iparticle)%v(2)-tmp%vel (2,iparticle)),&
-                        ABS(particle_set(iparticle)%v(3)-tmp%vel (3,iparticle)))
-                   endif
-                END DO
-             END IF
+               tmp%max_vel = MAX(tmp%max_vel,&
+                    ABS(tmp%vel (1,iparticle)),ABS(tmp%vel (2,iparticle)),ABS(tmp%vel (3,iparticle)))
+               tmp%max_dr = MAX(tmp%max_dr,&
+                    ABS(particle_set(iparticle)%r(1)-tmp%pos (1,iparticle)),&
+                    ABS(particle_set(iparticle)%r(2)-tmp%pos (2,iparticle)),&
+                    ABS(particle_set(iparticle)%r(3)-tmp%pos (3,iparticle)))
+               tmp%max_dvel = MAX(tmp%max_dvel,&
+                    ABS(particle_set(iparticle)%v(1)-tmp%vel (1,iparticle)),&
+                    ABS(particle_set(iparticle)%v(2)-tmp%vel (2,iparticle)),&
+                    ABS(particle_set(iparticle)%v(3)-tmp%vel (3,iparticle)))
+                END IF
+            END DO
+        END IF
     END DO
 
   END SUBROUTINE vv_first_NE
@@ -1585,39 +1578,30 @@ CONTAINS
 !> \author James Reid [JR] and Emily Kahl [EVK], The University of Queensland (2023)
 ! *****************************************************************************
   SUBROUTINE vv_second_NE ( tmp, atomic_kind_set, local_particles, particle_set,&
-       core_particle_set, shell_particle_set, nparticle_kind,&
-       shell_adiabatic, dt,nevar)
+       nparticle_kind, dt, nevar)
 
     TYPE(tmp_variables_type), POINTER        :: tmp
     TYPE(atomic_kind_type), DIMENSION(:), &
-      POINTER                                :: atomic_kind_set
+    POINTER                                  :: atomic_kind_set
     TYPE(distribution_1d_type), POINTER      :: local_particles
     TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: particle_set, &
-                                                core_particle_set, &
-                                                shell_particle_set
+    POINTER                                  :: particle_set
     INTEGER, INTENT(IN)                      :: nparticle_kind
-    LOGICAL, INTENT(IN)                      :: shell_adiabatic
     REAL(KIND=dp)                            :: dt
     TYPE(NE_type), POINTER                   :: nevar
 
     CHARACTER(len=*), PARAMETER :: routineN = 'vv_second_NE', &
-      routineP = moduleN//':'//routineN
+                                   routineP = moduleN//':'//routineN
 
     INTEGER                                  :: iparticle, iparticle_kind, &
                                                 iparticle_local, &
-                                                nparticle_local, shell_index, &
-                                                natoms
+                                                nparticle_local
     LOGICAL                                  :: is_shell
-    REAL(KIND=dp)                            :: dm, dmc, dms, fac_massc, &
-                                                fac_masss, mass, field
-    REAL(KIND=dp)                            :: f_mass
+    REAL(KIND=dp)                            :: mass, f_mass
     TYPE(atomic_kind_type), POINTER          :: atomic_kind
     TYPE(shell_kind_type), POINTER           :: shell
 
     NULLIFY(atomic_kind,shell)
-    field = 0.1e-2_dp
-
 
 
     DO iparticle_kind=1,nparticle_kind
@@ -1627,11 +1611,10 @@ CONTAINS
 
              nparticle_local = local_particles%n_el(iparticle_kind)
        IF (mass/=0.0_dp) THEN
-          dm = 0.5_dp*dt/mass
-                DO iparticle_local=1,nparticle_local
-                   iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
-                   if (particle_set(iparticle)%ccharge.ne.0) then
-                   f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
+          DO iparticle_local=1,nparticle_local
+             iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
+             IF (particle_set(iparticle)%ccharge.ne.0) THEN
+             f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
 
        tmp%vel (1,iparticle) = &
                         tmp%vel (1,iparticle)+&
@@ -1645,9 +1628,9 @@ CONTAINS
                         tmp%vel (3,iparticle)+&
                         particle_set(iparticle)%ccharge*f_mass*nevar%FZ &
                         * tmp%scale_v(3) * tmp%poly_v(3)
-                  endif
-                END DO
-             END IF
+              END IF
+          END DO
+        END IF
     END DO
 
   END SUBROUTINE vv_second_NE
