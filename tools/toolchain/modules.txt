@@ -1,0 +1,26 @@
+
+Currently Loaded Modules:
+  1) craype-x86-milan                       19) valgrind4hpc/2.12.11
+  2) libfabric/1.15.2.0                     20) cray-hdf5/1.12.2.3
+  3) craype-network-ofi                     21) libxc/3.0.0-4cb5tnz
+  4) perftools-base/23.03.0                 22) .bzip2/1.0.8-a3u5xsx           (H)
+  5) xpmem/2.5.2-2.4_3.47__gd0f7936.shasta  23) py-setuptools/59.4.0-py3.10.10
+  6) pawseyenv/2023.08                      24) py-numpy/1.23.4
+  7) craype/2.7.20                          25) python/3.10.10
+  8) cray-dsmml/0.2.2                       26) boost/1.80.0-c++98-python
+  9) cray-libsci/23.02.1.1                  27) fftw/3.3.10
+ 10) PrgEnv-gnu/8.3.3                       28) .hwloc/2.8.0-cf3epwl           (H)
+ 11) pawsey                                 29) libtool/2.4.7
+ 12) pawseytools                            30) .pocl/4.0-olr5kf6              (H)
+ 13) slurm/22.05.2                          31) .arrayfire/3.8.1-kq6exuf       (H)
+ 14) gcc/12.2.0                             32) .cray-mpich/8.1.25-hxe3lld     (H)
+ 15) cmake/3.24.3                           33) gsl/2.7.1
+ 16) cray-mpich/8.1.25                      34) openblas/0.3.21
+ 17) netlib-scalapack/2.2.0                 35) .zlib/1.2.13-2icbpr5           (H)
+ 18) cray-mrnet/5.0.4                       36) plumed/2.9.0
+
+  Where:
+   H:  Hidden Module
+
+ 
+
