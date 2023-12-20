@@ -360,9 +360,21 @@ SUBROUTINE create_nonequilibrium_section(section)
       CALL section_add_keyword(section,keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, __LOCATION__, name="SLLOD_XY", &
+                          description="xy strain rate for SLLOD
+deformation.", &
+                          usage="SLLOD_XY <REAL>", &
+                          default_r_val=cp_unit_to_cp2k(0.0_dp,
+"1/fs"), &
+                          unit_str="1/fs")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       CALL create_region_section(region_section, "NE")
       CALL section_add_subsection(section, region_section)
       CALL section_release(region_section)
+
+
 
       ! Print Section
       CALL create_print_section_NE(subsection)

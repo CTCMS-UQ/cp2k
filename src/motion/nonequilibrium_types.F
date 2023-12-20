@@ -53,7 +53,7 @@ MODULE nonequilibrium_types
   TYPE NE_type
      INTEGER :: id_nr, ref_count, type_of_NE
      CHARACTER(LEN=default_string_length) :: label
-     REAL(KIND=dp)                            :: FX, FY, FZ
+     REAL(KIND=dp)                            :: FX, FY, FZ, SLLOD_XY
       TYPE(section_vals_type), POINTER :: section
   END TYPE NE_type
 
@@ -100,6 +100,8 @@ CONTAINS
         CALL section_vals_val_get(section, "FX", r_val=nevar%FX)
         CALL section_vals_val_get(section, "FY", r_val=nevar%FY)
         CALL section_vals_val_get(section, "FZ", r_val=nevar%FZ)
+        CALL section_vals_val_get(section, "SLLOD_XY",
+        r_val=nevar%SLODD_XY)
 
         ! Now get the list of all particles, via the force subsys
         CALL force_env_get(force_env, subsys=subsys)
@@ -172,6 +174,9 @@ CONTAINS
                ' NON-EQUILIBRIUM| Force in Y Direction [', 'au_f' ,'] ',nevar%FY
           WRITE ( iw, '( A,A5,A,T69,F12.9 )' ) &
                ' NON-EQUILIBRIUM| Force in Z Direction [', 'au_f' ,'] ',nevar%FZ
+          WRITE ( iw, '( A,A5,A,T69,F12.9 )' ) &
+               ' NON-EQUILIBRIUM| SLLOD XY strain rate [', 'au_f' ,']
+',nevar%SLLOD_XY
 
           WRITE ( iw, '(A,/)' ) ' NON-EQUILIBRIUM| NE "Charges":'
 
