@@ -32,7 +32,8 @@ MODULE input_cp2k_md
                                               create_thermo_fast_section,&
                                               create_thermo_slow_section,&
                                               create_thermostat_section,&
-                                              create_nonequilibrium_section
+                                              create_nonequilibrium_section,&
+                                              create_sllod_section
    USE input_keyword_types,             ONLY: keyword_create,&
                                               keyword_release,&
                                               keyword_type
@@ -277,6 +278,10 @@ CONTAINS
       CALL create_nonequilibrium_section(subsection)
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
+
+      CALL create_sllod_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection) 
 
       CALL create_respa_section(subsection)
       CALL section_add_subsection(section, subsection)

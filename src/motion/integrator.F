@@ -66,7 +66,7 @@ MODULE integrator
         allocate_old, allocate_tmp, damp_v, damp_veps, deallocate_old, get_s_ds, &
         old_variables_type, rattle_roll_setup, set, tmp_variables_type, update_dealloc_tmp, &
         update_pv, update_veps, variable_timestep, vv_first, vv_second, &
-        vv_first_NE, vv_second_NE
+        vv_first_NE, vv_second_NE, vv_first_NESLLOD, vv_second_NESLLOD
    USE kinds,                           ONLY: dp,&
                                               max_line_length
    USE md_environment_types,            ONLY: get_md_env,&
@@ -466,13 +466,15 @@ CONTAINS
       END IF
 
       CALL allocate_tmp(md_env, tmp, nparticle, nshell, shell_adiabatic)
-
+      
       ! Apply thermostat over the full set of shells if required
       IF (shell_adiabatic) THEN
          CALL apply_thermostat_shells(thermostat_shell, atomic_kind_set, particle_set, &
                                       local_particles, para_env%group, shell_particle_set=shell_particle_set, &
                                       core_particle_set=core_particle_set)
       END IF
+
+      CALL set(old, atomic_kind_set, particle_set, local_particles, 'F')
 
       IF (simpar%constraint) CALL getold(gci, local_molecules, molecule_set, &
                                          molecule_kind_set, particle_set, cell)
@@ -485,6 +487,11 @@ CONTAINS
       IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
+      !LM SLLOD NE
+      IF(simpar%do_SLLODNE) CALL vv_first_NESLLOD(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+
 
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
@@ -522,6 +529,10 @@ CONTAINS
                                     local_particles, particle_set, &
                                     nparticle_kind, dt,nevar)
 
+         IF(simpar%do_SLLODNE) CALL vv_second_NESLLOD(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+
          CALL update_dealloc_tmp(tmp, particle_set, shell_particle_set, &
                                  core_particle_set, para_env, shell_adiabatic, vel=.TRUE., &
                                  should_deall_vel=.FALSE.)
@@ -558,6 +569,10 @@ CONTAINS
          IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
                                     local_particles, particle_set, &
                                     nparticle_kind, dt,nevar)
+
+         IF(simpar%do_SLLODNE) CALL vv_second_NESLLOD(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
 
          IF (simpar%constraint) CALL rattle_control(gci, local_molecules, molecule_set, &
                                                     molecule_kind_set, particle_set, tmp%vel, dt, simpar%shake_tol, &
@@ -597,7 +612,7 @@ CONTAINS
 
       CALL virial_evaluate(atomic_kind_set, particle_set, &
                            local_particles, virial, para_env%group)
-
+      
    END SUBROUTINE nve
 
 ! **************************************************************************************************
@@ -778,7 +793,7 @@ CONTAINS
       dt = simpar%dt
 
       CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell)
-
+      
       ! Do some checks on coordinates and box
       CALL apply_qmmm_walls_reflective(force_env)
 
@@ -839,7 +854,7 @@ CONTAINS
 
       IF (simpar%constraint) CALL getold(gci, local_molecules, molecule_set, &
                                          molecule_kind_set, particle_set, cell)
-
+      
       !    *** Velocity Verlet for Langeving *** v(t)--> v(t+1/2)
       IF (ASSOCIATED(force_env%meta_env)) THEN
          IF (force_env%meta_env%langevin) THEN
@@ -849,7 +864,7 @@ CONTAINS
             CALL metadyn_velocities_colvar(force_env, rand)
          END IF
       END IF
-
+      
       ! Velocity Verlet (first part)
       CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                     core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
@@ -858,6 +873,10 @@ CONTAINS
       IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
+      IF(simpar%do_SLLODNE) CALL vv_first_NESLLOD(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
                                                      nparticle_kind, shell_adiabatic)
@@ -893,6 +912,9 @@ CONTAINS
                      core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
       IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+      IF(simpar%do_SLLODNE) CALL vv_second_NESLLOD(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
 
@@ -1072,6 +1094,10 @@ CONTAINS
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
 
+      IF(simpar%do_SLLODNE) CALL vv_second_NESLLOD(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
                                                      nparticle_kind, shell_adiabatic)
@@ -1145,6 +1171,10 @@ CONTAINS
                      core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
 
       IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+
+      IF(simpar%do_SLLODNE) CALL vv_second_NESLLOD(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
 
@@ -1394,6 +1424,10 @@ CONTAINS
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
 
+            IF(simpar%do_SLLODNE) CALL vv_first_NESLLOD(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+
             CALL release_local_fixd_list(lfixd_list)
          ELSE
             CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
@@ -1403,7 +1437,9 @@ CONTAINS
             IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
-
+            IF(simpar%do_SLLODNE) CALL vv_first_NESLLOD(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
          END IF
 
          IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, &
@@ -1452,6 +1488,10 @@ CONTAINS
                      shell_adiabatic, dt)
 
       IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+
+      IF(simpar%do_SLLODNE) CALL vv_second_NESLLOD(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
 
@@ -1885,6 +1925,10 @@ CONTAINS
                        shell_adiabatic, dt)
           
           IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+
+          IF(simpar%do_SLLODNE) CALL vv_first_NESLLOD(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
 
@@ -2409,6 +2453,10 @@ CONTAINS
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
 
+         IF(simpar%do_SLLODNE) CALL vv_first_NESLLOD(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+
          IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, &
                                                         atomic_kind_set, local_particles, particle_set, core_particle_set, &
                                                         shell_particle_set, nparticle_kind, shell_adiabatic, npt=npt)
@@ -2458,6 +2506,10 @@ CONTAINS
                      shell_adiabatic, dt, tmp%u)
 
       IF(simpar%do_NEforce) CALL vv_second_NE(tmp, atomic_kind_set, &
+                                 local_particles, particle_set, &
+                                 nparticle_kind, dt,nevar)
+
+      IF(simpar%do_SLLODNE) CALL vv_second_NESLLOD(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
 

@@ -91,6 +91,8 @@ MODULE simpar_types
       INTEGER       :: initialization_method
       ! NEMD fo colour/Poisseuille flow
       LOGICAL       :: do_NEforce
+      ! SLLOD for shear flow
+      LOGICAL       :: do_SLLODNE
    END TYPE simpar_type
 
    PUBLIC :: simpar_type, &

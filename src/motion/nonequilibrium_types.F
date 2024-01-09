@@ -100,8 +100,6 @@ CONTAINS
         CALL section_vals_val_get(section, "FX", r_val=nevar%FX)
         CALL section_vals_val_get(section, "FY", r_val=nevar%FY)
         CALL section_vals_val_get(section, "FZ", r_val=nevar%FZ)
-        CALL section_vals_val_get(section, "SLLOD_XY",
-        r_val=nevar%SLODD_XY)
 
         ! Now get the list of all particles, via the force subsys
         CALL force_env_get(force_env, subsys=subsys)
@@ -141,6 +139,36 @@ CONTAINS
         CALL NE_info(nevar, particles)
       END IF
 
+      section => section_vals_get_subs_vals(md_section, "NE_SLLOD")
+      CALL section_vals_get(section, explicit=explicit)
+      IF (explicit) THEN 
+        ALLOCATE(nevar)
+        nevar%id_nr = 1
+        nevar%ref_count = 1
+        simpar%do_SLLODNE = .TRUE.
+        nevar%section => section
+
+        !CALL section_vals_val_get(section, "SHEARTYPE", i_val=nevar%type_of_SHEAR)
+        CALL section_vals_val_get(section, "SLLOD_XY", r_val=nevar%SLLOD_XY)
+
+        ! Now get the list of all particles, via the force subsys
+        CALL force_env_get(force_env, subsys=subsys)
+        CALL cp_subsys_get(subsys, atomic_kinds=atomic_kinds, particles=particles, &
+                           shell_particles=shell_particles)
+        atomic_kind_set => atomic_kinds%els
+
+        ! Turn particles on or off for sllod
+        particles%els(:)%sllodswitch = 0
+        CALL section_vals_val_get(section, "NELIST", i_vals=tmplist)
+
+        DO i = 1, SIZE(tmplist)
+          ipart = tmplist(i)
+          particles%els(ipart)%sllodswitch = 1
+        END DO
+
+        
+        CALL SLLOD_info(nevar, particles)
+       END IF
    END SUBROUTINE create_NE_type
 
    SUBROUTINE NE_info(nevar, particles)
@@ -174,9 +202,6 @@ CONTAINS
                ' NON-EQUILIBRIUM| Force in Y Direction [', 'au_f' ,'] ',nevar%FY
           WRITE ( iw, '( A,A5,A,T69,F12.9 )' ) &
                ' NON-EQUILIBRIUM| Force in Z Direction [', 'au_f' ,'] ',nevar%FZ
-          WRITE ( iw, '( A,A5,A,T69,F12.9 )' ) &
-               ' NON-EQUILIBRIUM| SLLOD XY strain rate [', 'au_f' ,']
-',nevar%SLLOD_XY
 
           WRITE ( iw, '(A,/)' ) ' NON-EQUILIBRIUM| NE "Charges":'
 
@@ -192,5 +217,49 @@ CONTAINS
       END IF
 
    END SUBROUTINE NE_info
+
+   SUBROUTINE SLLOD_info(nevar, particles)
+      TYPE(NE_type), POINTER                             :: nevar
+      TYPE(particle_list_type), POINTER                  :: particles
+      TYPE(cp_logger_type), POINTER                      :: logger
+      INTEGER                                            :: i, iw
+      LOGICAL                                            :: new_file
+
+      NULLIFY (logger)
+      logger => cp_get_default_logger()
+
+      IF (ASSOCIATED(nevar)) THEN
+        iw = cp_print_key_unit_nr(logger, nevar%section, "PRINT%SLLOD_INFO", &
+                                 extension=".log", is_new_file=new_file)
+
+        IF (iw > 0) THEN
+          IF (new_file) THEN
+            WRITE ( iw, '( /,A )' ) ' NON-EQUILIBRIUM| NE Info for SLLOD MD'
+          END IF
+
+!TODO - DIFFERENT TYPES OF SHEAR IN DIFFERENT PLANES 
+!          IF (nevar%type_of_SHEAR.eq.XY??) THEN
+!            WRITE ( iw, '( A,T69,A )' ) ' NON-EQUILIBRIUM| Type of thermostat','Colour Field'
+!          ELSE IF 
+!            WRITE ( iw, '( A,T65,A )' ) ' NON-EQUILIBRIUM| Type of thermostat','Poiseuille Field'
+!          END IF
+
+          WRITE ( iw, '( A,A5,A,T69,F12.9 )' ) &
+               ' NON-EQUILIBRIUM| XY STRAIN RATE [', 'au_f' ,'] ',nevar%SLLOD_XY
+          WRITE ( iw, '(A,/)' ) 'SLLOD thermostated atoms:'
+
+          WRITE ( iw, '( A,T72,A,/ )' ) ' Atom', 'SLLOD ON (1)/OFF (0)'
+          DO i=1,size(particles%els(:))
+            WRITE ( iw, '( I6,T79,I2 )' ) i, particles%els(i)%sllodswitch
+          END DO
+          WRITE(iw,'(/,/)')
+        END IF
+        
+        CALL cp_print_key_finished_output(iw, logger, nevar%section,"PRINT%SLLOD_INFO")
+
+      END IF
+
+   END SUBROUTINE SLLOD_info
+
 
 END MODULE nonequilibrium_types
