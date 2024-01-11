@@ -66,7 +66,8 @@ MODULE integrator
         allocate_old, allocate_tmp, damp_v, damp_veps, deallocate_old, get_s_ds, &
         old_variables_type, rattle_roll_setup, set, tmp_variables_type, update_dealloc_tmp, &
         update_pv, update_veps, variable_timestep, vv_first, vv_second, &
-        vv_first_NE, vv_second_NE, vv_first_NESLLOD, vv_second_NESLLOD
+        vv_first_NE, vv_second_NE, vv_first_NESLLOD, vv_second_NESLLOD, &
+        cell_NESLLOD
    USE kinds,                           ONLY: dp,&
                                               max_line_length
    USE md_environment_types,            ONLY: get_md_env,&
@@ -474,8 +475,6 @@ CONTAINS
                                       core_particle_set=core_particle_set)
       END IF
 
-      CALL set(old, atomic_kind_set, particle_set, local_particles, 'F')
-
       IF (simpar%constraint) CALL getold(gci, local_molecules, molecule_set, &
                                          molecule_kind_set, particle_set, cell)
 
@@ -876,7 +875,7 @@ CONTAINS
       IF(simpar%do_SLLODNE) CALL vv_first_NESLLOD(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
-
+       
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
                                                      nparticle_kind, shell_adiabatic)
@@ -1094,7 +1093,7 @@ CONTAINS
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
 
-      IF(simpar%do_SLLODNE) CALL vv_second_NESLLOD(tmp, atomic_kind_set, &
+      IF(simpar%do_SLLODNE) CALL vv_first_NESLLOD(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
 
@@ -1111,6 +1110,13 @@ CONTAINS
                             molecule_kind_set, particle_set, tmp%pos, tmp%vel, dt, simpar%shake_tol, &
                             simpar%info_constraint, simpar%lagrange_multipliers, simpar%dump_lm, &
                             cell, para_env%group, local_particles)
+      END IF
+      
+      IF (simpar%do_SLLODNE) 
+         CALL cell_NESLLOD(cell, dt, nevar)
+      ! Update the inverse
+         CALL init_cell(cell)
+
       END IF
 
       ! Broadcast the new particle positions and deallocate pos components of temporary

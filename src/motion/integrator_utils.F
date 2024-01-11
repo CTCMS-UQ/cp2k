@@ -102,7 +102,7 @@ MODULE integrator_utils
              allocate_tmp, update_dealloc_tmp, damp_v, set, update_pv, get_s_ds, &
              rattle_roll_setup, damp_veps, update_veps, vv_first, &
              vv_second, variable_timestep, vv_first_NE, vv_second_NE, &
-             vv_first_NESLLOD, vv_second_NESLLOD
+             vv_first_NESLLOD, vv_second_NESLLOD, cell_NESLLOD
 
 CONTAINS
 
@@ -1321,6 +1321,35 @@ CONTAINS
 
 
 ! *****************************************************************************
+!> \brief update cell hmatrix (defined as (A,0,0)(0,B,0)(0,0,C)) with
+!         strain rate 
+!> \param cell ...
+!> \param dt ...
+!> \param nevar
+!>      none
+!> \author me :), The University of QLD (2024)
+! *****************************************************************************
+  SUBROUTINE cell_NESLLOD ( cell, dt, nevar)
+
+    TYPE(cell_type), POINTER                 :: cell
+
+    REAL(KIND=dp)                            :: dt
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'cell_NESLLOD', &
+      routineP = moduleN//':'//routineN
+
+    TYPE(NE_type), POINTER                   :: nevar
+    INTEGER                                  :: i
+
+    DO i=1,3
+       cell%hmat(1,i)=cell%hmat(1,i)+cell%hmat(2,i)*dt*nevar%SLLOD_XY
+    END DO
+
+  END SUBROUTINE cell_NESLLOD
+
+
+
+! *****************************************************************************
 !> \brief First half of the velocity-verlet algorithm : update velocity by half
 !>        step and positions by full step for **SLLOD ONLY**
 !> \param tmp ...
@@ -1384,35 +1413,45 @@ CONTAINS
             DO iparticle_local=1,nparticle_local
                iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
 
-               IF (particle_set(iparticle)%ccharge.ne.0) THEN
+               IF (particle_set(iparticle)%sllodswitch.ne.0) THEN
 !update vel half step with old vel
                f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
                tmp%vel (1,iparticle) = &
                     tmp%vel (1,iparticle)-&
                     particle_set(iparticle)%sllodswitch*0.5_dp*dt*nevar%SLLOD_XY &
-                    * particle_set(iparticle)%r(2)* particle_set(iparticle)%v(1) * tmp%scale_v(1) * tmp%poly_v(1)
-               tmp%vel (2,iparticle) = &
-                    tmp%vel (2,iparticle)
-               tmp%vel (3,iparticle) = &
-                    tmp%vel (3,iparticle)
+                    * particle_set(iparticle)%v(2) * tmp%scale_v(1) * tmp%poly_v(1)
+               !tmp%vel (2,iparticle) = &
+               !     tmp%vel (2,iparticle)
+               !tmp%vel (3,iparticle) = &
+               !     tmp%vel (3,iparticle)
 !update pos half step with old position
                tmp%pos (1,iparticle) = &
                     tmp%pos (1,iparticle)+&
                     particle_set(iparticle)%sllodswitch*0.5_dp*dt*nevar%SLLOD_XY &
-                    * particle_set(iparticle)%r(1)*particle_set(iparticle)%r(2)* tmp%scale_r(1) * tmp%poly_r(1)
-               tmp%pos (2,iparticle) = &
-                    tmp%pos (2,iparticle)
-               tmp%pos (3,iparticle) = &
-                    tmp%pos (3,iparticle)
+                    *particle_set(iparticle)%r(2)* tmp%scale_r(1) * tmp%poly_r(1)
+               !tmp%pos (2,iparticle) = &
+               !     tmp%pos (2,iparticle)
+               !tmp%pos (3,iparticle) = &
+               !     tmp%pos (3,iparticle)
+!update pos with new half vel
+               tmp%pos (1,iparticle) = &
+                       tmp%pos (1,iparticle)-&
+                       particle_set(iparticle)%sllodswitch*0.5_dp*dt*nevar%SLLOD_XY &
+                       * particle_set(iparticle)%v(2) * tmp%scale_v(1) &
+                       * tmp%poly_v(1)*dt * tmp%scale_r(1) * tmp%poly_r(1)
+               !tmp%pos (2,iparticle) = &
+               !       tmp%pos (2,iparticle)
+               !tmp%pos (3,iparticle) = &
+               !       tmp%pos (3,iparticle)
 !update pos half step with new position for complete pos update
                tmp%pos (1,iparticle) = &
                     tmp%pos (1,iparticle)+&
                     particle_set(iparticle)%sllodswitch*0.5_dp*dt*nevar%SLLOD_XY &
-                    * tmp%pos (2,iparticle)*tmp%pos (1,iparticle)* tmp%scale_r(1) * tmp%poly_r(1)
-               tmp%pos (2,iparticle) = &
-                    tmp%pos (2,iparticle)
-               tmp%pos (3,iparticle) = &
-                    tmp%pos (3,iparticle)
+                    * tmp%pos (2,iparticle)* tmp%scale_r(1) * tmp%poly_r(1)
+               !tmp%pos (2,iparticle) = &
+               !     tmp%pos (2,iparticle)
+               !tmp%pos (3,iparticle) = &
+               !     tmp%pos (3,iparticle)
 
 
                tmp%max_vel = MAX(tmp%max_vel,&
@@ -1731,7 +1770,7 @@ CONTAINS
        IF (mass/=0.0_dp) THEN
           DO iparticle_local=1,nparticle_local
              iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
-             IF (particle_set(iparticle)%ccharge.ne.0) THEN
+             IF (particle_set(iparticle)%sllodswitch.ne.0) THEN
              f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
 
 !update vel half step with new vel for full vel update
@@ -1739,11 +1778,11 @@ CONTAINS
                tmp%vel (1,iparticle) = &
                     tmp%vel (1,iparticle)-&
                     particle_set(iparticle)%sllodswitch*0.5_dp*dt*nevar%SLLOD_XY &
-                    * tmp%pos (2, iparticle) *tmp%vel (1, iparticle) * tmp%scale_v(1) * tmp%poly_v(1)
-               tmp%vel (2,iparticle) = &
-                    tmp%vel (2,iparticle)
-               tmp%vel (3,iparticle) = &
-                    tmp%vel (3,iparticle)
+                    *tmp%vel (2, iparticle) * tmp%scale_v(1) * tmp%poly_v(1)
+               !tmp%vel (2,iparticle) = &
+               !     tmp%vel (2,iparticle)
+               !tmp%vel (3,iparticle) = &
+               !     tmp%vel (3,iparticle)
 
               END IF
           END DO

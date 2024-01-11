@@ -76,6 +76,7 @@ CONTAINS
       NULLIFY (subsys)
       NULLIFY (atomic_kinds, atomic_kind_set, particles, shell_particles)
       simpar%do_NEforce = .FALSE.
+      simpar%do_SLLODNE = .FALSE.
       ! TODO EVK: This check is completely busted. The CPASSERT is getting flagged
       ! by Valgrind as depending on uninitialsed memory, despite "check"
       ! being assigned to right here. But if I throw in the print
