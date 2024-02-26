@@ -51,6 +51,8 @@ MODULE integrator_utils
    USE thermostat_types,                ONLY: set_thermostats,&
                                               thermostats_type
    USE nonequilibrium_types,            ONLY: NE_type
+   USE sllod_types,                     ONLY: SLLOD_type
+   USE force_env_types,                 ONLY: force_env_type 
    USE virial_types,                    ONLY: virial_type
 #include "../base/base_uses.f90"
 
@@ -102,7 +104,7 @@ MODULE integrator_utils
              allocate_tmp, update_dealloc_tmp, damp_v, set, update_pv, get_s_ds, &
              rattle_roll_setup, damp_veps, update_veps, vv_first, &
              vv_second, variable_timestep, vv_first_NE, vv_second_NE, &
-             vv_first_NESLLOD, vv_second_NESLLOD, cell_NESLLOD
+             vv_first_SLLOD, vv_second_SLLOD, half_cell_SLLOD, remap_cell_SLLOD
 
 CONTAINS
 
@@ -1325,29 +1327,75 @@ CONTAINS
 !         strain rate 
 !> \param cell ...
 !> \param dt ...
-!> \param nevar
+!> \param sllodvar
 !>      none
-!> \author me :), The University of QLD (2024)
+!> \author LM, The University of QLD (2024)
 ! *****************************************************************************
-  SUBROUTINE cell_NESLLOD ( cell, dt, nevar)
+  SUBROUTINE half_cell_SLLOD ( cell, dt, sllodvar)
 
     TYPE(cell_type), POINTER                 :: cell
 
     REAL(KIND=dp)                            :: dt
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'cell_NESLLOD', &
+    CHARACTER(len=*), PARAMETER :: routineN = 'half_cell_SLLOD', &
       routineP = moduleN//':'//routineN
 
-    TYPE(NE_type), POINTER                   :: nevar
-    INTEGER                                  :: i
+    TYPE(SLLOD_type), POINTER                :: sllodvar
 
-    DO i=1,3
-       cell%hmat(1,i)=cell%hmat(1,i)+cell%hmat(2,i)*dt*nevar%SLLOD_XY
+    !(ax, ay, az) column of hmatrix
+    cell%hmat(1,1)=cell%hmat(1,1)+cell%hmat(2,1)*dt*0.5_dp*sllodvar%XY
+
+    !(bx, by, bz) column of hmatrix
+    cell%hmat(1,2)=cell%hmat(1,2)+cell%hmat(2,2)*dt*0.5_dp*sllodvar%XY
+
+    !(cx, cy, cz) column of hmatrix
+    cell%hmat(1,3)=cell%hmat(1,3)+cell%hmat(2,3)*dt*0.5_dp*sllodvar%XY
+    
+    
+  END SUBROUTINE half_cell_SLLOD
+
+
+! *****************************************************************************
+!> \brief update cell hmatrix (defined as (A,0,0)(0,B,0)(0,0,C)) with
+!         strain rate 
+!> \param cell ...
+!> \param dt ...
+!> \param sllodvar
+!>      none
+!> \author LM and SS, The University of QLD (2024)
+! *****************************************************************************
+  SUBROUTINE remap_cell_SLLOD ( cell, sllodvar)
+
+    TYPE(cell_type), POINTER                 :: cell
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'remap_cell_SLLOD', &
+      routineP = moduleN//':'//routineN
+
+    TYPE(SLLOD_type), POINTER                   :: sllodvar
+    INTEGER                                  :: i, j, signswitch
+    REAL(KIND=dp)                            :: vec, vecmap, poscomp=1
+
+    !remap box for XY shear - is signswitch appropriate?
+     
+     DO i=1,3
+        IF (SIGN(poscomp,sllodvar%XY).eq.SIGN(poscomp,cell%hmat(2,i))) THEN
+            signswitch = -1
+        ELSE
+            signswitch = 1
+        END IF
+        vec = NORM2(cell%hmat(:,i))
+        DO j=1,3
+          IF (i.ne.j) THEN
+            vecmap = NORM2((cell%hmat(:,i)+sllodvar%remap_prd*cell%hmat(:,j)*signswitch))
+            IF (vecmap<vec) THEN
+                cell%hmat(:,i)=cell%hmat(:,i)+sllodvar%remap_prd*cell%hmat(:,j)*signswitch 
+                cell%box_flipped = .TRUE.
+            END IF 
+          END IF
+        END DO
     END DO
 
-  END SUBROUTINE cell_NESLLOD
-
-
+  END SUBROUTINE remap_cell_SLLOD
 
 ! *****************************************************************************
 !> \brief First half of the velocity-verlet algorithm : update velocity by half
@@ -1361,14 +1409,13 @@ CONTAINS
 !> \param nparticle_kind ...
 !> \param shell_adiabatic ...
 !> \param dt ...
-!> \param u ...
-!> \param error ...
+!> \param sllodvar ...
 !> \par History
 !>      none
-!> \author me :), The University of QLD (2024)
+!> \author LM and SS, The University of QLD (2024)
 ! *****************************************************************************
-  SUBROUTINE vv_first_NESLLOD ( tmp, atomic_kind_set, local_particles, particle_set, &
-       nparticle_kind, dt, nevar)
+  SUBROUTINE vv_first_SLLOD ( tmp, atomic_kind_set, local_particles, particle_set, &
+       nparticle_kind, dt, sllodvar)
 
     TYPE(tmp_variables_type), POINTER        :: tmp
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -1379,7 +1426,7 @@ CONTAINS
     INTEGER, INTENT(IN)                      :: nparticle_kind
     REAL(KIND=dp)                            :: dt
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'vv_first_NESLLOD', &
+    CHARACTER(len=*), PARAMETER :: routineN = 'vv_first_SLLOD', &
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: iparticle, iparticle_kind, &
@@ -1388,10 +1435,10 @@ CONTAINS
     LOGICAL                                  :: is_shell
     REAL(KIND=dp)                            :: dsc(3), &
                                                 dvsc(3)
-    REAL(KIND=dp)                            :: mass, f_mass
+    REAL(KIND=dp)                            :: mass
     TYPE(atomic_kind_type), POINTER          :: atomic_kind
     TYPE(shell_kind_type), POINTER           :: shell
-    TYPE(NE_type), POINTER                   :: nevar
+    TYPE(SLLOD_type), POINTER                :: sllodvar
 
     NULLIFY(atomic_kind,shell)
     tmp%max_vel = 0.0_dp
@@ -1413,12 +1460,11 @@ CONTAINS
             DO iparticle_local=1,nparticle_local
                iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
 
-               IF (particle_set(iparticle)%sllodswitch.ne.0) THEN
+               IF (particle_set(iparticle)%sllodswitch) THEN
 !update vel half step with old vel
-               f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
                tmp%vel (1,iparticle) = &
                     tmp%vel (1,iparticle)-&
-                    particle_set(iparticle)%sllodswitch*0.5_dp*dt*nevar%SLLOD_XY &
+                    0.5_dp*dt*sllodvar%XY &
                     * particle_set(iparticle)%v(2) * tmp%scale_v(1) * tmp%poly_v(1)
                !tmp%vel (2,iparticle) = &
                !     tmp%vel (2,iparticle)
@@ -1427,7 +1473,7 @@ CONTAINS
 !update pos half step with old position
                tmp%pos (1,iparticle) = &
                     tmp%pos (1,iparticle)+&
-                    particle_set(iparticle)%sllodswitch*0.5_dp*dt*nevar%SLLOD_XY &
+                    0.5_dp*dt*sllodvar%XY &
                     *particle_set(iparticle)%r(2)* tmp%scale_r(1) * tmp%poly_r(1)
                !tmp%pos (2,iparticle) = &
                !     tmp%pos (2,iparticle)
@@ -1435,10 +1481,10 @@ CONTAINS
                !     tmp%pos (3,iparticle)
 !update pos with new half vel
                tmp%pos (1,iparticle) = &
-                       tmp%pos (1,iparticle)-&
-                       particle_set(iparticle)%sllodswitch*0.5_dp*dt*nevar%SLLOD_XY &
-                       * particle_set(iparticle)%v(2) * tmp%scale_v(1) &
-                       * tmp%poly_v(1)*dt * tmp%scale_r(1) * tmp%poly_r(1)
+                    tmp%pos (1,iparticle)-&
+                    0.5_dp*dt*sllodvar%XY &
+                    * particle_set(iparticle)%v(2) * tmp%scale_v(1) &
+                    * tmp%poly_v(1)*dt * tmp%scale_r(1) * tmp%poly_r(1)
                !tmp%pos (2,iparticle) = &
                !       tmp%pos (2,iparticle)
                !tmp%pos (3,iparticle) = &
@@ -1446,7 +1492,7 @@ CONTAINS
 !update pos half step with new position for complete pos update
                tmp%pos (1,iparticle) = &
                     tmp%pos (1,iparticle)+&
-                    particle_set(iparticle)%sllodswitch*0.5_dp*dt*nevar%SLLOD_XY &
+                    0.5_dp*dt*sllodvar%XY &
                     * tmp%pos (2,iparticle)* tmp%scale_r(1) * tmp%poly_r(1)
                !tmp%pos (2,iparticle) = &
                !     tmp%pos (2,iparticle)
@@ -1469,7 +1515,7 @@ CONTAINS
         END IF
     END DO
 
-  END SUBROUTINE vv_first_NESLLOD
+  END SUBROUTINE vv_first_SLLOD
 
 
 
@@ -1728,14 +1774,13 @@ CONTAINS
 !> \param nparticle_kind ...
 !> \param shell_adiabatic ...
 !> \param dt ...
-!> \param u ...
-!> \param error ...
+!> \param sllodvar ... 
 !> \par History
 !>      none
-!> \author me B), The University of Queensland (2024)
+!> \author LM, The University of Queensland (2024)
 ! *****************************************************************************
-  SUBROUTINE vv_second_NESLLOD ( tmp, atomic_kind_set, local_particles, particle_set,&
-       nparticle_kind, dt, nevar)
+  SUBROUTINE vv_second_SLLOD ( tmp, atomic_kind_set, local_particles, particle_set,&
+       nparticle_kind, dt, sllodvar)
 
     TYPE(tmp_variables_type), POINTER        :: tmp
     TYPE(atomic_kind_type), DIMENSION(:), &
@@ -1745,16 +1790,16 @@ CONTAINS
     POINTER                                  :: particle_set
     INTEGER, INTENT(IN)                      :: nparticle_kind
     REAL(KIND=dp)                            :: dt
-    TYPE(NE_type), POINTER                   :: nevar
+    TYPE(SLLOD_type), POINTER                :: sllodvar
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'vv_second_NESLLOD', &
+    CHARACTER(len=*), PARAMETER :: routineN = 'vv_second_SLLOD', &
                                    routineP = moduleN//':'//routineN
 
     INTEGER                                  :: iparticle, iparticle_kind, &
                                                 iparticle_local, &
                                                 nparticle_local
     LOGICAL                                  :: is_shell
-    REAL(KIND=dp)                            :: mass, f_mass
+    REAL(KIND=dp)                            :: mass
     TYPE(atomic_kind_type), POINTER          :: atomic_kind
     TYPE(shell_kind_type), POINTER           :: shell
 
@@ -1770,14 +1815,12 @@ CONTAINS
        IF (mass/=0.0_dp) THEN
           DO iparticle_local=1,nparticle_local
              iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
-             IF (particle_set(iparticle)%sllodswitch.ne.0) THEN
-             f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
+             IF (particle_set(iparticle)%sllodswitch) THEN
 
 !update vel half step with new vel for full vel update
-               f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
                tmp%vel (1,iparticle) = &
                     tmp%vel (1,iparticle)-&
-                    particle_set(iparticle)%sllodswitch*0.5_dp*dt*nevar%SLLOD_XY &
+                    0.5_dp*dt*sllodvar%XY &
                     *tmp%vel (2, iparticle) * tmp%scale_v(1) * tmp%poly_v(1)
                !tmp%vel (2,iparticle) = &
                !     tmp%vel (2,iparticle)
@@ -1789,7 +1832,7 @@ CONTAINS
         END IF
     END DO
 
-  END SUBROUTINE vv_second_NESLLOD
+  END SUBROUTINE vv_second_SLLOD
 
 
 

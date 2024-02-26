@@ -63,6 +63,7 @@ MODULE cell_types
       REAL(KIND=dp)                     :: deth
       INTEGER, DIMENSION(3)             :: perd
       REAL(KIND=dp), DIMENSION(3, 3)    :: hmat, h_inv
+      LOGICAL                           :: box_flipped=.FALSE. 
    END TYPE cell_type
 
    TYPE cell_p_type

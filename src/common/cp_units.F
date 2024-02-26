@@ -106,7 +106,7 @@ MODULE cp_units
    INTEGER, PARAMETER, PUBLIC :: cp_units_fs = 180, &
                                  cp_units_s = 181, &
                                  cp_units_wn = 182, &
-                                 cp_units_ps = 183
+                                 cp_units_ps = 183 
 
    ! Potential
    INTEGER, PARAMETER, PUBLIC :: cp_units_volt = 190

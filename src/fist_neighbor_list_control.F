@@ -154,6 +154,11 @@ CONTAINS
                                 l_val=build_from_scratch)
       CALL section_vals_val_get(mm_section, "NEIGHBOR_LISTS%GEO_CHECK", &
                                 l_val=geo_check)
+
+      IF (cell%box_flipped) THEN
+        build_from_scratch = .TRUE.
+      END IF
+
       IF (ASSOCIATED(r_last_update)) THEN
          ! Determine the maximum of the squared displacement, compared to
          ! r_last_update.
@@ -181,6 +186,7 @@ CONTAINS
             END DO
             update_neighbor_lists = .TRUE.
          END IF
+
       ELSE
          ! There is no r_last_update to compare with. Neighbor lists from scratch.
          ALLOCATE (r_last_update(nparticle))
@@ -193,8 +199,9 @@ CONTAINS
       END IF
       ! Force Update
       IF (PRESENT(force_update)) THEN
-         IF (force_update) update_neighbor_lists = .TRUE.
+        IF (force_update) update_neighbor_lists = .TRUE.
       END IF
+
 
       ! Allocate the r_last_update_pbc, rshell_last_update_pbc, rcore_last_update_pbc
       IF (.NOT. ASSOCIATED(r_last_update_pbc)) THEN
@@ -307,6 +314,8 @@ CONTAINS
       counter = counter + 1
       CALL fist_nonbond_env_set(fist_nonbond_env, counter=counter)
       CALL timestop(handle)
+
+      cell%box_flipped = .FALSE. !any remapping already accounted for
 
    END SUBROUTINE list_control
 

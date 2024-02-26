@@ -340,6 +340,7 @@ CONTAINS
          CALL rescale_forces(force_env)
       END IF
 
+
       CALL force_env_get(force_env, potential_energy=e_pot)
 
       ! Print always Energy in the same format for all methods

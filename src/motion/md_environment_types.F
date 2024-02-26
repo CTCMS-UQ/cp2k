@@ -50,6 +50,7 @@ MODULE md_environment_types
                                               thermostat_type,&
                                               thermostats_type
    USE nonequilibrium_types,            ONLY: NE_type
+   USE sllod_types,                     ONLY: SLLOD_type
 #include "../base/base_uses.f90"
 
    IMPLICIT NONE
@@ -79,6 +80,7 @@ MODULE md_environment_types
       TYPE(average_quantities_type), POINTER     :: averages
       TYPE(thermal_regions_type), POINTER        :: thermal_regions
       TYPE(NE_type), POINTER                     :: nevar
+      TYPE(SLLOD_type), POINTER                  :: sllodvar
    END TYPE md_environment_type
 
    ! *** Public subroutines and data types ***
@@ -215,7 +217,7 @@ CONTAINS
                          force_env, para_env, reftraj, t, init, first_time, fe_env, thermostats, barostat, &
                          thermostat_coeff, thermostat_part, thermostat_shell, thermostat_baro, &
                          thermostat_fast, thermostat_slow, md_ener, averages, &
-                         thermal_regions, ehrenfest_md, nevar)
+                         thermal_regions, ehrenfest_md, nevar, sllodvar)
 
       TYPE(md_environment_type), POINTER                 :: md_env
       INTEGER, OPTIONAL, POINTER                         :: itimes
@@ -239,6 +241,7 @@ CONTAINS
       TYPE(thermal_regions_type), OPTIONAL, POINTER      :: thermal_regions
       LOGICAL, OPTIONAL                                  :: ehrenfest_md
       TYPE(NE_type), OPTIONAL, POINTER                   :: nevar
+      TYPE(SLLOD_type), OPTIONAL, POINTER                :: sllodvar
 
       LOGICAL                                            :: check
 
@@ -254,6 +257,7 @@ CONTAINS
       IF (PRESENT(thermostats)) thermostats => md_env%thermostats
       IF (PRESENT(barostat)) barostat => md_env%barostat
       IF (PRESENT(nevar)) nevar => md_env%nevar
+      IF (PRESENT(sllodvar)) sllodvar => md_env%sllodvar
       IF (PRESENT(thermostat_part) .OR. PRESENT(thermostat_coeff) .OR. &
           PRESENT(thermostat_baro) .OR. PRESENT(thermostat_shell) .OR. &
           PRESENT(thermostat_fast) .OR. PRESENT(thermostat_slow)) THEN
@@ -317,7 +321,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE set_md_env(md_env, itimes, constant, cell, simpar, fe_env, force_env, &
                          para_env, init, first_time, thermostats, barostat, reftraj, md_ener, averages, &
-                         thermal_regions, ehrenfest_md, nevar)
+                         thermal_regions, ehrenfest_md, nevar, sllodvar)
 
       TYPE(md_environment_type), POINTER                 :: md_env
       INTEGER, OPTIONAL, POINTER                         :: itimes
@@ -336,6 +340,7 @@ CONTAINS
       TYPE(thermal_regions_type), OPTIONAL, POINTER      :: thermal_regions
       LOGICAL, OPTIONAL                                  :: ehrenfest_md
       TYPE(NE_type), OPTIONAL, POINTER                   :: nevar
+      TYPE(SLLOD_type), OPTIONAL, POINTER                :: sllodvar
 
       LOGICAL                                            :: check
 
@@ -358,6 +363,9 @@ CONTAINS
 
       IF (PRESENT(nevar)) THEN 
         md_env%nevar => nevar
+      END IF
+      IF (PRESENT(sllodvar)) THEN 
+        md_env%sllodvar => sllodvar
       END IF
       IF (PRESENT(simpar)) md_env%simpar => simpar
       IF (PRESENT(itimes)) md_env%itimes => itimes

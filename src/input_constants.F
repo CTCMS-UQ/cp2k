@@ -116,6 +116,7 @@ MODULE input_constants
    ! Nonequilibrium colour/Poisseuille flow
    INTEGER, PARAMETER, PUBLIC               :: do_ne_colour=100, &
                                                do_ne_field=101
+   ! SLLOD types
 
    ! MD initialisation method
    INTEGER, PARAMETER, PUBLIC               :: md_init_default = 1, &

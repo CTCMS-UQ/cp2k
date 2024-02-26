@@ -92,7 +92,7 @@ MODULE simpar_types
       ! NEMD fo colour/Poisseuille flow
       LOGICAL       :: do_NEforce
       ! SLLOD for shear flow
-      LOGICAL       :: do_SLLODNE
+      LOGICAL       :: do_SLLOD
    END TYPE simpar_type
 
    PUBLIC :: simpar_type, &

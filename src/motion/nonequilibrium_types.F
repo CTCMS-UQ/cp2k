@@ -39,12 +39,11 @@ MODULE nonequilibrium_types
 !            allocate_NE,&
 !            release_NE,&
 !            retain_NE,&
-            create_NE_type
+            create_NE_type 
 !            release_NE_type,&
 !            NE_info_type,&
 !            release_NE_info,&
 !            set_NE
-
 
   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'Non-equilibrium_methods'
 
@@ -53,7 +52,7 @@ MODULE nonequilibrium_types
   TYPE NE_type
      INTEGER :: id_nr, ref_count, type_of_NE
      CHARACTER(LEN=default_string_length) :: label
-     REAL(KIND=dp)                            :: FX, FY, FZ, SLLOD_XY
+     REAL(KIND=dp)                            :: FX, FY, FZ
       TYPE(section_vals_type), POINTER :: section
   END TYPE NE_type
 
@@ -76,7 +75,6 @@ CONTAINS
       NULLIFY (subsys)
       NULLIFY (atomic_kinds, atomic_kind_set, particles, shell_particles)
       simpar%do_NEforce = .FALSE.
-      simpar%do_SLLODNE = .FALSE.
       ! TODO EVK: This check is completely busted. The CPASSERT is getting flagged
       ! by Valgrind as depending on uninitialsed memory, despite "check"
       ! being assigned to right here. But if I throw in the print
@@ -140,36 +138,6 @@ CONTAINS
         CALL NE_info(nevar, particles)
       END IF
 
-      section => section_vals_get_subs_vals(md_section, "NE_SLLOD")
-      CALL section_vals_get(section, explicit=explicit)
-      IF (explicit) THEN 
-        ALLOCATE(nevar)
-        nevar%id_nr = 1
-        nevar%ref_count = 1
-        simpar%do_SLLODNE = .TRUE.
-        nevar%section => section
-
-        !CALL section_vals_val_get(section, "SHEARTYPE", i_val=nevar%type_of_SHEAR)
-        CALL section_vals_val_get(section, "SLLOD_XY", r_val=nevar%SLLOD_XY)
-
-        ! Now get the list of all particles, via the force subsys
-        CALL force_env_get(force_env, subsys=subsys)
-        CALL cp_subsys_get(subsys, atomic_kinds=atomic_kinds, particles=particles, &
-                           shell_particles=shell_particles)
-        atomic_kind_set => atomic_kinds%els
-
-        ! Turn particles on or off for sllod
-        particles%els(:)%sllodswitch = 0
-        CALL section_vals_val_get(section, "NELIST", i_vals=tmplist)
-
-        DO i = 1, SIZE(tmplist)
-          ipart = tmplist(i)
-          particles%els(ipart)%sllodswitch = 1
-        END DO
-
-        
-        CALL SLLOD_info(nevar, particles)
-       END IF
    END SUBROUTINE create_NE_type
 
    SUBROUTINE NE_info(nevar, particles)
@@ -218,49 +186,4 @@ CONTAINS
       END IF
 
    END SUBROUTINE NE_info
-
-   SUBROUTINE SLLOD_info(nevar, particles)
-      TYPE(NE_type), POINTER                             :: nevar
-      TYPE(particle_list_type), POINTER                  :: particles
-      TYPE(cp_logger_type), POINTER                      :: logger
-      INTEGER                                            :: i, iw
-      LOGICAL                                            :: new_file
-
-      NULLIFY (logger)
-      logger => cp_get_default_logger()
-
-      IF (ASSOCIATED(nevar)) THEN
-        iw = cp_print_key_unit_nr(logger, nevar%section, "PRINT%SLLOD_INFO", &
-                                 extension=".log", is_new_file=new_file)
-
-        IF (iw > 0) THEN
-          IF (new_file) THEN
-            WRITE ( iw, '( /,A )' ) ' NON-EQUILIBRIUM| NE Info for SLLOD MD'
-          END IF
-
-!TODO - DIFFERENT TYPES OF SHEAR IN DIFFERENT PLANES 
-!          IF (nevar%type_of_SHEAR.eq.XY??) THEN
-!            WRITE ( iw, '( A,T69,A )' ) ' NON-EQUILIBRIUM| Type of thermostat','Colour Field'
-!          ELSE IF 
-!            WRITE ( iw, '( A,T65,A )' ) ' NON-EQUILIBRIUM| Type of thermostat','Poiseuille Field'
-!          END IF
-
-          WRITE ( iw, '( A,A5,A,T69,F12.9 )' ) &
-               ' NON-EQUILIBRIUM| XY STRAIN RATE [', 'au_f' ,'] ',nevar%SLLOD_XY
-          WRITE ( iw, '(A,/)' ) 'SLLOD thermostated atoms:'
-
-          WRITE ( iw, '( A,T72,A,/ )' ) ' Atom', 'SLLOD ON (1)/OFF (0)'
-          DO i=1,size(particles%els(:))
-            WRITE ( iw, '( I6,T79,I2 )' ) i, particles%els(i)%sllodswitch
-          END DO
-          WRITE(iw,'(/,/)')
-        END IF
-        
-        CALL cp_print_key_finished_output(iw, logger, nevar%section,"PRINT%SLLOD_INFO")
-
-      END IF
-
-   END SUBROUTINE SLLOD_info
-
-
 END MODULE nonequilibrium_types

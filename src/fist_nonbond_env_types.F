@@ -267,6 +267,7 @@ CONTAINS
    SUBROUTINE fist_nonbond_env_create(fist_nonbond_env, atomic_kind_set, &
                                       potparm14, potparm, do_nonbonded, verlet_skin, ewald_rcut, ei_scale14, &
                                       vdw_scale14, shift_cutoff)
+
       TYPE(fist_nonbond_env_type), POINTER               :: fist_nonbond_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(pair_potential_pp_type), OPTIONAL, POINTER    :: potparm14, potparm

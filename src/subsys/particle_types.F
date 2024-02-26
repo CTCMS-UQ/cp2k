@@ -41,8 +41,8 @@ MODULE particle_types
       INTEGER                               :: atom_index = -1, &
                                                t_region_index = -1, &
                                                shell_index = -1, &
-                                               ccharge = 0, &
-                                               sllodswitch = 0
+                                               ccharge = 0 
+      LOGICAL                               :: sllodswitch = .FALSE.
    END TYPE particle_type
 
    ! Public data types

@@ -17,7 +17,7 @@ MODULE md_run
    USE barostat_types,                  ONLY: barostat_type,&
                                               create_barostat_type,&
                                               release_barostat_type
-   USE cell_types,                      ONLY: cell_type
+   USE cell_types,                      ONLY: cell_type, cell_sym_triclinic
    USE cp_external_control,             ONLY: external_control
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_type
@@ -96,6 +96,7 @@ MODULE md_run
    USE thermostat_types,                ONLY: release_thermostats,&
                                               thermostats_type
    USE nonequilibrium_types,            ONLY: NE_type, create_NE_type
+   USE sllod_types,                     ONLY: SLLOD_type, create_SLLOD_type
    USE velocity_verlet_control,         ONLY: velocity_verlet
    USE virial_methods,                  ONLY: virial_evaluate
    USE virial_types,                    ONLY: virial_type
@@ -210,6 +211,7 @@ CONTAINS
       TYPE(thermostats_type), POINTER                    :: thermostats
       TYPE(virial_type), POINTER                         :: virial
       TYPE(NE_type), POINTER                             :: nevar
+      TYPE(SLLOD_type), POINTER                          :: sllodvar
 
       CALL timeset(routineN, handle)
       CPASSERT(ASSOCIATED(globenv))
@@ -219,7 +221,8 @@ CONTAINS
                md_ener, thermostats, barostat, reftraj, force_env_section, &
                reftraj_section, work_section, atomic_kinds, &
                local_particles, time, fe_env, free_energy_section, &
-               constraint_section, thermal_regions, virial, subsys_i, nevar)
+               constraint_section, thermal_regions, virial, subsys_i, nevar, &
+               sllodvar)
       logger => cp_get_default_logger()
       para_env => force_env%para_env
 
@@ -258,6 +261,9 @@ CONTAINS
       ! If requested setup nonequilibrium
       CALL create_NE_type(nevar, simpar, md_section, force_env)
 
+      ! If requested setup sllod
+      CALL create_SLLOD_type(sllodvar, simpar, md_section, force_env)
+
       ! If requested setup Barostat
       CALL create_barostat_type(barostat, md_section, force_env, simpar, globenv)
 
@@ -273,7 +279,8 @@ CONTAINS
       END IF
 
       CALL set_md_env(md_env, thermostats=thermostats, &
-                      barostat=barostat, thermal_regions=thermal_regions, nevar=nevar)
+                      barostat=barostat, thermal_regions=thermal_regions, & 
+                      nevar=nevar, sllodvar=sllodvar)
 
       CALL get_md_env(md_env, ehrenfest_md=ehrenfest_md)
 
@@ -295,6 +302,15 @@ CONTAINS
       IF (simpar%ensemble == nph_uniaxial_ensemble .OR. simpar%ensemble == nph_uniaxial_damped_ensemble) THEN
          IF (simpar%v0 == 0._dp) simpar%v0 = cell%deth
       END IF
+      
+      !IF(simpar%do_SLLOD) THEN
+      !  SELECT CASE (cell%symmetry_id)
+      !    CASE(cell_sym_triclinic)
+      !        !nothing to do
+      !    CASE DEFAULT
+      !        CPABORT("need a triclinic cell to apply SLLOD box deformation")
+      !  END SELECT
+      !END IF
 
       ! Initialize velocities possibly applying constraints at the zeroth MD step
       CALL section_vals_val_get(motion_section, "PRINT%RESTART%SPLIT_RESTART_FILE", &
@@ -306,7 +322,7 @@ CONTAINS
       CALL fe_env_create(fe_env, free_energy_section)
 
       CALL set_md_env(md_env=md_env, simpar=simpar, fe_env=fe_env, cell=cell, &
-                      force_env=force_env)
+                      force_env=force_env, sllodvar=sllodvar)
 
       ! Possibly initialize Wiener processes
       ![NB] Tested again within create_wiener_process.  Why??
