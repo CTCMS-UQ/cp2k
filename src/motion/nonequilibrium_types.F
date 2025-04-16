@@ -69,11 +69,12 @@ CONTAINS
       TYPE(atomic_kind_list_type), POINTER               :: atomic_kinds
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(particle_list_type), POINTER                  :: particles, shell_particles
-      INTEGER, DIMENSION(:), POINTER                     :: tmplist
-      INTEGER                                            :: i, ipart
+      INTEGER, DIMENSION(:), POINTER                     :: ccharge_list, sllod_list
+      INTEGER                                            :: i, j, irep, nlist, isize
 
       NULLIFY (subsys)
       NULLIFY (atomic_kinds, atomic_kind_set, particles, shell_particles)
+      NULLIFY (ccharge_list, sllod_list)
       simpar%do_NEforce = .FALSE.
       ! TODO EVK: This check is completely busted. The CPASSERT is getting flagged
       ! by Valgrind as depending on uninitialsed memory, despite "check"
@@ -94,6 +95,7 @@ CONTAINS
         nevar%ref_count = 1
         simpar%do_NEforce = .TRUE.
         nevar%section => section
+        irep = 1
 
         CALL section_vals_val_get(section, "NETYPE", i_val=nevar%type_of_NE)
         CALL section_vals_val_get(section, "FX", r_val=nevar%FX)
@@ -116,28 +118,26 @@ CONTAINS
 
         ! Assign colour charges to particles
         particles%els(:)%ccharge = 0
-        CALL section_vals_val_get(section, "NELIST", i_vals=tmplist)
-        IF (nevar%type_of_NE .EQ. do_ne_colour .AND. mod(SIZE(tmplist), 2) .NE. 0) THEN
-          CPABORT("NELIST: colour field must have an even number of particles")
-        END IF
-
-        DO i = 1, SIZE(tmplist)
-          ipart = tmplist(i)
-          IF (nevar%type_of_NE .EQ. do_ne_colour) THEN
-            particles%els(ipart)%ccharge = (-1)**(i)
-          ELSE IF (nevar%type_of_NE .EQ. do_ne_field) THEN
-            particles%els(ipart)%ccharge = 1
+        CALL section_vals_val_get(section, "CCHARGE", i_rep_section=irep, n_rep_val=nlist)
+        CPASSERT(nlist > 0)
+        DO i = 1, nlist
+          CALL section_vals_val_get(section, "CCHARGE", i_rep_section=irep, i_rep_val=i, i_vals=ccharge_list)
+          isize = SIZE(ccharge_list)
+          IF (isize .LT. 2) THEN
+            CPABORT("CCHARGE: must define a charge and >=1 particles")
           END IF
+          DO j = 2, isize
+            particles%els(ccharge_list(j))%ccharge = ccharge_list(1)
+          END DO
         END DO
 
-        ! Check the colour charges all sum to zero. This should never happen
+        ! Check the colour charges all sum to zero.
         if (nevar%type_of_NE .EQ. do_ne_colour .AND. sum(particles%els(:)%ccharge) .NE. 0) THEN
-          CPABORT("NELIST: colour charges do not sum to zero")
+          CPABORT("CCHARGE: colour charges do not sum to zero")
         END IF
         
         CALL NE_info(nevar, particles)
       END IF
-
    END SUBROUTINE create_NE_type
 
    SUBROUTINE NE_info(nevar, particles)

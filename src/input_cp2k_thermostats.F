@@ -428,11 +428,11 @@ SUBROUTINE create_nonequilibrium_section(section)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)      
 
-      CALL keyword_create(keyword, __LOCATION__, name="NELIST",&
-                          description="Specifies a list of atoms to thermostat.",&
-                          usage="NELIST {integer} {integer} .. {integer}", &
-                          n_var=-1, type_of_var=integer_t)
-      CALL section_add_keyword(section,keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="CCHARGE", &
+                          description="Specifies a list of atoms with a given color charge", &
+                          usage="CCHARGE {integer (charge)} {integer} {integer .. {integer}", &
+                          n_var=-1, type_of_var=integer_t, repeats=.TRUE.)
+      CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL create_region_section(region_section, "NE")
