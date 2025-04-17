@@ -49,6 +49,9 @@ MODULE integrator_utils
    USE simpar_types,                    ONLY: simpar_type
    USE thermostat_types,                ONLY: set_thermostats,&
                                               thermostats_type
+   USE nonequilibrium_types,            ONLY: NE_type
+   USE sllod_types,                     ONLY: SLLOD_type
+   USE force_env_types,                 ONLY: force_env_type 
    USE virial_types,                    ONLY: virial_type
 #include "../base/base_uses.f90"
 
@@ -96,12 +99,15 @@ MODULE integrator_utils
       MODULE PROCEDURE damp_v_particle_set, damp_v_velocity
    END INTERFACE
 
-   PUBLIC :: old_variables_type, tmp_variables_type, allocate_old, deallocate_old, &
+   PUBLIC :: old_variables_type, tmp_variables_type, allocate_old,  deallocate_old, &
              allocate_tmp, update_dealloc_tmp, damp_v, set, update_pv, get_s_ds, &
              rattle_roll_setup, damp_veps, update_veps, vv_first, &
-             vv_second, variable_timestep
+             vv_second, variable_timestep, vv_first_NE, vv_second_NE, &
+             vv_first_SLLOD, vv_second_SLLOD, half_cell_SLLOD, remap_cell_SLLOD
 
 CONTAINS
+
+
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1320,6 +1326,313 @@ CONTAINS
       END DO
    END SUBROUTINE vv_first
 
+
+! *****************************************************************************
+!> \brief update cell hmatrix (defined as (A,0,0)(0,B,0)(0,0,C)) with
+!         strain rate 
+!> \param cell ...
+!> \param dt ...
+!> \param sllodvar
+!>      none
+!> \author LM, The University of QLD (2024)
+! *****************************************************************************
+  SUBROUTINE half_cell_SLLOD ( cell, dt, sllodvar)
+
+    TYPE(cell_type), POINTER                 :: cell
+
+    REAL(KIND=dp)                            :: dt
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'half_cell_SLLOD', &
+      routineP = moduleN//':'//routineN
+
+    TYPE(SLLOD_type), POINTER                :: sllodvar
+
+    !(ax, ay, az) column of hmatrix
+    cell%hmat(1,1)=cell%hmat(1,1)+cell%hmat(2,1)*dt*0.5_dp*sllodvar%XY
+
+    !(bx, by, bz) column of hmatrix
+    cell%hmat(1,2)=cell%hmat(1,2)+cell%hmat(2,2)*dt*0.5_dp*sllodvar%XY
+
+    !(cx, cy, cz) column of hmatrix
+    cell%hmat(1,3)=cell%hmat(1,3)+cell%hmat(2,3)*dt*0.5_dp*sllodvar%XY
+    
+    
+  END SUBROUTINE half_cell_SLLOD
+
+
+! *****************************************************************************
+!> \brief update cell hmatrix (defined as (A,0,0)(0,B,0)(0,0,C)) with
+!         strain rate 
+!> \param cell ...
+!> \param dt ...
+!> \param sllodvar
+!>      none
+!> \author LM and SS, The University of QLD (2024)
+! *****************************************************************************
+  SUBROUTINE remap_cell_SLLOD ( cell, sllodvar)
+
+    TYPE(cell_type), POINTER                 :: cell
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'remap_cell_SLLOD', &
+      routineP = moduleN//':'//routineN
+
+    TYPE(SLLOD_type), POINTER                   :: sllodvar
+    INTEGER                                  :: i, j, signswitch
+    REAL(KIND=dp)                            :: vec, vecmap, poscomp=1
+
+    !remap box for XY shear - is signswitch appropriate?
+     
+     DO i=1,3
+        IF (SIGN(poscomp,sllodvar%XY).eq.SIGN(poscomp,cell%hmat(2,i))) THEN
+            signswitch = -1
+        ELSE
+            signswitch = 1
+        END IF
+        vec = NORM2(cell%hmat(:,i))
+        DO j=1,3
+          IF (i.ne.j) THEN
+            vecmap = NORM2((cell%hmat(:,i)+sllodvar%remap_prd*cell%hmat(:,j)*signswitch))
+            IF (vecmap<vec) THEN
+                cell%hmat(:,i)=cell%hmat(:,i)+sllodvar%remap_prd*cell%hmat(:,j)*signswitch 
+                cell%box_flipped = .TRUE.
+            END IF 
+          END IF
+        END DO
+    END DO
+
+  END SUBROUTINE remap_cell_SLLOD
+
+! *****************************************************************************
+!> \brief First half of the velocity-verlet algorithm : update velocity by half
+!>        step and positions by full step for **SLLOD ONLY**
+!> \param tmp ...
+!> \param atomic_kind_set ...
+!> \param local_particles ...
+!> \param particle_set ...
+!> \param core_particle_set ...
+!> \param shell_particle_set ...
+!> \param nparticle_kind ...
+!> \param shell_adiabatic ...
+!> \param dt ...
+!> \param sllodvar ...
+!> \par History
+!>      none
+!> \author LM and SS, The University of QLD (2024)
+! *****************************************************************************
+  SUBROUTINE vv_first_SLLOD ( tmp, atomic_kind_set, local_particles, particle_set, &
+       nparticle_kind, dt, sllodvar)
+
+    TYPE(tmp_variables_type), POINTER        :: tmp
+    TYPE(atomic_kind_type), DIMENSION(:), &
+    POINTER                                  :: atomic_kind_set
+    TYPE(distribution_1d_type), POINTER      :: local_particles
+    TYPE(particle_type), DIMENSION(:), &
+    POINTER                                  :: particle_set
+    INTEGER, INTENT(IN)                      :: nparticle_kind
+    REAL(KIND=dp)                            :: dt
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'vv_first_SLLOD', &
+      routineP = moduleN//':'//routineN
+
+    INTEGER                                  :: iparticle, iparticle_kind, &
+                                                iparticle_local, &
+                                                nparticle_local
+    LOGICAL                                  :: is_shell
+    REAL(KIND=dp)                            :: dsc(3), &
+                                                dvsc(3)
+    REAL(KIND=dp)                            :: mass
+    TYPE(atomic_kind_type), POINTER          :: atomic_kind
+    TYPE(shell_kind_type), POINTER           :: shell
+    TYPE(SLLOD_type), POINTER                :: sllodvar
+
+    NULLIFY(atomic_kind,shell)
+    tmp%max_vel = 0.0_dp
+    tmp%max_vel_sc = 0.0_dp
+    tmp%max_dvel = 0.0_dp
+    tmp%max_dvel_sc = 0.0_dp
+    tmp%max_dr = 0.0_dp
+    tmp%max_dsc = 0.0_dp
+    dsc = 0.0_dp
+    dvsc = 0.0_dp
+
+    !     *** Velocity Verlet (first part) ***
+    DO iparticle_kind=1,nparticle_kind
+       atomic_kind => atomic_kind_set(iparticle_kind)
+       CALL get_atomic_kind(atomic_kind=atomic_kind,mass=mass,shell_active=is_shell)
+
+             nparticle_local = local_particles%n_el(iparticle_kind)
+       IF (mass/=0.0_dp) THEN
+            DO iparticle_local=1,nparticle_local
+               iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
+
+               IF (particle_set(iparticle)%sllodswitch) THEN
+!update vel half step with old vel
+               tmp%vel (1,iparticle) = &
+                    tmp%vel (1,iparticle)-&
+                    0.5_dp*dt*sllodvar%XY &
+                    * particle_set(iparticle)%v(2) * tmp%scale_v(1) * tmp%poly_v(1)
+               !tmp%vel (2,iparticle) = &
+               !     tmp%vel (2,iparticle)
+               !tmp%vel (3,iparticle) = &
+               !     tmp%vel (3,iparticle)
+!update pos half step with old position
+               tmp%pos (1,iparticle) = &
+                    tmp%pos (1,iparticle)+&
+                    0.5_dp*dt*sllodvar%XY &
+                    *particle_set(iparticle)%r(2)* tmp%scale_r(1) * tmp%poly_r(1)
+               !tmp%pos (2,iparticle) = &
+               !     tmp%pos (2,iparticle)
+               !tmp%pos (3,iparticle) = &
+               !     tmp%pos (3,iparticle)
+!update pos with new half vel
+               tmp%pos (1,iparticle) = &
+                    tmp%pos (1,iparticle)-&
+                    0.5_dp*dt*sllodvar%XY &
+                    * particle_set(iparticle)%v(2) * tmp%scale_v(1) &
+                    * tmp%poly_v(1)*dt * tmp%scale_r(1) * tmp%poly_r(1)
+               !tmp%pos (2,iparticle) = &
+               !       tmp%pos (2,iparticle)
+               !tmp%pos (3,iparticle) = &
+               !       tmp%pos (3,iparticle)
+!update pos half step with new position for complete pos update
+               tmp%pos (1,iparticle) = &
+                    tmp%pos (1,iparticle)+&
+                    0.5_dp*dt*sllodvar%XY &
+                    * tmp%pos (2,iparticle)* tmp%scale_r(1) * tmp%poly_r(1)
+               !tmp%pos (2,iparticle) = &
+               !     tmp%pos (2,iparticle)
+               !tmp%pos (3,iparticle) = &
+               !     tmp%pos (3,iparticle)
+
+
+               tmp%max_vel = MAX(tmp%max_vel,&
+                    ABS(tmp%vel (1,iparticle)),ABS(tmp%vel (2,iparticle)),ABS(tmp%vel (3,iparticle)))
+               tmp%max_dr = MAX(tmp%max_dr,&
+                    ABS(particle_set(iparticle)%r(1)-tmp%pos (1,iparticle)),&
+                    ABS(particle_set(iparticle)%r(2)-tmp%pos (2,iparticle)),&
+                    ABS(particle_set(iparticle)%r(3)-tmp%pos (3,iparticle)))
+               tmp%max_dvel = MAX(tmp%max_dvel,&
+                    ABS(particle_set(iparticle)%v(1)-tmp%vel (1,iparticle)),&
+                    ABS(particle_set(iparticle)%v(2)-tmp%vel (2,iparticle)),&
+                    ABS(particle_set(iparticle)%v(3)-tmp%vel (3,iparticle)))
+                END IF
+            END DO
+        END IF
+    END DO
+
+  END SUBROUTINE vv_first_SLLOD
+
+
+
+! *****************************************************************************
+!> \brief First half of the velocity-verlet algorithm : update velocity by half
+!>        step and positions by full step for **NEFORCES ONLY**
+!> \param tmp ...
+!> \param atomic_kind_set ...
+!> \param local_particles ...
+!> \param particle_set ...
+!> \param core_particle_set ...
+!> \param shell_particle_set ...
+!> \param nparticle_kind ...
+!> \param shell_adiabatic ...
+!> \param dt ...
+!> \param u ...
+!> \param error ...
+!> \par History
+!>      none
+!> \author James Reid [JR] and Emily Kahl [EVK], The University of QLD (2023)
+! *****************************************************************************
+  SUBROUTINE vv_first_NE ( tmp, atomic_kind_set, local_particles, particle_set, &
+       nparticle_kind, dt, nevar)
+
+    TYPE(tmp_variables_type), POINTER        :: tmp
+    TYPE(atomic_kind_type), DIMENSION(:), &
+    POINTER                                  :: atomic_kind_set
+    TYPE(distribution_1d_type), POINTER      :: local_particles
+    TYPE(particle_type), DIMENSION(:), &
+    POINTER                                  :: particle_set
+    INTEGER, INTENT(IN)                      :: nparticle_kind
+    REAL(KIND=dp)                            :: dt
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'vv_first_NE', &
+      routineP = moduleN//':'//routineN
+
+    INTEGER                                  :: iparticle, iparticle_kind, &
+                                                iparticle_local, &
+                                                nparticle_local
+    LOGICAL                                  :: is_shell
+    REAL(KIND=dp)                            :: dsc(3), &
+                                                dvsc(3)
+    REAL(KIND=dp)                            :: mass, f_mass
+    TYPE(atomic_kind_type), POINTER          :: atomic_kind
+    TYPE(shell_kind_type), POINTER           :: shell
+    TYPE(NE_type), POINTER                   :: nevar
+
+    NULLIFY(atomic_kind,shell)
+    tmp%max_vel = 0.0_dp
+    tmp%max_vel_sc = 0.0_dp
+    tmp%max_dvel = 0.0_dp
+    tmp%max_dvel_sc = 0.0_dp
+    tmp%max_dr = 0.0_dp
+    tmp%max_dsc = 0.0_dp
+    dsc = 0.0_dp
+    dvsc = 0.0_dp
+
+    !     *** Velocity Verlet (first part) ***
+    DO iparticle_kind=1,nparticle_kind
+       atomic_kind => atomic_kind_set(iparticle_kind)
+       CALL get_atomic_kind(atomic_kind=atomic_kind,mass=mass,shell_active=is_shell)
+
+             nparticle_local = local_particles%n_el(iparticle_kind)
+       IF (mass/=0.0_dp) THEN
+            DO iparticle_local=1,nparticle_local
+               iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
+
+               IF (particle_set(iparticle)%ccharge.ne.0) THEN
+               f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
+               tmp%vel (1,iparticle) = &
+                    tmp%vel (1,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FX &
+                    *tmp%scale_v(1) * tmp%poly_v(1)
+               tmp%vel (2,iparticle) = &
+                    tmp%vel (2,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FY&
+                    *tmp%scale_v(2) * tmp%poly_v(2)
+               tmp%vel (3,iparticle) = &
+                    tmp%vel (3,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FZ &
+                    *tmp%scale_v(3) * tmp%poly_v(3)
+               tmp%pos (1,iparticle) = &
+                    tmp%pos (1,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FX*dt &
+                    * tmp%scale_r(1) * tmp%poly_r(1)
+               tmp%pos (2,iparticle) = &
+                    tmp%pos (2,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FY*dt &
+                    * tmp%scale_r(2) * tmp%poly_r(2)
+               tmp%pos (3,iparticle) = &
+                    tmp%pos (3,iparticle)+&
+                    particle_set(iparticle)%ccharge*f_mass*nevar%FZ*dt &
+                    * tmp%scale_r(3) * tmp%poly_r(3)
+
+               tmp%max_vel = MAX(tmp%max_vel,&
+                    ABS(tmp%vel (1,iparticle)),ABS(tmp%vel (2,iparticle)),ABS(tmp%vel (3,iparticle)))
+               tmp%max_dr = MAX(tmp%max_dr,&
+                    ABS(particle_set(iparticle)%r(1)-tmp%pos (1,iparticle)),&
+                    ABS(particle_set(iparticle)%r(2)-tmp%pos (2,iparticle)),&
+                    ABS(particle_set(iparticle)%r(3)-tmp%pos (3,iparticle)))
+               tmp%max_dvel = MAX(tmp%max_dvel,&
+                    ABS(particle_set(iparticle)%v(1)-tmp%vel (1,iparticle)),&
+                    ABS(particle_set(iparticle)%v(2)-tmp%vel (2,iparticle)),&
+                    ABS(particle_set(iparticle)%v(3)-tmp%vel (3,iparticle)))
+                END IF
+            END DO
+        END IF
+    END DO
+
+  END SUBROUTINE vv_first_NE
+
+
 ! **************************************************************************************************
 !> \brief Second half of the velocity-verlet algorithm : update velocity by half
 !>        step  using the new forces
@@ -1453,6 +1766,158 @@ CONTAINS
       END DO
 
    END SUBROUTINE vv_second
+
+! *****************************************************************************
+!> \brief Second half of the velocity-verlet algorithm : update velocity by half
+!>        step  using the new forces Using SLLOD NE forces ONLY!!!
+!> \param tmp ...
+!> \param atomic_kind_set ...
+!> \param local_particles ...
+!> \param particle_set ...
+!> \param core_particle_set ...
+!> \param shell_particle_set ...
+!> \param nparticle_kind ...
+!> \param shell_adiabatic ...
+!> \param dt ...
+!> \param sllodvar ... 
+!> \par History
+!>      none
+!> \author LM, The University of Queensland (2024)
+! *****************************************************************************
+  SUBROUTINE vv_second_SLLOD ( tmp, atomic_kind_set, local_particles, particle_set,&
+       nparticle_kind, dt, sllodvar)
+
+    TYPE(tmp_variables_type), POINTER        :: tmp
+    TYPE(atomic_kind_type), DIMENSION(:), &
+    POINTER                                  :: atomic_kind_set
+    TYPE(distribution_1d_type), POINTER      :: local_particles
+    TYPE(particle_type), DIMENSION(:), &
+    POINTER                                  :: particle_set
+    INTEGER, INTENT(IN)                      :: nparticle_kind
+    REAL(KIND=dp)                            :: dt
+    TYPE(SLLOD_type), POINTER                :: sllodvar
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'vv_second_SLLOD', &
+                                   routineP = moduleN//':'//routineN
+
+    INTEGER                                  :: iparticle, iparticle_kind, &
+                                                iparticle_local, &
+                                                nparticle_local
+    LOGICAL                                  :: is_shell
+    REAL(KIND=dp)                            :: mass
+    TYPE(atomic_kind_type), POINTER          :: atomic_kind
+    TYPE(shell_kind_type), POINTER           :: shell
+
+    NULLIFY(atomic_kind,shell)
+
+
+    DO iparticle_kind=1,nparticle_kind
+       atomic_kind => atomic_kind_set(iparticle_kind)
+       CALL get_atomic_kind(atomic_kind=atomic_kind,mass=mass,&
+            shell_active=is_shell)
+
+             nparticle_local = local_particles%n_el(iparticle_kind)
+       IF (mass/=0.0_dp) THEN
+          DO iparticle_local=1,nparticle_local
+             iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
+             IF (particle_set(iparticle)%sllodswitch) THEN
+
+!update vel half step with new vel for full vel update
+               tmp%vel (1,iparticle) = &
+                    tmp%vel (1,iparticle)-&
+                    0.5_dp*dt*sllodvar%XY &
+                    *tmp%vel (2, iparticle) * tmp%scale_v(1) * tmp%poly_v(1)
+               !tmp%vel (2,iparticle) = &
+               !     tmp%vel (2,iparticle)
+               !tmp%vel (3,iparticle) = &
+               !     tmp%vel (3,iparticle)
+
+              END IF
+          END DO
+        END IF
+    END DO
+
+  END SUBROUTINE vv_second_SLLOD
+
+
+
+! *****************************************************************************
+!> \brief Second half of the velocity-verlet algorithm : update velocity by half
+!>        step  using the new forces Using NE forces ONLY!!!
+!> \param tmp ...
+!> \param atomic_kind_set ...
+!> \param local_particles ...
+!> \param particle_set ...
+!> \param core_particle_set ...
+!> \param shell_particle_set ...
+!> \param nparticle_kind ...
+!> \param shell_adiabatic ...
+!> \param dt ...
+!> \param u ...
+!> \param error ...
+!> \par History
+!>      none
+!> \author James Reid [JR] and Emily Kahl [EVK], The University of Queensland (2023)
+! *****************************************************************************
+  SUBROUTINE vv_second_NE ( tmp, atomic_kind_set, local_particles, particle_set,&
+       nparticle_kind, dt, nevar)
+
+    TYPE(tmp_variables_type), POINTER        :: tmp
+    TYPE(atomic_kind_type), DIMENSION(:), &
+    POINTER                                  :: atomic_kind_set
+    TYPE(distribution_1d_type), POINTER      :: local_particles
+    TYPE(particle_type), DIMENSION(:), &
+    POINTER                                  :: particle_set
+    INTEGER, INTENT(IN)                      :: nparticle_kind
+    REAL(KIND=dp)                            :: dt
+    TYPE(NE_type), POINTER                   :: nevar
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'vv_second_NE', &
+                                   routineP = moduleN//':'//routineN
+
+    INTEGER                                  :: iparticle, iparticle_kind, &
+                                                iparticle_local, &
+                                                nparticle_local
+    LOGICAL                                  :: is_shell
+    REAL(KIND=dp)                            :: mass, f_mass
+    TYPE(atomic_kind_type), POINTER          :: atomic_kind
+    TYPE(shell_kind_type), POINTER           :: shell
+
+    NULLIFY(atomic_kind,shell)
+
+
+    DO iparticle_kind=1,nparticle_kind
+       atomic_kind => atomic_kind_set(iparticle_kind)
+       CALL get_atomic_kind(atomic_kind=atomic_kind,mass=mass,&
+            shell_active=is_shell)
+
+             nparticle_local = local_particles%n_el(iparticle_kind)
+       IF (mass/=0.0_dp) THEN
+          DO iparticle_local=1,nparticle_local
+             iparticle = local_particles%list(iparticle_kind)%array(iparticle_local)
+             IF (particle_set(iparticle)%ccharge.ne.0) THEN
+             f_mass=0.5_dp*dt/particle_set(iparticle)%atomic_kind%mass
+
+       tmp%vel (1,iparticle) = &
+                        tmp%vel (1,iparticle)+&
+                        particle_set(iparticle)%ccharge*f_mass*nevar%FX &
+                        *tmp%scale_v(1) * tmp%poly_v(1)
+       tmp%vel (2,iparticle) = &
+                        tmp%vel (2,iparticle)+&
+                        particle_set(iparticle)%ccharge*f_mass*nevar%FY &
+                        * tmp%scale_v(2) * tmp%poly_v(2)
+       tmp%vel (3,iparticle) = &
+                        tmp%vel (3,iparticle)+&
+                        particle_set(iparticle)%ccharge*f_mass*nevar%FZ &
+                        * tmp%scale_v(3) * tmp%poly_v(3)
+              END IF
+          END DO
+        END IF
+    END DO
+
+  END SUBROUTINE vv_second_NE
+
+
 
 ! **************************************************************************************************
 !> \brief Transform position and velocities for the first half of the

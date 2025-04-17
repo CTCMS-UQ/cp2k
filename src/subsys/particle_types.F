@@ -38,9 +38,12 @@ MODULE particle_types
                                                r = 0.0_dp, & ! position
                                                v = 0.0_dp ! velocity
       ! Particle dependent terms for shell-model
+      ! TODO(SS): Better place to put ccharge and sllodswitch??
       INTEGER                               :: atom_index = 0, &
                                                t_region_index = 0, &
-                                               shell_index = 0
+                                               shell_index = 0, &
+                                               ccharge = 0 
+      LOGICAL                               :: sllodswitch = .FALSE.
    END TYPE particle_type
 
    ! Public data types

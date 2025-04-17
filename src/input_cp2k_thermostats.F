@@ -24,7 +24,8 @@ MODULE input_cp2k_thermostats
    USE input_constants,                 ONLY: &
         do_constr_atomic, do_constr_molec, do_constr_none, do_region_defined, do_region_global, &
         do_region_massive, do_region_molecule, do_region_none, do_thermo_al, do_thermo_csvr, &
-        do_thermo_gle, do_thermo_nose, do_thermo_same_as_part
+        do_thermo_gle, do_thermo_nose, do_thermo_same_as_part, &
+        do_ne_colour, do_ne_field
    USE input_cp2k_subsys,               ONLY: create_rng_section
    USE input_keyword_types,             ONLY: keyword_create,&
                                               keyword_release,&
@@ -54,8 +55,9 @@ MODULE input_cp2k_thermostats
              create_region_section, &
              create_velocity_section, &
              create_mass_section, &
-             create_gle_section
-
+             create_gle_section, &
+             create_sllod_section, &
+             create_nonequilibrium_section
 !***
 CONTAINS
 ! **************************************************************************************************
@@ -296,6 +298,155 @@ CONTAINS
    END SUBROUTINE create_thermostat_section
 
 ! **************************************************************************************************
+!> \brief Specifies parameter for SLLOD equations of motion for MODULE
+!> \Based on EK and JR's  thermostat section above, will eventually spin off into separate file
+!> \param section will contain the coeff section
+!> \author L Miller [LM] and Stephen Sanderson [SS], The University of Queensland - 2024
+! **************************************************************************************************
+SUBROUTINE create_sllod_section(section)
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(keyword_type), POINTER                        :: keyword
+      TYPE(section_type), POINTER                        :: al_section, csvr_section, gle_section, &
+                                                            region_section, subsection
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+      NULLIFY (csvr_section, gle_section, al_section, subsection, region_section)
+
+      CALL section_create(section, __LOCATION__, name="SLLOD", &
+                          description="Specify shear force for SLLOD equations of motion in simulations", &
+                          n_keywords=3, n_subsections=0, repeats=.FALSE.)
+      NULLIFY (keyword)
+
+      !CALL keyword_create(keyword, __LOCATION__, name="type_of_SLLOD", &
+      !                    description="Specify the kind of shear strain to add to equations of motion.", &
+      !                    usage="SHEARTYPE XY", &
+      !                    default_i_val=do_XY, &
+      !                    enum_c_vals=s2a("XY"), &
+      !                    enum_i_vals=(/do_XY)
+      !                    enum_desc=s2a("Shear in XY plane") 
+      !CALL section_add_keyword(section, keyword)
+      !CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="XY", &
+                          description="XY strain rate", &
+                          usage="XY real", &
+                          unit_str="fs^-1", type_of_var=real_t)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      !CALL keyword_create(keyword, __LOCATION__, name="YZ", &
+      !                    description="YZ strain rate", &
+      !                    usage="YZ <REAL>", &
+      !                    default_r_val=cp_unit_to_cp2k(0.0_dp, "/femtosecond"), &
+      !                    unit_str="/femtosecond")
+      !CALL section_add_keyword(section, keyword)
+      !CALL keyword_release(keyword)
+
+
+      CALL keyword_create(keyword, __LOCATION__, name="SLLODLIST",&
+                          description="Specifies a list of atoms to integrate with SLLOD equations of motion.",&
+                          usage="SLLODLIST {integer} {integer} .. {integer}", &
+                          n_var=-1, type_of_var=integer_t)
+      CALL section_add_keyword(section,keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="REMAP_PERIOD", &
+                          description="how often to flip box", &
+                          usage="REMAP_PERIOD integer", &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL create_region_section(region_section, "SLLOD")
+      CALL section_add_subsection(section, region_section)
+      CALL section_release(region_section)
+
+      ! Print Section
+      CALL create_print_section_SLLOD(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+   END SUBROUTINE create_sllod_section
+
+
+
+! **************************************************************************************************
+!> \brief Specifies parameter for Nonequilibrium dynamics for MODULE
+!> \Based on thermostat section above, will eventually spin off into separate file
+!> \param section will contain the coeff section
+!> \author JR [James Reid], EVK [Emily Kahl], The University of Queensland - 2023
+! **************************************************************************************************
+SUBROUTINE create_nonequilibrium_section(section)
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(keyword_type), POINTER                        :: keyword
+      TYPE(section_type), POINTER                        :: al_section, csvr_section, gle_section, &
+                                                            region_section, subsection
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+      NULLIFY (csvr_section, gle_section, al_section, subsection, region_section)
+
+      CALL section_create(section, __LOCATION__, name="NE", &
+                          description="Specify nonequilibrium fields in simulations", &
+                          n_keywords=4, n_subsections=0, repeats=.FALSE.)
+      NULLIFY (keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NETYPE", &
+                          description="Specify the kind of nonequilibrium field to add to equations of motion.", &
+                          usage="NETYPE COLOUR", &
+                          default_i_val=do_ne_colour, &
+                          enum_c_vals=s2a("COLOUR", "FIELD"), &
+                          enum_i_vals=(/do_ne_colour, &
+                                        do_ne_field/), &
+                          enum_desc=s2a("Colour field.", &
+                                        "Poiseuille field."))
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="FX", &
+                          description="Field in X-direction.", &
+                          usage="FX <REAL>", &
+                          default_r_val=cp_unit_to_cp2k(0.0_dp, "Hartree/Angstrom"), &
+                          unit_str="hartree/angstrom")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="FY", &
+                          description="Field in Y-direction.", &
+                          usage="FY <REAL>", &
+                          default_r_val=cp_unit_to_cp2k(0.0_dp, "Hartree/Angstrom"), &
+                          unit_str="hartree/angstrom")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="FZ", &
+                          description="Field in X-direction.", &
+                          usage="FZ <REAL>", &
+                          default_r_val=cp_unit_to_cp2k(0.0_dp, "Hartree/Angstrom"), &
+                          unit_str="hartree/angstrom")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)      
+
+      CALL keyword_create(keyword, __LOCATION__, name="CCHARGE", &
+                          description="Specifies a list of atoms with a given color charge", &
+                          usage="CCHARGE {integer (charge)} {integer} {integer .. {integer}", &
+                          n_var=-1, type_of_var=integer_t, repeats=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL create_region_section(region_section, "NE")
+      CALL section_add_subsection(section, region_section)
+      CALL section_release(region_section)
+
+      ! Print Section
+      CALL create_print_section_NE(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+   END SUBROUTINE create_nonequilibrium_section
+
+! **************************************************************************************************
 !> \brief Creates print section for thermostat section
 !> \param section ...
 !> \author teo [tlaino] - University of Zurich - 02.2008
@@ -333,6 +484,60 @@ CONTAINS
       CALL section_add_subsection(section, print_key)
       CALL section_release(print_key)
    END SUBROUTINE create_print_section
+
+
+! **************************************************************************************************
+!> \brief Creates print section for nonequilibrium section
+!> \param section ...
+!> \author JR [James Reid], EVK [Emily Kahl], The University of Queensland - 2023
+! **************************************************************************************************
+   SUBROUTINE create_print_section_NE(section)
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(section_type), POINTER                        :: print_key
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+      NULLIFY (print_key)
+      CALL section_create(section, __LOCATION__, name="PRINT", &
+                          description="Collects all print_keys for nonequilibrium", &
+                          n_keywords=1, n_subsections=0, repeats=.FALSE.)
+
+      CALL cp_print_key_section_create(print_key, __LOCATION__, "NE_INFO", &
+                                       description="Controls output information of the nonequilibrium forces.", &
+                                       print_level=low_print_level, common_iter_levels=1, &
+                                       filename="__STD_OUT__")
+      CALL section_add_subsection(section, print_key)
+      CALL section_release(print_key)
+
+   END SUBROUTINE create_print_section_NE
+
+
+
+! **************************************************************************************************
+!> \brief Creates print section for nonequilibrium SLLOD section
+!> \param section ...
+!> \author LM and SS
+! **************************************************************************************************
+   SUBROUTINE create_print_section_SLLOD(section)
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(section_type), POINTER                        :: print_key
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+      NULLIFY (print_key)
+      CALL section_create(section, __LOCATION__, name="PRINT", &
+                          description="Collects all print_keys for nonequilibrium", &
+                          n_keywords=1, n_subsections=0, repeats=.FALSE.)
+
+      CALL cp_print_key_section_create(print_key, __LOCATION__, "SLLOD_INFO", &
+                                       description="Controls output information of the nonequilibrium forces.", &
+                                       print_level=low_print_level, common_iter_levels=1, &
+                                       filename="__STD_OUT__")
+      CALL section_add_subsection(section, print_key)
+      CALL section_release(print_key)
+
+   END SUBROUTINE create_print_section_SLLOD
+
 
 ! **************************************************************************************************
 !> \brief Creates a section to arbitrary define a region to thermostat

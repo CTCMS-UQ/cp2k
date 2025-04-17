@@ -89,6 +89,10 @@ MODULE simpar_types
       REAL(KIND=dp) :: soften_delta = -1.0_dp
       ! MD initialisation method
       INTEGER       :: initialization_method = -1
+      ! NEMD fo colour/Poisseuille flow
+      LOGICAL       :: do_NEforce = .FALSE.
+      ! SLLOD for shear flow
+      LOGICAL       :: do_SLLOD = .FALSE.
    END TYPE simpar_type
 
    PUBLIC :: simpar_type, &
