@@ -89,14 +89,9 @@ MODULE md_run
    USE thermal_region_utils,            ONLY: create_thermal_regions,&
                                               print_thermal_regions_langevin
    USE thermostat_methods,              ONLY: create_thermostats
-<<<<<<< HEAD
    USE thermostat_types,                ONLY: thermostats_type
-=======
-   USE thermostat_types,                ONLY: release_thermostats,&
-                                              thermostats_type
    USE nonequilibrium_types,            ONLY: NE_type, create_NE_type
    USE sllod_types,                     ONLY: SLLOD_type, create_SLLOD_type
->>>>>>> ne-sllod
    USE velocity_verlet_control,         ONLY: velocity_verlet
    USE virial_methods,                  ONLY: virial_evaluate
    USE virial_types,                    ONLY: virial_type
