@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -11,6 +11,8 @@
 !> \date 05.2024
 ! **************************************************************************************************
 MODULE gw_small_cell_full_kp
+   USE bibliography,                    ONLY: Pasquier2025,&
+                                              cite_reference
    USE cp_cfm_types,                    ONLY: cp_cfm_create,&
                                               cp_cfm_get_info,&
                                               cp_cfm_release,&
@@ -32,10 +34,6 @@ MODULE gw_small_cell_full_kp
                                               fm_to_local_tensor,&
                                               local_array_to_fm,&
                                               local_dbt_to_global_fm
-   USE gw_kp_to_real_space_and_back,    ONLY: add_ikp_to_all_rs,&
-                                              fm_add_ikp_to_rs,&
-                                              fm_trafo_rs_to_ikp,&
-                                              trafo_rs_to_ikp
    USE gw_utils,                        ONLY: add_R,&
                                               analyt_conti_and_print,&
                                               de_init_bs_env,&
@@ -43,11 +41,17 @@ MODULE gw_small_cell_full_kp
                                               is_cell_in_index_to_cell,&
                                               power,&
                                               time_to_freq
-   USE kinds,                           ONLY: dp
+   USE kinds,                           ONLY: dp,&
+                                              int_8
    USE kpoint_coulomb_2c,               ONLY: build_2c_coulomb_matrix_kp_small_cell
+   USE kpoint_k_r_trafo_simple,         ONLY: add_kp_to_all_rs,&
+                                              fm_add_kp_to_all_rs,&
+                                              fm_rs_to_kp,&
+                                              rs_to_kp
    USE machine,                         ONLY: m_walltime
    USE mathconstants,                   ONLY: z_one,&
                                               z_zero
+   USE mathlib,                         ONLY: gemm_square
    USE parallel_gemm_api,               ONLY: parallel_gemm
    USE post_scf_bandstructure_types,    ONLY: post_scf_bandstructure_type
    USE post_scf_bandstructure_utils,    ONLY: get_all_VBM_CBM_bandgaps
@@ -80,6 +84,8 @@ CONTAINS
       INTEGER                                            :: handle
 
       CALL timeset(routineN, handle)
+
+      CALL cite_reference(Pasquier2025)
 
       ! G^occ_µλ(i|τ|,k) = sum_n^occ C_µn(k)^* e^(-|(ϵ_nk-ϵ_F)τ|) C_λn(k)
       ! G^vir_µλ(i|τ|,k) = sum_n^vir C_µn(k)^* e^(-|(ϵ_nk-ϵ_F)τ|) C_λn(k)
@@ -156,12 +162,14 @@ CONTAINS
             ! loop over ΔR = R_1 - R_2 which are local in the tensor subgroup
             DO i_task_Delta_R_local = 1, bs_env%n_tasks_Delta_R_local
 
+               IF (bs_env%skip_DR_chi(i_task_Delta_R_local)) CYCLE
+
                i_cell_Delta_R = bs_env%task_Delta_R(i_task_Delta_R_local)
 
                DO i_cell_R2 = 1, bs_env%nimages_3c
 
-                  cell_R2(1:3) = bs_env%index_to_cell_3c(i_cell_R2, 1:3)
-                  cell_DR(1:3) = bs_env%index_to_cell_Delta_R(i_cell_Delta_R, 1:3)
+                  cell_R2(1:3) = bs_env%index_to_cell_3c(1:3, i_cell_R2)
+                  cell_DR(1:3) = bs_env%index_to_cell_Delta_R(1:3, i_cell_Delta_R)
 
                   ! R_1 = R_2 + ΔR (from ΔR = R_2 - R_1)
                   CALL add_R(cell_R2, cell_DR, bs_env%index_to_cell_3c, cell_R1, &
@@ -170,14 +178,16 @@ CONTAINS
                   ! 3-cells check because in M^vir_νR2,λR1,QR (step 3.): R2 is index on ν
                   IF (.NOT. cell_found) CYCLE
                   ! 2. M^occ/vir_λR1,νR2,P0 = sum_µS (λR1 µR2-S | P0) G^occ/vir_νµ^S(iτ)
-                  CALL G_times_3c(Gocc_S, t_Gocc, bs_env, i_cell_R1, i_cell_R2)
-                  CALL G_times_3c(Gvir_S, t_Gvir, bs_env, i_cell_R2, i_cell_R1)
+                  CALL G_times_3c(Gocc_S, t_Gocc, bs_env, i_cell_R1, i_cell_R2, &
+                                  i_task_Delta_R_local, bs_env%skip_DR_R12_S_Goccx3c_chi)
+                  CALL G_times_3c(Gvir_S, t_Gvir, bs_env, i_cell_R2, i_cell_R1, &
+                                  i_task_Delta_R_local, bs_env%skip_DR_R12_S_Gvirx3c_chi)
 
                END DO ! i_cell_R2
 
                ! 3. χ_PQ^R(iτ) = sum_λR1,νR2 M^occ_λR1,νR2,P0 M^vir_νR2,λR1,QR
-               CALL contract_M_occ_vir_to_chi(t_Gocc, t_Gvir, t_chi_R, &
-                                              bs_env, i_cell_Delta_R)
+               CALL contract_M_occ_vir_to_chi(t_Gocc, t_Gvir, t_chi_R, bs_env, &
+                                              i_task_Delta_R_local)
 
             END DO ! i_cell_Delta_R_local
 
@@ -270,16 +280,22 @@ CONTAINS
 !> \param bs_env ...
 !> \param i_cell_R1 ...
 !> \param i_cell_R2 ...
+!> \param i_task_Delta_R_local ...
+!> \param skip_DR_R1_S_Gx3c ...
 ! **************************************************************************************************
-   SUBROUTINE G_times_3c(t_G_S, t_M, bs_env, i_cell_R1, i_cell_R2)
+   SUBROUTINE G_times_3c(t_G_S, t_M, bs_env, i_cell_R1, i_cell_R2, i_task_Delta_R_local, &
+                         skip_DR_R1_S_Gx3c)
       TYPE(dbt_type), ALLOCATABLE, DIMENSION(:)          :: t_G_S
       TYPE(dbt_type), ALLOCATABLE, DIMENSION(:, :)       :: t_M
       TYPE(post_scf_bandstructure_type), POINTER         :: bs_env
-      INTEGER                                            :: i_cell_R1, i_cell_R2
+      INTEGER                                            :: i_cell_R1, i_cell_R2, &
+                                                            i_task_Delta_R_local
+      LOGICAL, ALLOCATABLE, DIMENSION(:, :, :)           :: skip_DR_R1_S_Gx3c
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'G_times_3c'
 
       INTEGER                                            :: handle, i_cell_R1_p_S, i_cell_S
+      INTEGER(KIND=int_8)                                :: flop
       INTEGER, DIMENSION(3)                              :: cell_R1, cell_R1_plus_cell_S, cell_R2, &
                                                             cell_S
       LOGICAL                                            :: cell_found
@@ -289,12 +305,14 @@ CONTAINS
 
       CALL dbt_create(bs_env%t_RI_AO__AO, t_3c_int)
 
-      cell_R1(1:3) = bs_env%index_to_cell_3c(i_cell_R1, 1:3)
-      cell_R2(1:3) = bs_env%index_to_cell_3c(i_cell_R2, 1:3)
+      cell_R1(1:3) = bs_env%index_to_cell_3c(1:3, i_cell_R1)
+      cell_R2(1:3) = bs_env%index_to_cell_3c(1:3, i_cell_R2)
 
       DO i_cell_S = 1, bs_env%nimages_scf_desymm
 
-         cell_S(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(i_cell_S, 1:3)
+         IF (skip_DR_R1_S_Gx3c(i_task_Delta_R_local, i_cell_R1, i_cell_S)) CYCLE
+
+         cell_S(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(1:3, i_cell_S)
          cell_R1_plus_cell_S(1:3) = cell_R1(1:3) + cell_S(1:3)
 
          CALL is_cell_in_index_to_cell(cell_R1_plus_cell_S, bs_env%index_to_cell_3c, cell_found)
@@ -315,7 +333,10 @@ CONTAINS
                            tensor_3=t_M(i_cell_R1, i_cell_R2), &
                            contract_1=[3], notcontract_1=[1, 2], map_1=[1, 2], &
                            contract_2=[2], notcontract_2=[1], map_2=[3], &
-                           filter_eps=bs_env%eps_filter)
+                           filter_eps=bs_env%eps_filter, flop=flop)
+
+         IF (flop == 0_int_8) skip_DR_R1_S_Gx3c(i_task_Delta_R_local, i_cell_R1, i_cell_S) = .TRUE.
+
       END DO
 
       CALL dbt_destroy(t_3c_int)
@@ -426,8 +447,8 @@ CONTAINS
                             beta=z_zero, matrix_c=bs_env%cfm_work_mo_2)
 
          ! trafo k-point k -> cell S:  G^occ/vir_µλ(i|τ|,k) -> G^occ/vir,S_µλ(i|τ|)
-         CALL fm_add_ikp_to_rs(bs_env%cfm_work_mo_2, bs_env%fm_G_S, &
-                               bs_env%kpoints_scf_desymm, ikp)
+         CALL fm_add_kp_to_all_rs(bs_env%cfm_work_mo_2, bs_env%fm_G_S, &
+                                  bs_env%kpoints_scf_desymm, ikp)
 
       END DO ! ikp
 
@@ -447,19 +468,20 @@ CONTAINS
 !> \param t_Gvir ...
 !> \param t_chi_R ...
 !> \param bs_env ...
-!> \param i_cell_Delta_R ...
+!> \param i_task_Delta_R_local ...
 ! **************************************************************************************************
-   SUBROUTINE contract_M_occ_vir_to_chi(t_Gocc, t_Gvir, t_chi_R, bs_env, i_cell_Delta_R)
+   SUBROUTINE contract_M_occ_vir_to_chi(t_Gocc, t_Gvir, t_chi_R, bs_env, i_task_Delta_R_local)
       TYPE(dbt_type), ALLOCATABLE, DIMENSION(:, :)       :: t_Gocc, t_Gvir
       TYPE(dbt_type), ALLOCATABLE, DIMENSION(:)          :: t_chi_R
       TYPE(post_scf_bandstructure_type), POINTER         :: bs_env
-      INTEGER                                            :: i_cell_Delta_R
+      INTEGER                                            :: i_task_Delta_R_local
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'contract_M_occ_vir_to_chi'
 
-      INTEGER                                            :: handle, i_cell_R, i_cell_R1, &
-                                                            i_cell_R1_minus_R, i_cell_R2, &
-                                                            i_cell_R2_minus_R
+      INTEGER                                            :: handle, i_cell_Delta_R, i_cell_R, &
+                                                            i_cell_R1, i_cell_R1_minus_R, &
+                                                            i_cell_R2, i_cell_R2_minus_R
+      INTEGER(KIND=int_8)                                :: flop, flop_tmp
       INTEGER, DIMENSION(3)                              :: cell_DR, cell_R, cell_R1, &
                                                             cell_R1_minus_R, cell_R2, &
                                                             cell_R2_minus_R
@@ -471,14 +493,20 @@ CONTAINS
       CALL dbt_create(bs_env%t_RI__AO_AO, t_Gocc_2)
       CALL dbt_create(bs_env%t_RI__AO_AO, t_Gvir_2)
 
+      flop = 0_int_8
+
       ! χ_PQ^R(iτ) = sum_λR1,νR2 M^occ_λR1,νR2,P0 M^vir_νR2,λR1,QR
       DO i_cell_R = 1, bs_env%nimages_scf_desymm
 
          DO i_cell_R2 = 1, bs_env%nimages_3c
 
-            cell_R(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(i_cell_R, 1:3)
-            cell_R2(1:3) = bs_env%index_to_cell_3c(i_cell_R2, 1:3)
-            cell_DR(1:3) = bs_env%index_to_cell_Delta_R(i_cell_Delta_R, 1:3)
+            IF (bs_env%skip_DR_R_R2_MxM_chi(i_task_Delta_R_local, i_cell_R2, i_cell_R)) CYCLE
+
+            i_cell_Delta_R = bs_env%task_Delta_R(i_task_Delta_R_local)
+
+            cell_R(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(1:3, i_cell_R)
+            cell_R2(1:3) = bs_env%index_to_cell_3c(1:3, i_cell_R2)
+            cell_DR(1:3) = bs_env%index_to_cell_Delta_R(1:3, i_cell_Delta_R)
 
             ! R_1 = R_2 + ΔR (from ΔR = R_2 - R_1)
             CALL add_R(cell_R2, cell_DR, bs_env%index_to_cell_3c, cell_R1, &
@@ -505,10 +533,18 @@ CONTAINS
                               beta=1.0_dp, tensor_3=t_chi_R(i_cell_R), &
                               contract_1=[2, 3], notcontract_1=[1], map_1=[1], &
                               contract_2=[2, 3], notcontract_2=[1], map_2=[2], &
-                              filter_eps=bs_env%eps_filter, move_data=.TRUE.)
+                              filter_eps=bs_env%eps_filter, move_data=.TRUE., flop=flop_tmp)
+
+            IF (flop_tmp == 0_int_8) bs_env%skip_DR_R_R2_MxM_chi(i_task_Delta_R_local, &
+                                                                 i_cell_R2, i_cell_R) = .TRUE.
+
+            flop = flop + flop_tmp
+
          END DO ! i_cell_R2
 
       END DO ! i_cell_R
+
+      IF (flop == 0_int_8) bs_env%skip_DR_chi(i_task_Delta_R_local) = .TRUE.
 
       ! remove all data from t_Gocc and t_Gvir to safe memory
       DO i_cell_R1 = 1, bs_env%nimages_3c
@@ -536,7 +572,7 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'compute_W_real_space'
 
-      COMPLEX(KIND=dp), ALLOCATABLE, DIMENSION(:, :)     :: chi_k_w, eps_k_w, W_k_w, work
+      COMPLEX(KIND=dp), ALLOCATABLE, DIMENSION(:, :)     :: chi_k_w, eps_k_w, W_k_w
       COMPLEX(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :)  :: M_inv, M_inv_V_sqrt, V_sqrt
       INTEGER                                            :: handle, i_t, ikp, ikp_local, j_w, n_RI, &
                                                             nimages_scf_desymm
@@ -548,7 +584,7 @@ CONTAINS
       n_RI = bs_env%n_RI
       nimages_scf_desymm = bs_env%nimages_scf_desymm
 
-      ALLOCATE (chi_k_w(n_RI, n_RI), work(n_RI, n_RI), eps_k_w(n_RI, n_RI), W_k_w(n_RI, n_RI))
+      ALLOCATE (chi_k_w(n_RI, n_RI), eps_k_w(n_RI, n_RI), W_k_w(n_RI, n_RI))
       ALLOCATE (chi_R(n_RI, n_RI, nimages_scf_desymm), W_R(n_RI, n_RI, nimages_scf_desymm), &
                 MWM_R(n_RI, n_RI, nimages_scf_desymm))
 
@@ -581,28 +617,23 @@ CONTAINS
          DO ikp = 1, bs_env%nkp_chi_eps_W_orig_plus_extra
 
             ! trivial parallelization over k-points
-            IF (MODULO(ikp, bs_env%para_env%num_pe) .NE. bs_env%para_env%mepos) CYCLE
+            IF (MODULO(ikp, bs_env%para_env%num_pe) /= bs_env%para_env%mepos) CYCLE
 
             ikp_local = ikp_local + 1
 
             ! 1. χ_PQ^R(iω_j) -> χ_PQ(iω_j,k)
-            CALL trafo_rs_to_ikp(chi_R, chi_k_w, bs_env%kpoints_scf_desymm%index_to_cell, &
-                                 bs_env%kpoints_chi_eps_W%xkp(1:3, ikp))
+            CALL rs_to_kp(chi_R, chi_k_w, bs_env%kpoints_scf_desymm%index_to_cell, &
+                          bs_env%kpoints_chi_eps_W%xkp(1:3, ikp))
 
             ! 2. remove negative eigenvalues from χ_PQ(iω,k)
             CALL power(chi_k_w, 1.0_dp, bs_env%eps_eigval_mat_RI)
 
             ! 3. ε(iω_j,k_i) = Id - V^0.5(k_i)*M^-1(k_i)*χ(iω_j,k_i)*M^-1(k_i)*V^0.5(k_i)
 
-            ! 3. a) work = χ(iω_j,k_i)*M^-1(k_i)*V^0.5(k_i)
-            CALL ZGEMM('N', 'N', n_RI, n_RI, n_RI, z_one, chi_k_w, n_RI, &
-                       M_inv_V_sqrt(:, :, ikp_local), n_RI, z_zero, work, n_RI)
+            ! 3. a) eps_work = V^0.5(k_i)*M^-1(k_i)*χ(iω_j,k_i)*M^-1(k_i)*V^0.5(k_i)
+            CALL gemm_square(M_inv_V_sqrt(:, :, ikp_local), 'C', chi_k_w, 'N', M_inv_V_sqrt(:, :, ikp_local), 'N', eps_k_w)
 
-            ! 3. b) eps_work = V^0.5(k_i)*M^-1(k_i)*work
-            CALL ZGEMM('C', 'N', n_RI, n_RI, n_RI, z_one, M_inv_V_sqrt(:, :, ikp_local), n_RI, &
-                       work, n_RI, z_zero, eps_k_w, n_RI)
-
-            ! 3. c) ε(iω_j,k_i) = eps_work - Id
+            ! 3. b) ε(iω_j,k_i) = eps_work - Id
             CALL add_on_diag(eps_k_w, z_one)
 
             ! 4. W(iω_j,k_i) = M^-1(k_i)*V^0.5(k_i)*(ε^-1(iω_j,k_i)-Id)*V^0.5(k_i)*M^-1(k_i)
@@ -613,17 +644,12 @@ CONTAINS
             ! 4. b) ε^-1(iω_j,k_i)-Id
             CALL add_on_diag(eps_k_w, -z_one)
 
-            ! 4. c) work = (ε^-1(iω_j,k_i)-Id)*V^0.5(k_i)
-            CALL ZGEMM('N', 'C', n_RI, n_RI, n_RI, z_one, eps_k_w, n_RI, &
-                       V_sqrt(:, :, ikp_local), n_RI, z_zero, work, n_RI)
-
-            ! 4. d) W(iω,k_i) = V^0.5(k_i)*work
-            CALL ZGEMM('N', 'N', n_RI, n_RI, n_RI, z_one, V_sqrt(:, :, ikp_local), n_RI, &
-                       work, n_RI, z_zero, W_k_w, n_RI)
+            ! 4. c) W(iω,k_i) = V^0.5(k_i)*(ε^-1(iω_j,k_i)-Id)*V^0.5(k_i)
+            CALL gemm_square(V_sqrt(:, :, ikp_local), 'N', eps_k_w, 'N', V_sqrt(:, :, ikp_local), 'C', W_k_w)
 
             ! 5. W(iω,k_i) -> W^R(iω) = sum_k w_k e^(-ikR) W(iω,k) (k-point extrapolation here)
-            CALL add_ikp_to_all_rs(W_k_w, W_R, bs_env%kpoints_chi_eps_W, ikp, &
-                                   index_to_cell_ext=bs_env%kpoints_scf_desymm%index_to_cell)
+            CALL add_kp_to_all_rs(W_k_w, W_R, bs_env%kpoints_chi_eps_W, ikp, &
+                                  index_to_cell_ext=bs_env%kpoints_scf_desymm%index_to_cell)
 
          END DO ! ikp
 
@@ -682,7 +708,7 @@ CONTAINS
       nkp_local = 0
       DO ikp = 1, nkp
          ! trivial parallelization over k-points
-         IF (MODULO(ikp, bs_env%para_env%num_pe) .NE. bs_env%para_env%mepos) CYCLE
+         IF (MODULO(ikp, bs_env%para_env%num_pe) /= bs_env%para_env%mepos) CYCLE
          nkp_local = nkp_local + 1
       END DO
 
@@ -714,14 +740,14 @@ CONTAINS
       DO ikp = 1, nkp
 
          ! trivial parallelization
-         IF (MODULO(ikp, bs_env%para_env%num_pe) .NE. bs_env%para_env%mepos) CYCLE
+         IF (MODULO(ikp, bs_env%para_env%num_pe) /= bs_env%para_env%mepos) CYCLE
 
          ikp_local = ikp_local + 1
 
          ! M(k) = sum_R e^ikR M^R
-         CALL trafo_rs_to_ikp(M_R, M_inv(:, :, ikp_local), &
-                              bs_env%kpoints_scf_desymm%index_to_cell, &
-                              bs_env%kpoints_chi_eps_W%xkp(1:3, ikp))
+         CALL rs_to_kp(M_R, M_inv(:, :, ikp_local), &
+                       bs_env%kpoints_scf_desymm%index_to_cell, &
+                       bs_env%kpoints_chi_eps_W%xkp(1:3, ikp))
 
          ! invert M_PQ(k)
          CALL power(M_inv(:, :, ikp_local), -1.0_dp, 0.0_dp)
@@ -730,8 +756,7 @@ CONTAINS
          CALL power(V_sqrt(:, :, ikp_local), 0.5_dp, 0.0_dp)
 
          ! M^-1(k)*V^0.5(k)
-         CALL ZGEMM("N", "C", n_RI, n_RI, n_RI, z_one, M_inv(:, :, ikp_local), n_RI, &
-                    V_sqrt(:, :, ikp_local), n_RI, z_zero, M_inv_V_sqrt(:, :, ikp_local), n_RI)
+         CALL gemm_square(M_inv(:, :, ikp_local), 'N', V_sqrt(:, :, ikp_local), 'C', M_inv_V_sqrt(:, :, ikp_local))
 
       END DO ! ikp
 
@@ -795,29 +820,27 @@ CONTAINS
       DO ikp = 1, bs_env%nkp_scf_desymm
 
          ! trivial parallelization
-         IF (MODULO(ikp, bs_env%para_env%num_pe) .NE. bs_env%para_env%mepos) CYCLE
+         IF (MODULO(ikp, bs_env%para_env%num_pe) /= bs_env%para_env%mepos) CYCLE
 
          ! M(k) = sum_R e^ikR M^R
-         CALL trafo_rs_to_ikp(M_R, M_inv, &
-                              bs_env%kpoints_scf_desymm%index_to_cell, &
-                              bs_env%kpoints_scf_desymm%xkp(1:3, ikp))
+         CALL rs_to_kp(M_R, M_inv, &
+                       bs_env%kpoints_scf_desymm%index_to_cell, &
+                       bs_env%kpoints_scf_desymm%xkp(1:3, ikp))
 
          ! invert M_PQ(k)
          CALL power(M_inv, -1.0_dp, 0.0_dp)
 
          ! W(k) = sum_R e^ikR W^R [only R in the supercell that is determined by the SCF k-mesh]
-         CALL trafo_rs_to_ikp(W_R, W_k, &
-                              bs_env%kpoints_scf_desymm%index_to_cell, &
-                              bs_env%kpoints_scf_desymm%xkp(1:3, ikp))
+         CALL rs_to_kp(W_R, W_k, &
+                       bs_env%kpoints_scf_desymm%index_to_cell, &
+                       bs_env%kpoints_scf_desymm%xkp(1:3, ikp))
 
-         ! 2e. M^-1(k) W^trunc(k)
-         CALL ZGEMM("N", "N", n_RI, n_RI, n_RI, z_one, M_inv, n_RI, W_k, n_RI, z_zero, work, n_RI)
+         ! Ŵ(k) = M^-1(k)*W^trunc(k)*M^-1(k)
+         CALL gemm_square(M_inv, 'N', W_k, 'N', M_inv, 'N', work)
+         W_k(:, :) = work(:, :)
 
-         ! 2f. Ŵ(k) = M^-1(k) W^trunc(k) M^-1(k)
-         CALL ZGEMM("N", "N", n_RI, n_RI, n_RI, z_one, work, n_RI, M_inv, n_RI, z_zero, W_k, n_RI)
-
-         ! 2g. Ŵ^R = sum_k w_k e^(-ikR) Ŵ^(k)
-         CALL add_ikp_to_all_rs(W_k, MWM_R, bs_env%kpoints_scf_desymm, ikp)
+         ! Ŵ^R = sum_k w_k e^(-ikR) Ŵ^(k)
+         CALL add_kp_to_all_rs(W_k, MWM_R, bs_env%kpoints_scf_desymm, ikp)
 
       END DO ! ikp
 
@@ -839,8 +862,7 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'compute_Sigma_x'
 
-      INTEGER                                            :: handle, i_cell_Delta_R, &
-                                                            i_task_Delta_R_local, ispin
+      INTEGER                                            :: handle, i_task_Delta_R_local, ispin
       REAL(KIND=dp)                                      :: t1
       TYPE(dbt_type), ALLOCATABLE, DIMENSION(:)          :: D_S, Mi_Vtr_Mi_R, Sigma_x_R
       TYPE(dbt_type), ALLOCATABLE, DIMENSION(:, :)       :: t_V
@@ -870,16 +892,14 @@ CONTAINS
          ! loop over ΔR = S_1 - R_1 which are local in the tensor subgroup
          DO i_task_Delta_R_local = 1, bs_env%n_tasks_Delta_R_local
 
-            i_cell_Delta_R = bs_env%task_Delta_R(i_task_Delta_R_local)
-
             ! M^V_σ0,νS1,PR1 = sum_QR2 ( σ0 νS1 | QR1-R2 ) Ṽ^tr_QP^R2 for i_task_local
-            CALL contract_W(t_V, Mi_Vtr_Mi_R, bs_env, i_cell_Delta_R)
+            CALL contract_W(t_V, Mi_Vtr_Mi_R, bs_env, i_task_Delta_R_local)
 
             ! M^D_λ0,νS1,PR1 = sum_µS2 (λ0 µS1-S2 | PR1) D_µν^S2
             ! Σ^x_λσ^R = sum_PR1νS1 M^D_λ0,νS1,PR1 * M^V_σR,νS1,PR1 for i_task_local, where
             !                                        M^V_σR,νS1,PR1 = M^V_σ0,νS1-R,PR1-R
-            CALL contract_to_Sigma(Sigma_x_R, t_V, D_S, i_cell_Delta_R, bs_env, &
-                                   occ=.TRUE., vir=.FALSE., clear_t_W=.TRUE.)
+            CALL contract_to_Sigma(Sigma_x_R, t_V, D_S, i_task_Delta_R_local, bs_env, &
+                                   occ=.TRUE., vir=.FALSE., clear_t_W=.TRUE., fill_skip=.FALSE.)
 
          END DO ! i_cell_Delta_R_local
 
@@ -914,8 +934,7 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'compute_Sigma_c'
 
-      INTEGER                                            :: handle, i_cell_Delta_R, i_t, &
-                                                            i_task_Delta_R_local, ispin
+      INTEGER                                            :: handle, i_t, i_task_Delta_R_local, ispin
       REAL(KIND=dp)                                      :: t1, tau
       TYPE(dbt_type), ALLOCATABLE, DIMENSION(:)          :: Gocc_S, Gvir_S, Sigma_c_R_neg_tau, &
                                                             Sigma_c_R_pos_tau, W_R
@@ -952,22 +971,22 @@ CONTAINS
             ! loop over ΔR = S_1 - R_1 which are local in the tensor subgroup
             DO i_task_Delta_R_local = 1, bs_env%n_tasks_Delta_R_local
 
-               i_cell_Delta_R = bs_env%task_Delta_R(i_task_Delta_R_local)
+               IF (bs_env%skip_DR_Sigma(i_task_Delta_R_local)) CYCLE
 
                ! for i_task_local (i.e. fixed ΔR = S_1 - R_1) and for all τ (W(iτ) = W(-iτ)):
                ! M^W_σ0,νS1,PR1 = sum_QR2 ( σ0 νS1 | QR1-R2 ) W(iτ)_QP^R2
-               CALL contract_W(t_W, W_R, bs_env, i_cell_Delta_R)
+               CALL contract_W(t_W, W_R, bs_env, i_task_Delta_R_local)
 
                ! for τ < 0 and for i_task_local (i.e. fixed ΔR = S_1 - R_1):
                ! M^G_λ0,νS1,PR1 = sum_µS2 (λ0 µS1-S2 | PR1) G^occ(i|τ|)_µν^S2
                ! Σ^c_λσ^R(iτ) = sum_PR1νS1 M^G_λ0,νS1,PR1 * M^W_σR,νS1,PR1
                !                                      where M^W_σR,νS1,PR1 = M^W_σ0,νS1-R,PR1-R
-               CALL contract_to_Sigma(Sigma_c_R_neg_tau, t_W, Gocc_S, i_cell_Delta_R, bs_env, &
-                                      occ=.TRUE., vir=.FALSE., clear_t_W=.FALSE.)
+               CALL contract_to_Sigma(Sigma_c_R_neg_tau, t_W, Gocc_S, i_task_Delta_R_local, bs_env, &
+                                      occ=.TRUE., vir=.FALSE., clear_t_W=.FALSE., fill_skip=.FALSE.)
 
                ! for τ > 0: same as for τ < 0, but G^occ -> G^vir
-               CALL contract_to_Sigma(Sigma_c_R_pos_tau, t_W, Gvir_S, i_cell_Delta_R, bs_env, &
-                                      occ=.FALSE., vir=.TRUE., clear_t_W=.TRUE.)
+               CALL contract_to_Sigma(Sigma_c_R_pos_tau, t_W, Gvir_S, i_task_Delta_R_local, bs_env, &
+                                      occ=.FALSE., vir=.TRUE., clear_t_W=.TRUE., fill_skip=.TRUE.)
 
             END DO ! i_cell_Delta_R_local
 
@@ -1015,8 +1034,7 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'get_Minv_Vtr_Minv_R'
 
-      COMPLEX(KIND=dp), ALLOCATABLE, DIMENSION(:, :)     :: M_inv_V_tr_kp, M_kp, Mi_Vtr_Mi_kp, &
-                                                            V_tr_kp
+      COMPLEX(KIND=dp), ALLOCATABLE, DIMENSION(:, :)     :: M_kp, Mi_Vtr_Mi_kp, V_tr_kp
       INTEGER                                            :: handle, i_cell_R, ikp, n_RI, &
                                                             nimages_scf, nkp_scf
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :)     :: M_R, Mi_Vtr_Mi_R_arr, V_tr_R
@@ -1030,29 +1048,25 @@ CONTAINS
       CALL get_V_tr_R(V_tr_R, bs_env%trunc_coulomb, 0.0_dp, bs_env, qs_env)
       CALL get_V_tr_R(M_R, bs_env%ri_metric, bs_env%regularization_RI, bs_env, qs_env)
 
-      ALLOCATE (V_tr_kp(n_RI, n_RI), M_kp(n_RI, n_RI), M_inv_V_tr_kp(n_RI, n_RI), &
+      ALLOCATE (V_tr_kp(n_RI, n_RI), M_kp(n_RI, n_RI), &
                 Mi_Vtr_Mi_kp(n_RI, n_RI), Mi_Vtr_Mi_R_arr(n_RI, n_RI, nimages_scf))
       Mi_Vtr_Mi_R_arr(:, :, :) = 0.0_dp
 
       DO ikp = 1, nkp_scf
          ! trivial parallelization
-         IF (MODULO(ikp, bs_env%para_env%num_pe) .NE. bs_env%para_env%mepos) CYCLE
+         IF (MODULO(ikp, bs_env%para_env%num_pe) /= bs_env%para_env%mepos) CYCLE
          ! V_tr(k) = sum_R e^ikR V_tr^R
-         CALL trafo_rs_to_ikp(V_tr_R, V_tr_kp, bs_env%kpoints_scf_desymm%index_to_cell, &
-                              bs_env%kpoints_scf_desymm%xkp(1:3, ikp))
+         CALL rs_to_kp(V_tr_R, V_tr_kp, bs_env%kpoints_scf_desymm%index_to_cell, &
+                       bs_env%kpoints_scf_desymm%xkp(1:3, ikp))
          ! M(k)    = sum_R e^ikR M^R
-         CALL trafo_rs_to_ikp(M_R, M_kp, bs_env%kpoints_scf_desymm%index_to_cell, &
-                              bs_env%kpoints_scf_desymm%xkp(1:3, ikp))
+         CALL rs_to_kp(M_R, M_kp, bs_env%kpoints_scf_desymm%index_to_cell, &
+                       bs_env%kpoints_scf_desymm%xkp(1:3, ikp))
          ! M(k) -> M^-1(k)
          CALL power(M_kp, -1.0_dp, 0.0_dp)
-         ! M^-1(k) * V_tr(k)
-         CALL ZGEMM('N', 'N', n_RI, n_RI, n_RI, z_one, M_kp, n_RI, &
-                    V_tr_kp, n_RI, z_zero, M_inv_V_tr_kp, n_RI)
          ! Ṽ(k) = M^-1(k) * V_tr(k) * M^-1(k)
-         CALL ZGEMM('N', 'N', n_RI, n_RI, n_RI, z_one, M_inv_V_tr_kp, n_RI, &
-                    M_kp, n_RI, z_zero, Mi_Vtr_Mi_kp, n_RI)
+         CALL gemm_square(M_kp, 'N', V_tr_kp, 'N', M_kp, 'N', Mi_Vtr_Mi_kp)
          ! Ṽ^R = sum_k w_k e^-ikR Ṽ(k)
-         CALL add_ikp_to_all_rs(Mi_Vtr_Mi_kp, Mi_Vtr_Mi_R_arr, bs_env%kpoints_scf_desymm, ikp)
+         CALL add_kp_to_all_rs(Mi_Vtr_Mi_kp, Mi_Vtr_Mi_R_arr, bs_env%kpoints_scf_desymm, ikp)
       END DO
       CALL bs_env%para_env%sync()
       CALL bs_env%para_env%sum(Mi_Vtr_Mi_R_arr)
@@ -1121,18 +1135,18 @@ CONTAINS
 !> \param t_W ...
 !> \param W_R ...
 !> \param bs_env ...
-!> \param i_cell_Delta_R ...
+!> \param i_task_Delta_R_local ...
 ! **************************************************************************************************
-   SUBROUTINE contract_W(t_W, W_R, bs_env, i_cell_Delta_R)
+   SUBROUTINE contract_W(t_W, W_R, bs_env, i_task_Delta_R_local)
       TYPE(dbt_type), ALLOCATABLE, DIMENSION(:, :)       :: t_W
       TYPE(dbt_type), ALLOCATABLE, DIMENSION(:)          :: W_R
       TYPE(post_scf_bandstructure_type), POINTER         :: bs_env
-      INTEGER                                            :: i_cell_Delta_R
+      INTEGER                                            :: i_task_Delta_R_local
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'contract_W'
 
-      INTEGER                                            :: handle, i_cell_R1, i_cell_R2, &
-                                                            i_cell_R2_m_R1, i_cell_S1, &
+      INTEGER                                            :: handle, i_cell_Delta_R, i_cell_R1, &
+                                                            i_cell_R2, i_cell_R2_m_R1, i_cell_S1, &
                                                             i_cell_S1_m_R1_p_R2
       INTEGER, DIMENSION(3)                              :: cell_DR, cell_R1, cell_R2, cell_R2_m_R1, &
                                                             cell_S1, cell_S1_m_R2_p_R1
@@ -1144,10 +1158,12 @@ CONTAINS
       CALL dbt_create(bs_env%t_RI__AO_AO, t_W_tmp)
       CALL dbt_create(bs_env%t_RI_AO__AO, t_3c_int)
 
+      i_cell_Delta_R = bs_env%task_Delta_R(i_task_Delta_R_local)
+
       DO i_cell_R1 = 1, bs_env%nimages_3c
 
-         cell_R1(1:3) = bs_env%index_to_cell_3c(i_cell_R1, 1:3)
-         cell_DR(1:3) = bs_env%index_to_cell_Delta_R(i_cell_Delta_R, 1:3)
+         cell_R1(1:3) = bs_env%index_to_cell_3c(1:3, i_cell_R1)
+         cell_DR(1:3) = bs_env%index_to_cell_Delta_R(1:3, i_cell_Delta_R)
 
          ! S_1 = R_1 + ΔR (from ΔR = S_1 - R_1)
          CALL add_R(cell_R1, cell_DR, bs_env%index_to_cell_3c, cell_S1, &
@@ -1156,7 +1172,7 @@ CONTAINS
 
          DO i_cell_R2 = 1, bs_env%nimages_scf_desymm
 
-            cell_R2(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(i_cell_R2, 1:3)
+            cell_R2(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(1:3, i_cell_R2)
 
             ! R_2 - R_1
             CALL add_R(cell_R2, -cell_R1, bs_env%index_to_cell_3c, cell_R2_m_R1, &
@@ -1202,24 +1218,27 @@ CONTAINS
 !> \param Sigma_R ...
 !> \param t_W ...
 !> \param G_S ...
-!> \param i_cell_Delta_R ...
+!> \param i_task_Delta_R_local ...
 !> \param bs_env ...
 !> \param occ ...
 !> \param vir ...
 !> \param clear_t_W ...
+!> \param fill_skip ...
 ! **************************************************************************************************
-   SUBROUTINE contract_to_Sigma(Sigma_R, t_W, G_S, i_cell_Delta_R, bs_env, occ, vir, clear_t_W)
+   SUBROUTINE contract_to_Sigma(Sigma_R, t_W, G_S, i_task_Delta_R_local, bs_env, occ, vir, &
+                                clear_t_W, fill_skip)
       TYPE(dbt_type), DIMENSION(:)                       :: Sigma_R
       TYPE(dbt_type), ALLOCATABLE, DIMENSION(:, :)       :: t_W
       TYPE(dbt_type), DIMENSION(:)                       :: G_S
-      INTEGER                                            :: i_cell_Delta_R
+      INTEGER                                            :: i_task_Delta_R_local
       TYPE(post_scf_bandstructure_type), POINTER         :: bs_env
-      LOGICAL                                            :: occ, vir, clear_t_W
+      LOGICAL                                            :: occ, vir, clear_t_W, fill_skip
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'contract_to_Sigma'
 
-      INTEGER :: handle, handle2, i_cell_m_R1, i_cell_R, i_cell_R1, i_cell_R1_minus_R, i_cell_S1, &
-         i_cell_S1_minus_R, i_cell_S1_p_S2_m_R1, i_cell_S2
+      INTEGER :: handle, handle2, i_cell_Delta_R, i_cell_m_R1, i_cell_R, i_cell_R1, &
+         i_cell_R1_minus_R, i_cell_S1, i_cell_S1_minus_R, i_cell_S1_p_S2_m_R1, i_cell_S2
+      INTEGER(KIND=int_8)                                :: flop, flop_tmp
       INTEGER, DIMENSION(3)                              :: cell_DR, cell_m_R1, cell_R, cell_R1, &
                                                             cell_R1_minus_R, cell_S1, &
                                                             cell_S1_minus_R, cell_S1_p_S2_m_R1, &
@@ -1238,10 +1257,14 @@ CONTAINS
       CALL dbt_create(bs_env%t_RI_AO__AO, t_G_2)
       CALL dbt_create(bs_env%t_RI_AO__AO, t_3c_int)
 
+      i_cell_Delta_R = bs_env%task_Delta_R(i_task_Delta_R_local)
+
+      flop = 0_int_8
+
       DO i_cell_R1 = 1, bs_env%nimages_3c
 
-         cell_R1(1:3) = bs_env%index_to_cell_3c(i_cell_R1, 1:3)
-         cell_DR(1:3) = bs_env%index_to_cell_Delta_R(i_cell_Delta_R, 1:3)
+         cell_R1(1:3) = bs_env%index_to_cell_3c(1:3, i_cell_R1)
+         cell_DR(1:3) = bs_env%index_to_cell_Delta_R(1:3, i_cell_Delta_R)
 
          ! S_1 = R_1 + ΔR (from ΔR = S_1 - R_1)
          CALL add_R(cell_R1, cell_DR, bs_env%index_to_cell_3c, cell_S1, cell_found, &
@@ -1250,7 +1273,9 @@ CONTAINS
 
          DO i_cell_S2 = 1, bs_env%nimages_scf_desymm
 
-            cell_S2(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(i_cell_S2, 1:3)
+            IF (bs_env%skip_DR_R1_S2_Gx3c_Sigma(i_task_Delta_R_local, i_cell_R1, i_cell_S2)) CYCLE
+
+            cell_S2(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(1:3, i_cell_S2)
             cell_m_R1(1:3) = -cell_R1(1:3)
             cell_S1_p_S2_m_R1(1:3) = cell_S1(1:3) + cell_S2(1:3) - cell_R1(1:3)
 
@@ -1279,7 +1304,11 @@ CONTAINS
                               tensor_3=t_G, &
                               contract_1=[2], notcontract_1=[1], map_1=[3], &
                               contract_2=[3], notcontract_2=[1, 2], map_2=[1, 2], &
-                              filter_eps=bs_env%eps_filter)
+                              filter_eps=bs_env%eps_filter, flop=flop_tmp)
+
+            IF (flop_tmp == 0_int_8 .AND. fill_skip) THEN
+               bs_env%skip_DR_R1_S2_Gx3c_Sigma(i_task_Delta_R_local, i_cell_R1, i_cell_S2) = .TRUE.
+            END IF
 
             CALL timestop(handle2)
 
@@ -1291,7 +1320,9 @@ CONTAINS
 
          DO i_cell_R = 1, bs_env%nimages_scf_desymm
 
-            cell_R = bs_env%kpoints_scf_desymm%index_to_cell(i_cell_R, 1:3)
+            IF (bs_env%skip_DR_R1_R_MxM_Sigma(i_task_Delta_R_local, i_cell_R1, i_cell_R)) CYCLE
+
+            cell_R = bs_env%kpoints_scf_desymm%index_to_cell(1:3, i_cell_R)
 
             ! R_1 - R
             CALL add_R(cell_R1, -cell_R, bs_env%index_to_cell_3c, cell_R1_minus_R, &
@@ -1313,7 +1344,13 @@ CONTAINS
                               tensor_3=Sigma_R(i_cell_R), &
                               contract_1=[1, 2], notcontract_1=[3], map_1=[1], &
                               contract_2=[1, 2], notcontract_2=[3], map_2=[2], &
-                              filter_eps=bs_env%eps_filter)
+                              filter_eps=bs_env%eps_filter, flop=flop_tmp)
+
+            flop = flop + flop_tmp
+
+            IF (flop_tmp == 0_int_8 .AND. fill_skip) THEN
+               bs_env%skip_DR_R1_R_MxM_Sigma(i_task_Delta_R_local, i_cell_R1, i_cell_R) = .TRUE.
+            END IF
 
          END DO ! i_cell_R
 
@@ -1322,6 +1359,8 @@ CONTAINS
          CALL timestop(handle2)
 
       END DO ! i_cell_R1
+
+      IF (vir .AND. flop == 0_int_8) bs_env%skip_DR_Sigma(i_task_Delta_R_local) = .TRUE.
 
       ! release memory
       IF (clear_t_W) THEN
@@ -1457,7 +1496,7 @@ CONTAINS
       CALL cp_fm_create(fm_ikp_re, cfm_mo_coeff%matrix_struct)
 
       ! Σ_µν(k_i) = sum_R e^ik_iR Σ_µν^R
-      CALL fm_trafo_rs_to_ikp(cfm_ikp, fm_rs, bs_env%kpoints_DOS, ikp)
+      CALL fm_rs_to_kp(cfm_ikp, fm_rs, bs_env%kpoints_DOS, ikp)
 
       n_ao = bs_env%n_ao
 

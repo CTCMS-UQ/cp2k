@@ -6,9 +6,9 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-scalapack_ver="2.2.1"
-scalapack_sha256="4aede775fdb28fa44b331875730bcd5bab130caaec225fadeccf424c8fcb55aa"
-scalapack_pkg="scalapack-${scalapack_ver}.tgz"
+scalapack_ver="2.2.2"
+scalapack_sha256="a2f0c9180a210bf7ffe126c9cb81099cf337da1a7120ddb4cbe4894eb7b7d022"
+scalapack_pkg="scalapack-${scalapack_ver}.tar.gz"
 
 source "${SCRIPT_DIR}"/common_vars.sh
 source "${SCRIPT_DIR}"/tool_kit.sh
@@ -48,15 +48,19 @@ case "$with_scalapack" in
       cflags=""
       fflags=""
       if ("${FC}" --version | grep -q 'GNU'); then
-        cflags="-fpermissive"
+        cflags="-fpermissive -std=c17"
         fflags=$(allowed_gfortran_flags "-fallow-argument-mismatch")
       fi
-      CFLAGS=${cflags} FFLAGS=${fflags} cmake -DCMAKE_FIND_ROOT_PATH="$ROOTDIR" \
+      cmake \
+        -DCMAKE_BUILD_TYPE=Release .. \
+        -DCMAKE_C_FLAGS="${cflags}" \
+        -DCMAKE_Fortran_FLAGS="${fflags}" \
+        -DCMAKE_FIND_ROOT_PATH="${ROOTDIR}" \
         -DCMAKE_INSTALL_PREFIX="${pkg_install_dir}" \
         -DCMAKE_INSTALL_LIBDIR="lib" \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
         -DCMAKE_VERBOSE_MAKEFILE=ON \
         -DBUILD_SHARED_LIBS=NO \
-        -DCMAKE_BUILD_TYPE=Release .. \
         -DBUILD_TESTING=NO \
         -DSCALAPACK_BUILD_TESTS=NO \
         > configure.log 2>&1 || tail -n ${LOG_LINES} configure.log

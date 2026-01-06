@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -232,7 +232,7 @@ CONTAINS
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(pw_c1d_gs_type)                               :: rho_tot_g
       TYPE(pw_c1d_gs_type), DIMENSION(:), POINTER        :: rho_g
-      TYPE(pw_c1d_gs_type), POINTER                      :: rho0_s_gs, rho_core
+      TYPE(pw_c1d_gs_type), POINTER                      :: rho0_s_gs, rho_core, rhoz_cneo_s_gs
       TYPE(pw_env_type), POINTER                         :: pw_env
       TYPE(pw_pool_type), POINTER                        :: auxbas_pool
       TYPE(pw_r3d_rs_type), DIMENSION(:), POINTER        :: rho_r
@@ -250,13 +250,14 @@ CONTAINS
       need_f = .FALSE.
       IF (PRESENT(calc_force)) need_f = calc_force
       logger => cp_get_default_logger()
-      NULLIFY (dft_control, rho, rho_core, rho0_s_gs, pw_env, rho_g, rho_r, &
+      NULLIFY (dft_control, rho, rho_core, rho0_s_gs, rhoz_cneo_s_gs, pw_env, rho_g, rho_r, &
                radii, inp_radii, particle_set, qs_kind_set, qs_charges, cp_ddapc_env)
       CALL get_qs_env(qs_env=qs_env, &
                       dft_control=dft_control, &
                       rho=rho, &
                       rho_core=rho_core, &
                       rho0_s_gs=rho0_s_gs, &
+                      rhoz_cneo_s_gs=rhoz_cneo_s_gs, &
                       pw_env=pw_env, &
                       qs_charges=qs_charges, &
                       particle_set=particle_set, &
@@ -290,7 +291,13 @@ CONTAINS
          CASE (do_full_density)
             ! Otherwise build the total QS density (electron+nuclei) in G-space
             IF (dft_control%qs_control%gapw) THEN
+               IF (ASSOCIATED(rhoz_cneo_s_gs)) THEN
+                  CALL pw_axpy(rhoz_cneo_s_gs, rho0_s_gs)
+               END IF
                CALL pw_transfer(rho0_s_gs, rho_tot_g)
+               IF (ASSOCIATED(rhoz_cneo_s_gs)) THEN
+                  CALL pw_axpy(rhoz_cneo_s_gs, rho0_s_gs, -1.0_dp)
+               END IF
             ELSE
                CALL pw_transfer(rho_core, rho_tot_g)
             END IF
@@ -719,10 +726,10 @@ CONTAINS
          CALL rho_tot_g%pw_grid%para%group%sum(bv2)
          ddbv(:) = (bv1(:) - bv2(:))/(2.0_dp*dx)
          DO kk = 1, SIZE(ddbv)
-            IF (ddbv(kk) .GT. 1.0E-8_dp) THEN
+            IF (ddbv(kk) > 1.0E-8_dp) THEN
                v0 = ABS(dbv(kk, i) - ddbv(kk))/ddbv(kk)*100.0_dp
                WRITE (*, *) "Error % on B ::", v0
-               IF (v0 .GT. 0.1_dp) THEN
+               IF (v0 > 0.1_dp) THEN
                   WRITE (*, '(A,2I5,2F15.9)') "ERROR IN DERIVATIVE OF B VECTOR, IPARTICLE, ICOORD:", iparticle, i, &
                      dbv(kk, i), ddbv(kk)
                   CPABORT("")
@@ -799,10 +806,10 @@ CONTAINS
          ddAm(:, :) = (Am1 - Am2)/(2.0_dp*dx)
          DO kk = 1, SIZE(ddAm, 1)
             DO ll = 1, SIZE(ddAm, 2)
-               IF (ddAm(kk, ll) .GT. 1.0E-8_dp) THEN
+               IF (ddAm(kk, ll) > 1.0E-8_dp) THEN
                   v0 = ABS(dAm(kk, ll, i) - ddAm(kk, ll))/ddAm(kk, ll)*100.0_dp
                   WRITE (*, *) "Error % on A ::", v0, Am1(kk, ll), Am2(kk, ll), iparticle, i, kk, ll
-                  IF (v0 .GT. 0.1_dp) THEN
+                  IF (v0 > 0.1_dp) THEN
                      WRITE (*, '(A,4I5,2F15.9)') "ERROR IN DERIVATIVE OF A MATRIX, IPARTICLE, ICOORD:", iparticle, i, kk, ll, &
                         dAm(kk, ll, i), ddAm(kk, ll)
                      CPABORT("")
@@ -869,7 +876,7 @@ CONTAINS
                            ext_rho_tot_g=rho_tot_g, Itype_of_density=type_of_density)
             ddqv(:) = (qtot1 - qtot2)/(2.0_dp*dx)
             DO kk = 1, SIZE(qtot1) - 1, SIZE(radii)
-               IF (ANY(ddqv(kk:kk + 2) .GT. 1.0E-8_dp)) THEN
+               IF (ANY(ddqv(kk:kk + 2) > 1.0E-8_dp)) THEN
                   WRITE (*, '(A,2F12.6,F12.2)') "Error :", SUM(dqv(kk:kk + 2, iparticle, i)), SUM(ddqv(kk:kk + 2)), &
                      ABS((SUM(ddqv(kk:kk + 2)) - SUM(dqv(kk:kk + 2, iparticle, i)))/SUM(ddqv(kk:kk + 2))*100.0_dp)
                END IF

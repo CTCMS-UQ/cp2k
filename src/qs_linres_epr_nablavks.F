@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -52,6 +52,7 @@ MODULE qs_linres_epr_nablavks
    USE pw_pool_types,                   ONLY: pw_pool_type
    USE pw_types,                        ONLY: pw_c1d_gs_type,&
                                               pw_r3d_rs_type
+   USE qs_cneo_types,                   ONLY: cneo_potential_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
    USE qs_gapw_densities,               ONLY: prepare_gapw_den
@@ -80,7 +81,7 @@ MODULE qs_linres_epr_nablavks
    USE qs_subsys_types,                 ONLY: qs_subsys_get,&
                                               qs_subsys_type
    USE qs_vxc,                          ONLY: qs_vxc_create
-   USE qs_vxc_atom,                     ONLY: calculate_vxc_atom
+   USE qs_vxc_atom,                     ONLY: calculate_vxc_atom_epr
    USE util,                            ONLY: get_limit
 #include "./base/base_uses.f90"
 
@@ -125,6 +126,7 @@ CONTAINS
       TYPE(all_potential_type), POINTER                  :: all_potential
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
+      TYPE(cneo_potential_type), POINTER                 :: cneo_potential
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: rho_ao
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -435,17 +437,17 @@ CONTAINS
       END IF ! gapw
 
       CALL pw_copy(v_hartree_gspace, v_hartree_gtemp)
-      CALL pw_derive(v_hartree_gtemp, (/1, 0, 0/))
+      CALL pw_derive(v_hartree_gtemp, [1, 0, 0])
       CALL pw_transfer(v_hartree_gtemp, v_hartree_rtemp)
       CALL pw_copy(v_hartree_rtemp, pwx)
 
       CALL pw_copy(v_hartree_gspace, v_hartree_gtemp)
-      CALL pw_derive(v_hartree_gtemp, (/0, 1, 0/))
+      CALL pw_derive(v_hartree_gtemp, [0, 1, 0])
       CALL pw_transfer(v_hartree_gtemp, v_hartree_rtemp)
       CALL pw_copy(v_hartree_rtemp, pwy)
 
       CALL pw_copy(v_hartree_gspace, v_hartree_gtemp)
-      CALL pw_derive(v_hartree_gtemp, (/0, 0, 1/))
+      CALL pw_derive(v_hartree_gtemp, [0, 0, 1])
       CALL pw_transfer(v_hartree_gtemp, v_hartree_rtemp)
       CALL pw_copy(v_hartree_rtemp, pwz)
 
@@ -472,6 +474,7 @@ CONTAINS
                           gth_potential=gth_potential, &
                           sgp_potential=sgp_potential, &
                           all_potential=all_potential, &
+                          cneo_potential=cneo_potential, &
                           paw_atom=paw_atom)
 
          IF (ASSOCIATED(gth_potential)) THEN
@@ -582,17 +585,17 @@ CONTAINS
                END DO
 
                CALL pw_copy(v_coulomb_gspace, v_coulomb_gtemp)
-               CALL pw_derive(v_coulomb_gtemp, (/1, 0, 0/))
+               CALL pw_derive(v_coulomb_gtemp, [1, 0, 0])
                CALL pw_transfer(v_coulomb_gtemp, v_coulomb_rtemp)
                CALL pw_axpy(v_coulomb_rtemp, pwx)
 
                CALL pw_copy(v_coulomb_gspace, v_coulomb_gtemp)
-               CALL pw_derive(v_coulomb_gtemp, (/0, 1, 0/))
+               CALL pw_derive(v_coulomb_gtemp, [0, 1, 0])
                CALL pw_transfer(v_coulomb_gtemp, v_coulomb_rtemp)
                CALL pw_axpy(v_coulomb_rtemp, pwy)
 
                CALL pw_copy(v_coulomb_gspace, v_coulomb_gtemp)
-               CALL pw_derive(v_coulomb_gtemp, (/0, 0, 1/))
+               CALL pw_derive(v_coulomb_gtemp, [0, 0, 1])
                CALL pw_transfer(v_coulomb_gtemp, v_coulomb_rtemp)
                CALL pw_axpy(v_coulomb_rtemp, pwz)
 
@@ -620,9 +623,9 @@ CONTAINS
                   DO ix = bo(1, 1), bo(2, 1)
                      DO iy = bo(1, 2), bo(2, 2)
                         DO iz = bo(1, 3), bo(2, 3)
-                           rpoint = (/REAL(ix, dp)*pwx%pw_grid%dr(1), &
-                                      REAL(iy, dp)*pwx%pw_grid%dr(2), &
-                                      REAL(iz, dp)*pwx%pw_grid%dr(3)/)
+                           rpoint = [REAL(ix, dp)*pwx%pw_grid%dr(1), &
+                                     REAL(iy, dp)*pwx%pw_grid%dr(2), &
+                                     REAL(iz, dp)*pwx%pw_grid%dr(3)]
                            rpoint = rpoint + roffset
                            rap = rpoint - ratom
                            rap(1) = MODULO(rap(1), cell%hmat(1, 1)) - cell%hmat(1, 1)/2._dp
@@ -775,6 +778,10 @@ CONTAINS
 
             CPABORT("EPR with SGP potentials is not implemented")
 
+         ELSE IF (ASSOCIATED(cneo_potential)) THEN
+
+            CPABORT("EPR with CNEO potentials is not implemented")
+
          ELSE IF (ASSOCIATED(all_potential)) THEN
 
             CALL get_potential(potential=all_potential, &
@@ -860,19 +867,19 @@ CONTAINS
          DO ispin = 1, nspins
 
             CALL pw_transfer(v_rspace_new(ispin), v_xc_gtemp)
-            CALL pw_derive(v_xc_gtemp, (/1, 0, 0/))
+            CALL pw_derive(v_xc_gtemp, [1, 0, 0])
             CALL pw_transfer(v_xc_gtemp, v_xc_rtemp)
             CALL qs_rho_get(nablavks_set(1, ispin)%rho, rho_r=rho_r)
             CALL pw_axpy(v_xc_rtemp, rho_r(1))
 
             CALL pw_transfer(v_rspace_new(ispin), v_xc_gtemp)
-            CALL pw_derive(v_xc_gtemp, (/0, 1, 0/))
+            CALL pw_derive(v_xc_gtemp, [0, 1, 0])
             CALL pw_transfer(v_xc_gtemp, v_xc_rtemp)
             CALL qs_rho_get(nablavks_set(2, ispin)%rho, rho_r=rho_r)
             CALL pw_axpy(v_xc_rtemp, rho_r(1))
 
             CALL pw_transfer(v_rspace_new(ispin), v_xc_gtemp)
-            CALL pw_derive(v_xc_gtemp, (/0, 0, 1/))
+            CALL pw_derive(v_xc_gtemp, [0, 0, 1])
             CALL pw_transfer(v_xc_gtemp, v_xc_rtemp)
             CALL qs_rho_get(nablavks_set(3, ispin)%rho, rho_r=rho_r)
             CALL pw_axpy(v_xc_rtemp, rho_r(1))
@@ -889,19 +896,19 @@ CONTAINS
          DO ispin = 1, nspins
 
             CALL pw_transfer(v_tau_rspace(ispin), v_xc_gtemp)
-            CALL pw_derive(v_xc_gtemp, (/1, 0, 0/))
+            CALL pw_derive(v_xc_gtemp, [1, 0, 0])
             CALL pw_transfer(v_xc_gtemp, v_xc_rtemp)
             CALL qs_rho_get(nablavks_set(1, ispin)%rho, rho_r=rho_r)
             CALL pw_axpy(v_xc_rtemp, rho_r(1))
 
             CALL pw_transfer(v_tau_rspace(ispin), v_xc_gtemp)
-            CALL pw_derive(v_xc_gtemp, (/0, 1, 0/))
+            CALL pw_derive(v_xc_gtemp, [0, 1, 0])
             CALL pw_transfer(v_xc_gtemp, v_xc_rtemp)
             CALL qs_rho_get(nablavks_set(2, ispin)%rho, rho_r=rho_r)
             CALL pw_axpy(v_xc_rtemp, rho_r(1))
 
             CALL pw_transfer(v_tau_rspace(ispin), v_xc_gtemp)
-            CALL pw_derive(v_xc_gtemp, (/0, 0, 1/))
+            CALL pw_derive(v_xc_gtemp, [0, 0, 1])
             CALL pw_transfer(v_xc_gtemp, v_xc_rtemp)
             CALL qs_rho_get(nablavks_set(3, ispin)%rho, rho_r=rho_r)
             CALL pw_axpy(v_xc_rtemp, rho_r(1))
@@ -917,8 +924,7 @@ CONTAINS
       CALL auxbas_pw_pool%give_back_pw(v_xc_rtemp)
 
       IF (gapw .OR. gapw_xc) THEN
-         CALL calculate_vxc_atom(qs_env=qs_env, energy_only=.FALSE., exc1=exc1, &
-                                 gradient_atom_set=nablavks_atom_set)
+         CALL calculate_vxc_atom_epr(qs_env=qs_env, exc1=exc1, gradient_atom_set=nablavks_atom_set)
       END IF
 
 !   -------------------------------------

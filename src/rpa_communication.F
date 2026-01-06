@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -48,7 +48,7 @@ MODULE rpa_communication
 
    TYPE index_map
       INTEGER, DIMENSION(:, :), ALLOCATABLE :: map
-   END TYPE
+   END TYPE index_map
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'rpa_communication'
 
@@ -122,8 +122,8 @@ CONTAINS
                                   group_grid_2_mepos, mepos_2_grid_group)
 
       ! fm_mat_Gamma_3 is released here
-      CALL fm2array(Gamma_2D, my_ia_size, my_ia_start, my_ia_end, &
-                    my_group_L_size, my_group_L_start, my_group_L_end, &
+      CALL fm2array(Gamma_2D, my_ia_start, my_ia_end, &
+                    my_group_L_start, my_group_L_end, &
                     group_grid_2_mepos, mepos_2_grid_group, &
                     para_env_sub%num_pe, ngroup, &
                     fm_mat_Gamma_3)

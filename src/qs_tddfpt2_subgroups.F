@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -113,9 +113,10 @@ MODULE qs_tddfpt2_subgroups
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env => NULL()
       !> group-specific MPI parallel environment
       TYPE(mp_para_env_type), POINTER                    :: para_env => NULL()
-      !> occupied MOs stored in a matrix form [nao x nmo_occ(spin)] distributed across processes
+      !> (active) occupied MOs stored in a matrix form [nao x nmo_occ(spin)] distributed across processes
       !> in the parallel group
-      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)      :: mos_occ
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: mos_occ
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: mos_active
       !> group-specific copy of the ADMM A matrix 'admm_type%A'
       TYPE(cp_fm_type), POINTER                          :: admm_A => NULL()
       !
@@ -171,21 +172,22 @@ CONTAINS
 !> \param sub_env  parallel group environment (initialised on exit)
 !> \param qs_env   Quickstep environment
 !> \param mos_occ  ground state molecular orbitals in primary atomic basis set
+!> \param mos_active  active ground state molecular orbitals in primary atomic basis set
 !> \param kernel   Type of kernel (full/sTDA) that will be used
 !> \par History
 !>    * 01.2017 (sub)group-related code has been moved here from the main subroutine tddfpt()
 !>              [Sergey Chulkov]
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_sub_env_init(sub_env, qs_env, mos_occ, kernel)
+   SUBROUTINE tddfpt_sub_env_init(sub_env, qs_env, mos_occ, mos_active, kernel)
       TYPE(tddfpt_subgroup_env_type), INTENT(out)        :: sub_env
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(cp_fm_type), DIMENSION(:), INTENT(in)         :: mos_occ
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(in)         :: mos_occ, mos_active
       INTEGER, INTENT(in)                                :: kernel
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_sub_env_init'
 
       INTEGER                                            :: handle, ispin, nao, nao_aux, natom, &
-                                                            nmo_occ, nspins
+                                                            nmo_active, nmo_occ, nspins
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env_global
@@ -215,6 +217,7 @@ CONTAINS
       sub_env%is_split = tddfpt_control%nprocs > 0 .AND. tddfpt_control%nprocs*2 <= para_env_global%num_pe
 
       ALLOCATE (sub_env%mos_occ(nspins))
+      ALLOCATE (sub_env%mos_active(nspins))
       NULLIFY (sub_env%admm_A)
 
       IF (sub_env%is_split) THEN
@@ -245,6 +248,15 @@ CONTAINS
                                                       fm_dest_sub=sub_env%mos_occ(ispin), sub_env=sub_env)
          END DO
 
+         DO ispin = 1, nspins
+            CALL cp_fm_get_info(mos_active(ispin), nrow_global=nao, ncol_global=nmo_active)
+            CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nmo_active, context=sub_env%blacs_env)
+            CALL cp_fm_create(sub_env%mos_active(ispin), fm_struct)
+            CALL cp_fm_struct_release(fm_struct)
+            CALL tddfpt_fm_replicate_across_subgroups(fm_src=mos_active(ispin), &
+                                                      fm_dest_sub=sub_env%mos_active(ispin), sub_env=sub_env)
+         END DO
+
          IF (dft_control%do_admm) THEN
             CALL get_qs_env(qs_env, admm_env=admm_env)
             CALL cp_fm_get_info(admm_env%A, nrow_global=nao_aux, ncol_global=nao)
@@ -262,6 +274,7 @@ CONTAINS
          sub_env%blacs_env => blacs_env_global
 
          sub_env%mos_occ(:) = mos_occ(:)
+         sub_env%mos_active(:) = mos_active(:)
 
          IF (dft_control%do_admm) THEN
             CALL get_qs_env(qs_env, admm_env=admm_env)
@@ -289,27 +302,29 @@ CONTAINS
 
             CALL tddfpt_build_distribution_2d(distribution_2d=sub_env%dist_2d, dbcsr_dist=sub_env%dbcsr_dist, &
                                               blacs_env=sub_env%blacs_env, qs_env=qs_env)
+
             CALL tddfpt_build_tasklist(task_list=sub_env%task_list_orb, sab=sub_env%sab_orb, basis_type="ORB", &
                                        distribution_2d=sub_env%dist_2d, pw_env=sub_env%pw_env, qs_env=qs_env, &
-                                       soft_valid=.FALSE., skip_load_balance=qs_control%skip_load_balance_distributed, &
+                                       skip_load_balance=qs_control%skip_load_balance_distributed, &
                                        reorder_grid_ranks=.TRUE.)
+
             IF (qs_control%gapw .OR. qs_control%gapw_xc) THEN
-               CALL tddfpt_build_tasklist(task_list=sub_env%task_list_orb_soft, sab=sub_env%sab_orb, basis_type="ORB", &
+               CALL tddfpt_build_tasklist(task_list=sub_env%task_list_orb_soft, sab=sub_env%sab_orb, basis_type="ORB_SOFT", &
                                           distribution_2d=sub_env%dist_2d, pw_env=sub_env%pw_env, qs_env=qs_env, &
-                                          soft_valid=.TRUE., skip_load_balance=qs_control%skip_load_balance_distributed, &
+                                          skip_load_balance=qs_control%skip_load_balance_distributed, &
                                           reorder_grid_ranks=.TRUE.)
             END IF
 
             IF (dft_control%do_admm) THEN
                CALL tddfpt_build_tasklist(task_list=sub_env%task_list_aux_fit, sab=sub_env%sab_aux_fit, &
                                           basis_type="AUX_FIT", distribution_2d=sub_env%dist_2d, &
-                                          pw_env=sub_env%pw_env, qs_env=qs_env, soft_valid=.FALSE., &
+                                          pw_env=sub_env%pw_env, qs_env=qs_env, &
                                           skip_load_balance=qs_control%skip_load_balance_distributed, &
                                           reorder_grid_ranks=.FALSE.)
                IF (qs_control%gapw .OR. qs_control%gapw_xc) THEN
                   CALL tddfpt_build_tasklist(task_list=sub_env%task_list_aux_fit_soft, sab=sub_env%sab_aux_fit, &
-                                             basis_type="AUX_FIT", distribution_2d=sub_env%dist_2d, &
-                                             pw_env=sub_env%pw_env, qs_env=qs_env, soft_valid=.TRUE., &
+                                             basis_type="AUX_FIT_SOFT", distribution_2d=sub_env%dist_2d, &
+                                             pw_env=sub_env%pw_env, qs_env=qs_env, &
                                              skip_load_balance=qs_control%skip_load_balance_distributed, &
                                              reorder_grid_ranks=.FALSE.)
                END IF
@@ -375,7 +390,8 @@ CONTAINS
          sub_env%is_mgrid = .FALSE.
          NULLIFY (sub_env%dbcsr_dist, sub_env%dist_2d)
          NULLIFY (sub_env%sab_orb, sub_env%sab_aux_fit)
-         NULLIFY (sub_env%task_list_orb, sub_env%task_list_orb_soft, sub_env%task_list_aux_fit)
+         NULLIFY (sub_env%task_list_orb, sub_env%task_list_orb_soft)
+         NULLIFY (sub_env%task_list_aux_fit, sub_env%task_list_aux_fit_soft)
          NULLIFY (sub_env%pw_env)
          IF (sub_env%is_split) THEN
             CPABORT('Subsys option not available')
@@ -386,7 +402,8 @@ CONTAINS
          sub_env%is_mgrid = .FALSE.
          NULLIFY (sub_env%dbcsr_dist, sub_env%dist_2d)
          NULLIFY (sub_env%sab_orb, sub_env%sab_aux_fit)
-         NULLIFY (sub_env%task_list_orb, sub_env%task_list_orb_soft, sub_env%task_list_aux_fit)
+         NULLIFY (sub_env%task_list_orb, sub_env%task_list_orb_soft)
+         NULLIFY (sub_env%task_list_aux_fit, sub_env%task_list_aux_fit_soft)
          NULLIFY (sub_env%pw_env)
          IF (sub_env%is_split) THEN
             CPABORT('Subsys option not available')
@@ -419,6 +436,9 @@ CONTAINS
       IF (sub_env%is_mgrid) THEN
          IF (ASSOCIATED(sub_env%task_list_aux_fit)) &
             CALL deallocate_task_list(sub_env%task_list_aux_fit)
+
+         IF (ASSOCIATED(sub_env%task_list_aux_fit_soft)) &
+            CALL deallocate_task_list(sub_env%task_list_aux_fit_soft)
 
          IF (ASSOCIATED(sub_env%task_list_orb)) &
             CALL deallocate_task_list(sub_env%task_list_orb)
@@ -468,8 +488,12 @@ CONTAINS
          DO i = SIZE(sub_env%mos_occ), 1, -1
             CALL cp_fm_release(sub_env%mos_occ(i))
          END DO
+         DO i = SIZE(sub_env%mos_active), 1, -1
+            CALL cp_fm_release(sub_env%mos_active(i))
+         END DO
       END IF
       DEALLOCATE (sub_env%mos_occ)
+      DEALLOCATE (sub_env%mos_active)
 
       CALL cp_blacs_env_release(sub_env%blacs_env)
       CALL mp_para_env_release(sub_env%para_env)
@@ -642,7 +666,6 @@ CONTAINS
 !> \param distribution_2d     two-dimensional distribution of pairs of particles
 !> \param pw_env              plane wave environment
 !> \param qs_env              Quickstep environment
-!> \param soft_valid          generate a task list for soft basis functions (GAPW, GAPW_XC)
 !> \param skip_load_balance   do not perform load balancing
 !> \param reorder_grid_ranks  re-optimise grid ranks and re-create the real-space grid descriptor
 !>                            as well as grids
@@ -651,7 +674,7 @@ CONTAINS
 !>   * 01.2017 moved from qs_tddfpt2_methods [Sergey Chulkov]
 ! **************************************************************************************************
    SUBROUTINE tddfpt_build_tasklist(task_list, sab, basis_type, distribution_2d, pw_env, qs_env, &
-                                    soft_valid, skip_load_balance, reorder_grid_ranks)
+                                    skip_load_balance, reorder_grid_ranks)
       TYPE(task_list_type), POINTER                      :: task_list
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
          POINTER                                         :: sab
@@ -659,8 +682,7 @@ CONTAINS
       TYPE(distribution_2d_type), POINTER                :: distribution_2d
       TYPE(pw_env_type), POINTER                         :: pw_env
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      LOGICAL, INTENT(in)                                :: soft_valid, skip_load_balance, &
-                                                            reorder_grid_ranks
+      LOGICAL, INTENT(in)                                :: skip_load_balance, reorder_grid_ranks
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_build_tasklist'
 
@@ -688,39 +710,41 @@ CONTAINS
 
       nkinds = SIZE(atomic_kind_set)
 
-      ALLOCATE (atom2d(nkinds))
-      CALL atom2d_build(atom2d, local_particles, distribution_2d, atomic_kind_set, &
-                        molecule_set, molecule_only=.FALSE., particle_set=particle_set)
+      IF (.NOT. (ASSOCIATED(sab))) THEN
+         ALLOCATE (atom2d(nkinds))
+         CALL atom2d_build(atom2d, local_particles, distribution_2d, atomic_kind_set, &
+                           molecule_set, molecule_only=.FALSE., particle_set=particle_set)
 
-      ALLOCATE (orb_present(nkinds))
-      ALLOCATE (orb_radius(nkinds))
-      ALLOCATE (pair_radius(nkinds, nkinds))
+         ALLOCATE (orb_present(nkinds))
+         ALLOCATE (orb_radius(nkinds))
+         ALLOCATE (pair_radius(nkinds, nkinds))
 
-      DO ikind = 1, nkinds
-         CALL get_qs_kind(qs_kind_set(ikind), basis_set=orb_basis_set, basis_type=basis_type)
-         IF (ASSOCIATED(orb_basis_set)) THEN
-            orb_present(ikind) = .TRUE.
-            CALL get_gto_basis_set(gto_basis_set=orb_basis_set, kind_radius=orb_radius(ikind))
-         ELSE
-            orb_present(ikind) = .FALSE.
-            orb_radius(ikind) = 0.0_dp
-         END IF
-      END DO
+         DO ikind = 1, nkinds
+            CALL get_qs_kind(qs_kind_set(ikind), basis_set=orb_basis_set, basis_type=basis_type)
+            IF (ASSOCIATED(orb_basis_set)) THEN
+               orb_present(ikind) = .TRUE.
+               CALL get_gto_basis_set(gto_basis_set=orb_basis_set, kind_radius=orb_radius(ikind))
+            ELSE
+               orb_present(ikind) = .FALSE.
+               orb_radius(ikind) = 0.0_dp
+            END IF
+         END DO
 
-      CALL pair_radius_setup(orb_present, orb_present, orb_radius, orb_radius, pair_radius)
+         CALL pair_radius_setup(orb_present, orb_present, orb_radius, orb_radius, pair_radius)
 
-      NULLIFY (sab)
-      CALL section_vals_val_get(input, "DFT%SUBCELLS", r_val=subcells)
-      CALL build_neighbor_lists(sab, particle_set, atom2d, cell, pair_radius, &
-                                mic=.FALSE., subcells=subcells, molecular=.FALSE., nlname="sab_orb")
+         NULLIFY (sab)
+         CALL section_vals_val_get(input, "DFT%SUBCELLS", r_val=subcells)
+         CALL build_neighbor_lists(sab, particle_set, atom2d, cell, pair_radius, &
+                                   mic=.FALSE., subcells=subcells, molecular=.FALSE., nlname="sab_orb")
 
-      CALL atom2d_cleanup(atom2d)
-      DEALLOCATE (atom2d, orb_present, orb_radius, pair_radius)
+         CALL atom2d_cleanup(atom2d)
+         DEALLOCATE (atom2d, orb_present, orb_radius, pair_radius)
+      END IF
 
       CALL allocate_task_list(task_list)
-      CALL generate_qs_task_list(ks_env, task_list, &
-                                 reorder_rs_grid_ranks=reorder_grid_ranks, soft_valid=soft_valid, &
-                                 basis_type=basis_type, skip_load_balance_distributed=skip_load_balance, &
+      CALL generate_qs_task_list(ks_env, task_list, basis_type=basis_type, &
+                                 reorder_rs_grid_ranks=reorder_grid_ranks, &
+                                 skip_load_balance_distributed=skip_load_balance, &
                                  pw_env_external=pw_env, sab_orb_external=sab)
 
       CALL timestop(handle)
@@ -762,7 +786,7 @@ CONTAINS
          ALLOCATE (matrix)
       END IF
 
-      CALL dbcsr_create(matrix, matrix_name, dbcsr_dist, matrix_type, row_blk_sizes, col_blk_sizes, nze=0)
+      CALL dbcsr_create(matrix, matrix_name, dbcsr_dist, matrix_type, row_blk_sizes, col_blk_sizes)
       CALL cp_dbcsr_alloc_block_from_nbl(matrix, sab)
 
       CALL timestop(handle)

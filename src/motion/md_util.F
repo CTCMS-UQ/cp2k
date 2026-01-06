@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -136,7 +136,7 @@ CONTAINS
                         unit_number=unit_nr)
          ! the first record contains one integer giving degrees of freedom
          READ (unit_nr) dof
-         IF (dof .GT. SIZE(eigenvalues)) THEN
+         IF (dof > SIZE(eigenvalues)) THEN
             CPABORT("Too many DoFs found in "//filename)
          END IF
          ! the second record contains the eigenvalues

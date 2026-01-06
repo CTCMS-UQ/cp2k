@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -10,22 +10,27 @@
 ! **************************************************************************************************
 MODULE cp_control_utils
    USE bibliography,                    ONLY: &
-        Andreussi2012, Dewar1977, Dewar1985, Elstner1998, Fattebert2002, Grimme2017, Hu2007, &
-        Krack2000, Lippert1997, Lippert1999, Porezag1995, Pracht2019, Repasky2002, Rocha2006, &
-        Schenter2008, Seifert1996, Souza2002, Stengel2009, Stewart1989, Stewart2007, Thiel1992, &
-        Umari2002, VanVoorhis2015, VandeVondele2005a, VandeVondele2005b, Yin2017, Zhechkov2005, &
-        cite_reference
+        Andreussi2012, Asgeirsson2017, Bannwarth2019, Caldeweyher2017, Caldeweyher2020, Dewar1977, &
+        Dewar1985, Elstner1998, Fattebert2002, Grimme2017, Hu2007, Krack2000, Lippert1997, &
+        Lippert1999, Porezag1995, Pracht2019, Repasky2002, Rocha2006, Schenter2008, Seifert1996, &
+        Souza2002, Stengel2009, Stewart1989, Stewart2007, Thiel1992, Umari2002, VanVoorhis2015, &
+        VandeVondele2005a, VandeVondele2005b, Yin2017, Zhechkov2005, cite_reference
    USE cp_control_types,                ONLY: &
         admm_control_create, admm_control_type, ddapc_control_create, ddapc_restraint_type, &
         dft_control_create, dft_control_type, efield_type, expot_control_create, &
-        maxwell_control_create, qs_control_type, tddfpt2_control_type, tddfpt_control_create, &
-        tddfpt_control_type, xtb_control_type
+        maxwell_control_create, qs_control_type, rixs_control_type, tddfpt2_control_type, &
+        xtb_control_type
    USE cp_files,                        ONLY: close_file,&
                                               open_file
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                               cp_print_key_unit_nr
+   USE cp_parser_methods,               ONLY: parser_read_line
+   USE cp_parser_types,                 ONLY: cp_parser_type,&
+                                              parser_create,&
+                                              parser_release,&
+                                              parser_reset
    USE cp_units,                        ONLY: cp_unit_from_cp2k,&
                                               cp_unit_to_cp2k
    USE eeq_input,                       ONLY: read_eeq_param
@@ -48,11 +53,11 @@ MODULE cp_control_utils
         do_pwgrid_spherical, do_s2_constraint, do_s2_restraint, do_se_is_kdso, do_se_is_kdso_d, &
         do_se_is_slater, do_se_lr_ewald, do_se_lr_ewald_gks, do_se_lr_ewald_r3, do_se_lr_none, &
         gapw_1c_large, gapw_1c_medium, gapw_1c_orb, gapw_1c_small, gapw_1c_very_large, &
-        gaussian_env, no_admm_type, numerical, ramp_env, real_time_propagation, sccs_andreussi, &
-        sccs_derivative_cd3, sccs_derivative_cd5, sccs_derivative_cd7, sccs_derivative_fft, &
-        sccs_fattebert_gygi, sic_ad, sic_eo, sic_list_all, sic_list_unpaired, sic_mauri_spz, &
-        sic_mauri_us, sic_none, slater, tddfpt_dipole_length, tddfpt_excitations, &
-        tddfpt_kernel_stda, use_mom_ref_user, xtb_vdw_type_d3, xtb_vdw_type_d4, xtb_vdw_type_none
+        gaussian_env, no_admm_type, numerical, ramp_env, real_time_propagation, rtp_method_bse, &
+        sccs_andreussi, sccs_derivative_cd3, sccs_derivative_cd5, sccs_derivative_cd7, &
+        sccs_derivative_fft, sccs_fattebert_gygi, sic_ad, sic_eo, sic_list_all, sic_list_unpaired, &
+        sic_mauri_spz, sic_mauri_us, sic_none, slater, tddfpt_dipole_length, tddfpt_kernel_stda, &
+        use_mom_ref_user, xtb_vdw_type_d3, xtb_vdw_type_d4, xtb_vdw_type_none
    USE input_cp2k_check,                ONLY: xc_functionals_expand
    USE input_cp2k_dft,                  ONLY: create_dft_section
    USE input_enumeration_types,         ONLY: enum_i2c,&
@@ -72,6 +77,7 @@ MODULE cp_control_utils
    USE smeagol_control_types,           ONLY: read_smeagol_control
    USE string_utilities,                ONLY: uppercase
    USE util,                            ONLY: sort
+   USE xas_tdp_types,                   ONLY: read_xas_tdp_control
    USE xc,                              ONLY: xc_uses_kinetic_energy_density,&
                                               xc_uses_norm_drho
    USE xc_input_constants,              ONLY: xc_deriv_collocate
@@ -85,9 +91,9 @@ MODULE cp_control_utils
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'cp_control_utils'
 
    PUBLIC :: read_dft_control, &
+             read_rixs_control, &
              read_mgrid_section, &
              read_qs_section, &
-             read_tddfpt_control, &
              read_tddfpt2_control, &
              write_dft_control, &
              write_qs_control, &
@@ -104,21 +110,21 @@ CONTAINS
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(section_vals_type), POINTER                   :: dft_section
 
-      CHARACTER(len=default_path_length)                 :: basis_set_file_name, potential_file_name
+      CHARACTER(len=default_path_length)                 :: basis_set_file_name, &
+                                                            intensities_file_name, &
+                                                            potential_file_name
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: tmpstringlist
-      INTEGER                                            :: admmtype, excitations, irep, isize, &
-                                                            method_id, nrep, xc_deriv_method_id
-      LOGICAL                                            :: do_hfx, do_ot, do_rpa_admm, do_rtp, &
-                                                            exopt1, exopt2, exopt3, explicit, &
-                                                            is_present, l_param, not_SE, &
-                                                            was_present
+      INTEGER                                            :: admmtype, irep, isize, method_id, nrep, &
+                                                            xc_deriv_method_id
+      LOGICAL :: at_end, do_hfx, do_ot, do_rpa_admm, do_rtp, exopt1, exopt2, exopt3, explicit, &
+         is_present, l_param, local_moment_possible, not_SE, was_present
       REAL(KIND=dp)                                      :: density_cut, gradient_cut, tau_cut
       REAL(KIND=dp), DIMENSION(:), POINTER               :: pol
       TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(section_vals_type), POINTER                   :: hfx_section, maxwell_section, &
-                                                            sccs_section, scf_section, &
-                                                            tmp_section, xc_fun_section, xc_section
+      TYPE(cp_parser_type)                               :: parser
+      TYPE(section_vals_type), POINTER :: hairy_probes_section, hfx_section, maxwell_section, &
+         sccs_section, scf_section, tmp_section, xc_fun_section, xc_section
 
       was_present = .FALSE.
 
@@ -390,6 +396,16 @@ CONTAINS
                           "unrestricted Kohn-Sham (UKS) calculations")
       END IF
 
+      !Read the HAIR PROBES input section if present
+      hairy_probes_section => section_vals_get_subs_vals(dft_section, "HAIRY_PROBES")
+      CALL section_vals_get(hairy_probes_section, n_repetition=nrep, explicit=is_present)
+
+      IF (is_present) THEN
+         dft_control%hairy_probes = .TRUE.
+         ALLOCATE (dft_control%probe(nrep))
+         CALL read_hairy_probes_sections(dft_control, hairy_probes_section)
+      END IF
+
       ! check for the presence of the low spin roks section
       tmp_section => section_vals_get_subs_vals(dft_section, "LOW_SPIN_ROKS")
       CALL section_vals_get(tmp_section, explicit=dft_control%low_spin_roks)
@@ -444,13 +460,6 @@ CONTAINS
       CALL section_vals_val_get(tmp_section, "SIC_SCALING_B", &
                                 r_val=dft_control%sic_scaling_b)
 
-      ! Determine if this is a TDDFPT run
-      CALL section_vals_val_get(dft_section, "EXCITATIONS", i_val=excitations)
-      dft_control%do_tddfpt_calculation = (excitations == tddfpt_excitations)
-      IF (dft_control%do_tddfpt_calculation) THEN
-         CALL tddfpt_control_create(dft_control%tddfpt_control)
-      END IF
-
       do_rtp = .FALSE.
       tmp_section => section_vals_get_subs_vals(dft_section, "REAL_TIME_PROPAGATION")
       CALL section_vals_get(tmp_section, explicit=is_present)
@@ -499,6 +508,19 @@ CONTAINS
          END IF
       END IF
 
+      ! Now, can try to guess polarisation in rtp
+      IF (do_rtp) THEN
+         ! tmp_section => section_vals_get_subs_vals(dft_section, "REAL_TIME_PROPAGATION%PRINT%POLARIZABILITY")
+         ! CALL section_vals_get(tmp_section, explicit=is_present)
+         local_moment_possible = (dft_control%rtp_control%rtp_method == rtp_method_bse) .OR. &
+                                 ((.NOT. dft_control%rtp_control%periodic) .AND. dft_control%rtp_control%linear_scaling)
+         IF (local_moment_possible .AND. (.NOT. ASSOCIATED(dft_control%rtp_control%print_pol_elements))) THEN
+            tmp_section => section_vals_get_subs_vals(dft_section, "REAL_TIME_PROPAGATION")
+            CALL guess_pol_elements(dft_control, &
+                                    dft_control%rtp_control%print_pol_elements)
+         END IF
+      END IF
+
       ! Read the finite field input section for periodic fields
       tmp_section => section_vals_get_subs_vals(dft_section, "PERIODIC_EFIELD")
       CALL section_vals_get(tmp_section, explicit=dft_control%apply_period_efield)
@@ -513,6 +535,73 @@ CONTAINS
          dft_control%period_efield%displacement_field = .FALSE.
          CALL section_vals_val_get(tmp_section, "DISPLACEMENT_FIELD", &
                                    l_val=dft_control%period_efield%displacement_field)
+
+         CALL section_vals_val_get(tmp_section, "INTENSITY_LIST", r_vals=pol)
+
+         CALL section_vals_val_get(tmp_section, "INTENSITIES_FILE_NAME", c_val=intensities_file_name)
+
+         IF (SIZE(pol) > 1 .OR. pol(1) /= 0.0_dp) THEN
+            ! if INTENSITY_LIST is present, INTENSITY and INTENSITIES_FILE_NAME must not be present
+            IF (dft_control%period_efield%strength /= 0.0_dp .OR. intensities_file_name /= "") THEN
+               CALL cp_abort(__LOCATION__, "[PERIODIC FIELD] Only one of INTENSITY, INTENSITY_LIST "// &
+                             "or INTENSITIES_FILE_NAME can be specified.")
+            END IF
+
+            ALLOCATE (dft_control%period_efield%strength_list(SIZE(pol)))
+            dft_control%period_efield%strength_list(1:SIZE(pol)) = pol(1:SIZE(pol))
+         END IF
+
+         IF (intensities_file_name /= "") THEN
+            ! if INTENSITIES_FILE_NAME is present, INTENSITY must not be present
+            IF (dft_control%period_efield%strength /= 0.0_dp) THEN
+               CALL cp_abort(__LOCATION__, "[PERIODIC FIELD] Only one of INTENSITY, INTENSITY_LIST "// &
+                             "or INTENSITIES_FILE_NAME can be specified.")
+            END IF
+
+            CALL parser_create(parser, intensities_file_name)
+
+            nrep = 0
+            DO WHILE (.TRUE.)
+               CALL parser_read_line(parser, 1, at_end)
+               IF (at_end) EXIT
+               nrep = nrep + 1
+            END DO
+
+            IF (nrep == 0) THEN
+               CPABORT("[PERIODIC FIELD] No intensities found in INTENSITIES_FILE_NAME")
+            END IF
+
+            ALLOCATE (dft_control%period_efield%strength_list(nrep))
+
+            CALL parser_reset(parser)
+            DO irep = 1, nrep
+               CALL parser_read_line(parser, 1)
+               READ (parser%input_line, *) dft_control%period_efield%strength_list(irep)
+            END DO
+
+            CALL parser_release(parser)
+         END IF
+
+         CALL section_vals_val_get(tmp_section, "START_FRAME", &
+                                   i_val=dft_control%period_efield%start_frame)
+         CALL section_vals_val_get(tmp_section, "END_FRAME", &
+                                   i_val=dft_control%period_efield%end_frame)
+
+         IF (dft_control%period_efield%end_frame /= -1) THEN
+            ! check if valid bounds are given
+            ! if an end frame is given, the number of active frames must be a
+            ! multiple of the number of intensities
+            IF (dft_control%period_efield%start_frame > dft_control%period_efield%end_frame) THEN
+               CPABORT("[PERIODIC FIELD] START_FRAME > END_FRAME")
+            ELSE IF (dft_control%period_efield%start_frame < 1) THEN
+               CPABORT("[PERIODIC FIELD] START_FRAME < 1")
+            ELSE IF (MOD(dft_control%period_efield%end_frame - &
+                         dft_control%period_efield%start_frame + 1, SIZE(pol)) /= 0) THEN
+               CALL cp_abort(__LOCATION__, &
+                             "[PERIODIC FIELD] Number of active frames must be a multiple of the number of intensities")
+            END IF
+         END IF
+
          ! periodic fields don't work with RTP
          CPASSERT(.NOT. do_rtp)
          IF (dft_control%period_efield%displacement_field) THEN
@@ -631,6 +720,32 @@ CONTAINS
    END SUBROUTINE read_dft_control
 
 ! **************************************************************************************************
+!> \brief Reads the input and stores in the rixs_control_type
+!> \param rixs_control ...
+!> \param rixs_section ...
+!> \param qs_control ...
+! **************************************************************************************************
+   SUBROUTINE read_rixs_control(rixs_control, rixs_section, qs_control)
+      TYPE(rixs_control_type), POINTER                   :: rixs_control
+      TYPE(section_vals_type), POINTER                   :: rixs_section
+      TYPE(qs_control_type), POINTER                     :: qs_control
+
+      TYPE(section_vals_type), POINTER                   :: td_section, xas_section
+
+      CALL section_vals_val_get(rixs_section, "_SECTION_PARAMETERS_", l_val=rixs_control%enabled)
+
+      CALL section_vals_val_get(rixs_section, "CORE_STATES", i_val=rixs_control%core_states)
+      CALL section_vals_val_get(rixs_section, "VALENCE_STATES", i_val=rixs_control%valence_states)
+
+      td_section => section_vals_get_subs_vals(rixs_section, "TDDFPT")
+      CALL read_tddfpt2_control(rixs_control%tddfpt2_control, td_section, qs_control)
+
+      xas_section => section_vals_get_subs_vals(rixs_section, "XAS_TDP")
+      CALL read_xas_tdp_control(rixs_control%xas_tdp_control, xas_section)
+
+   END SUBROUTINE read_rixs_control
+
+! **************************************************************************************************
 !> \brief ...
 !> \param qs_control ...
 !> \param dft_section ...
@@ -744,7 +859,7 @@ CONTAINS
       TYPE(section_vals_type), POINTER :: cdft_control_section, ddapc_restraint_section, &
          dftb_parameter, dftb_section, eeq_section, genpot_section, lri_optbas_section, &
          mull_section, nonbonded_section, s2_restraint_section, se_section, xtb_parameter, &
-         xtb_section
+         xtb_section, xtb_tblite
 
       CALL timeset(routineN, handle)
 
@@ -766,6 +881,7 @@ CONTAINS
       cdft_control_section => section_vals_get_subs_vals(qs_section, "CDFT")
       nonbonded_section => section_vals_get_subs_vals(xtb_section, "NONBONDED")
       genpot_section => section_vals_get_subs_vals(nonbonded_section, "GENPOT")
+      xtb_tblite => section_vals_get_subs_vals(xtb_section, "TBLITE")
 
       ! Setup all defaults values and overwrite input parameters
       ! EPS_DEFAULT should set the target accuracy in the total energy (~per electron) or a closely related value
@@ -842,7 +958,6 @@ CONTAINS
       CALL section_vals_val_get(qs_section, "EPSSVD", r_val=qs_control%gapw_control%eps_svd)
       CALL section_vals_val_get(qs_section, "EPSRHO0", r_val=qs_control%gapw_control%eps_Vrho0)
       CALL section_vals_val_get(qs_section, "ALPHA0_HARD", r_val=qs_control%gapw_control%alpha0_hard)
-      qs_control%gapw_control%lrho1_eq_lrho0 = .FALSE.
       qs_control%gapw_control%alpha0_hard_from_input = .FALSE.
       IF (qs_control%gapw_control%alpha0_hard /= 0.0_dp) qs_control%gapw_control%alpha0_hard_from_input = .TRUE.
       CALL section_vals_val_get(qs_section, "FORCE_PAW", l_val=qs_control%gapw_control%force_paw)
@@ -1455,6 +1570,8 @@ CONTAINS
             qs_control%xtb_control%coulomb_lr = .FALSE.
             qs_control%xtb_control%tb3_interaction = .FALSE.
             qs_control%xtb_control%check_atomic_charges = .FALSE.
+            CALL section_vals_val_get(xtb_section, "VARIATIONAL_DIPOLE", &
+                                      l_val=qs_control%xtb_control%var_dipole)
          CASE (1)
             ! For debugging purposes
             CALL section_vals_val_get(xtb_section, "COULOMB_INTERACTION", &
@@ -1466,6 +1583,7 @@ CONTAINS
             ! Check for bad atomic charges
             CALL section_vals_val_get(xtb_section, "CHECK_ATOMIC_CHARGES", &
                                       l_val=qs_control%xtb_control%check_atomic_charges)
+            qs_control%xtb_control%var_dipole = .FALSE.
          CASE (2)
             CPABORT("gfn2-xtb tbd")
          CASE DEFAULT
@@ -1520,46 +1638,23 @@ CONTAINS
       ! Optimize LRI basis set
       CALL section_vals_get(lri_optbas_section, explicit=qs_control%lri_optbas)
 
+      ! Use instead the tblite
+      CALL section_vals_val_get(xtb_tblite, "_SECTION_PARAMETERS_", &
+                                l_val=qs_control%xtb_control%do_tblite)
+      CALL section_vals_val_get(xtb_tblite, "METHOD", &
+                                i_val=qs_control%xtb_control%tblite_method)
+      IF (qs_control%xtb_control%do_tblite) THEN
+         CALL cite_reference(Caldeweyher2017)
+         CALL cite_reference(Caldeweyher2020)
+         CALL cite_reference(Asgeirsson2017)
+         CALL cite_reference(Grimme2017)
+         CALL cite_reference(Bannwarth2019)
+         !Ewald sum included in tblite
+         qs_control%xtb_control%do_ewald = .FALSE.
+      END IF
+
       CALL timestop(handle)
    END SUBROUTINE read_qs_section
-
-! **************************************************************************************************
-!> \brief ...
-!> \param t_control ...
-!> \param dft_section ...
-! **************************************************************************************************
-   SUBROUTINE read_tddfpt_control(t_control, dft_section)
-      TYPE(tddfpt_control_type)                          :: t_control
-      TYPE(section_vals_type), POINTER                   :: dft_section
-
-      LOGICAL                                            :: kenergy_den
-      TYPE(section_vals_type), POINTER                   :: sic_section, t_section
-
-      kenergy_den = .FALSE.
-      NULLIFY (sic_section, t_section)
-      t_section => section_vals_get_subs_vals(dft_section, "TDDFPT")
-
-      CALL section_vals_val_get(t_section, "CONVERGENCE", r_val=t_control%tolerance)
-      CALL section_vals_val_get(t_section, "NEV", i_val=t_control%n_ev)
-      CALL section_vals_val_get(t_section, "MAX_KV", i_val=t_control%max_kv)
-      CALL section_vals_val_get(t_section, "RESTARTS", i_val=t_control%n_restarts)
-      CALL section_vals_val_get(t_section, "NREORTHO", i_val=t_control%n_reortho)
-      CALL section_vals_val_get(t_section, "RES_ETYPE", i_val=t_control%res_etype)
-      CALL section_vals_val_get(t_section, "DIAG_METHOD", i_val=t_control%diag_method)
-      CALL section_vals_val_get(t_section, "KERNEL", l_val=t_control%do_kernel)
-      CALL section_vals_val_get(t_section, "LSD_SINGLETS", l_val=t_control%lsd_singlets)
-      CALL section_vals_val_get(t_section, "INVERT_S", l_val=t_control%invert_S)
-      CALL section_vals_val_get(t_section, "PRECOND", l_val=t_control%precond)
-      CALL section_vals_val_get(t_section, "OE_CORR", i_val=t_control%oe_corr)
-
-      t_control%use_kinetic_energy_density = .FALSE.
-      sic_section => section_vals_get_subs_vals(t_section, "SIC")
-      CALL section_vals_val_get(sic_section, "SIC_METHOD", i_val=t_control%sic_method_id)
-      CALL section_vals_val_get(sic_section, "ORBITAL_SET", i_val=t_control%sic_list_id)
-      CALL section_vals_val_get(sic_section, "SIC_SCALING_A", r_val=t_control%sic_scaling_a)
-      CALL section_vals_val_get(sic_section, "SIC_SCALING_B", r_val=t_control%sic_scaling_b)
-
-   END SUBROUTINE read_tddfpt_control
 
 ! **************************************************************************************************
 !> \brief Read TDDFPT-related input parameters.
@@ -1595,6 +1690,7 @@ CONTAINS
       CALL section_vals_val_get(t_section, "NLUMO", i_val=t_control%nlumo)
       CALL section_vals_val_get(t_section, "NPROC_STATE", i_val=t_control%nprocs)
       CALL section_vals_val_get(t_section, "KERNEL", i_val=t_control%kernel)
+      CALL section_vals_val_get(t_section, "SPINFLIP", i_val=t_control%spinflip)
       CALL section_vals_val_get(t_section, "OE_CORR", i_val=t_control%oe_corr)
       CALL section_vals_val_get(t_section, "EV_SHIFT", r_val=t_control%ev_shift)
       CALL section_vals_val_get(t_section, "EOS_SHIFT", r_val=t_control%eos_shift)
@@ -1607,8 +1703,11 @@ CONTAINS
       CALL section_vals_val_get(t_section, "RKS_TRIPLETS", l_val=t_control%rks_triplets)
       CALL section_vals_val_get(t_section, "DO_LRIGPW", l_val=t_control%do_lrigpw)
       CALL section_vals_val_get(t_section, "DO_SMEARING", l_val=t_control%do_smearing)
+      CALL section_vals_val_get(t_section, "DO_BSE", l_val=t_control%do_bse)
       CALL section_vals_val_get(t_section, "ADMM_KERNEL_CORRECTION_SYMMETRIC", l_val=t_control%admm_symm)
       CALL section_vals_val_get(t_section, "ADMM_KERNEL_XC_CORRECTION", l_val=t_control%admm_xc_correction)
+      CALL section_vals_val_get(t_section, "EXCITON_DESCRIPTORS", l_val=t_control%do_exciton_descriptors)
+      CALL section_vals_val_get(t_section, "DIRECTIONAL_EXCITON_DESCRIPTORS", l_val=t_control%do_directional_exciton_descriptors)
 
       ! read automatically generated auxiliary basis for LRI
       CALL section_vals_val_get(t_section, "AUTO_BASIS", n_rep_val=nrep)
@@ -1799,7 +1898,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER                        :: routineN = 'write_dft_control'
 
       CHARACTER(LEN=20)                                  :: tmpStr
-      INTEGER                                            :: handle, output_unit
+      INTEGER                                            :: handle, i, i_rep, n_rep, output_unit
       REAL(kind=dp)                                      :: density_cut, density_smooth_cut_range, &
                                                             gradient_cut, tau_cut
       TYPE(cp_logger_type), POINTER                      :: logger
@@ -1845,7 +1944,7 @@ CONTAINS
          WRITE (UNIT=output_unit, FMT="(T2,A,T76,I5)") &
             "DFT| Charge", dft_control%charge
 
-         IF (dft_control%sic_method_id .NE. sic_none) CALL cite_reference(VandeVondele2005b)
+         IF (dft_control%sic_method_id /= sic_none) CALL cite_reference(VandeVondele2005b)
          SELECT CASE (dft_control%sic_method_id)
          CASE (sic_none)
             tmpstr = "NO"
@@ -1934,9 +2033,32 @@ CONTAINS
                "PERIODIC_EFIELD|                            y", &
                dft_control%period_efield%polarisation(2), &
                "PERIODIC_EFIELD|                            z", &
-               dft_control%period_efield%polarisation(3), &
-               "PERIODIC_EFIELD| Intensity [a.u.]:", &
-               dft_control%period_efield%strength
+               dft_control%period_efield%polarisation(3)
+
+            WRITE (UNIT=output_unit, FMT="(T2,A,T66,1X,I14)") &
+               "PERIODIC_EFIELD| Start Frame:", &
+               dft_control%period_efield%start_frame, &
+               "PERIODIC_EFIELD| End Frame:", &
+               dft_control%period_efield%end_frame
+
+            IF (ALLOCATED(dft_control%period_efield%strength_list)) THEN
+               WRITE (UNIT=output_unit, FMT="(T2,A,T66,1X,I14)") &
+                  "PERIODIC_EFIELD| Number of Intensities:", &
+                  SIZE(dft_control%period_efield%strength_list)
+               WRITE (UNIT=output_unit, FMT="(T2,A,I10,T66,1X,ES14.6)") &
+                  "PERIODIC_EFIELD| Intensity List [a.u.] ", &
+                  1, dft_control%period_efield%strength_list(1)
+               DO i = 2, SIZE(dft_control%period_efield%strength_list)
+                  WRITE (UNIT=output_unit, FMT="(T2,A,I10,T66,1X,ES14.6)") &
+                     "PERIODIC_EFIELD|                       ", &
+                     i, dft_control%period_efield%strength_list(i)
+               END DO
+            ELSE
+               WRITE (UNIT=output_unit, FMT="(T2,A,T66,1X,ES14.6)") &
+                  "PERIODIC_EFIELD| Intensity [a.u.]:", &
+                  dft_control%period_efield%strength
+            END IF
+
             IF (SQRT(DOT_PRODUCT(dft_control%period_efield%polarisation, &
                                  dft_control%period_efield%polarisation)) < EPSILON(0.0_dp)) THEN
                CPABORT("Invalid (too small) polarisation vector specified for PERIODIC_EFIELD")
@@ -2015,6 +2137,25 @@ CONTAINS
 
          WRITE (UNIT=output_unit, FMT="(A)") ""
 
+      END IF
+
+      IF (dft_control%hairy_probes .EQV. .TRUE.) THEN
+         n_rep = SIZE(dft_control%probe)
+         IF (output_unit > 0) THEN
+            DO i_rep = 1, n_rep
+               WRITE (UNIT=output_unit, FMT="(T2,A,I5)") &
+                  "HP | hair probe set", i_rep
+               WRITE (UNIT=output_unit, FMT="(T2,A,T61,*(I5))") &
+                  "HP| atom indexes", &
+                  (dft_control%probe(i_rep)%atom_ids(i), i=1, dft_control%probe(i_rep)%natoms)
+               WRITE (UNIT=output_unit, FMT="(T2,A,T61,ES20.6)") &
+                  "HP| potential", dft_control%probe(i_rep)%mu
+               WRITE (UNIT=output_unit, FMT="(T2,A,T61,F20.2)") &
+                  "HP| temperature", dft_control%probe(i_rep)%T
+               WRITE (UNIT=output_unit, FMT="(T2,A,T61,ES20.6)") &
+                  "HP| eps_hp", dft_control%probe(i_rep)%eps_hp
+            END DO
+         END IF
       END IF
 
       CALL cp_print_key_finished_output(output_unit, logger, dft_section, &
@@ -2241,12 +2382,12 @@ CONTAINS
       NULLIFY (enum, keyword)
       keyword => section_get_keyword(qs_section, "METHOD")
       CALL keyword_get(keyword, enum=enum)
-      method = enum_i2c(enum, qs_control%method_id)
+      method = TRIM(enum_i2c(enum, qs_control%method_id))
 
       NULLIFY (enum, keyword)
       keyword => section_get_keyword(qs_section, "QUADRATURE")
       CALL keyword_get(keyword, enum=enum)
-      quadrature = enum_i2c(enum, qs_control%gapw_control%quadrature)
+      quadrature = TRIM(enum_i2c(enum, qs_control%gapw_control%quadrature))
 
       output_unit = cp_print_key_unit_nr(logger, print_section_vals, &
                                          "DFT_CONTROL_PARAMETERS", extension=".Log")
@@ -2397,7 +2538,7 @@ CONTAINS
          IF (qs_control%ddapc_restraint) THEN
             DO i = 1, SIZE(qs_control%ddapc_restraint_control)
                ddapc_restraint_control => qs_control%ddapc_restraint_control(i)
-               IF (SIZE(qs_control%ddapc_restraint_control) .GT. 1) &
+               IF (SIZE(qs_control%ddapc_restraint_control) > 1) &
                   WRITE (UNIT=output_unit, FMT="(T2,A,T3,I8)") &
                   "QS| parameters for DDAPC restraint number", i
                WRITE (UNIT=output_unit, FMT="(T2,A,T73,ES8.1)") &
@@ -2470,7 +2611,7 @@ CONTAINS
 
       IF (PRESENT(ddapc_restraint_section)) THEN
          IF (ASSOCIATED(qs_control%ddapc_restraint_control)) THEN
-            IF (SIZE(qs_control%ddapc_restraint_control) .GE. 2) &
+            IF (SIZE(qs_control%ddapc_restraint_control) >= 2) &
                CPABORT("ET_COUPLING cannot be used in combination with a normal restraint")
          ELSE
             ddapc_section => ddapc_restraint_section
@@ -2541,7 +2682,7 @@ CONTAINS
                ddapc_restraint_control%coeff(jj) = rtmplist(j)
             END DO
          END DO
-         IF (jj < ddapc_restraint_control%natoms .AND. jj .NE. 0) &
+         IF (jj < ddapc_restraint_control%natoms .AND. jj /= 0) &
             CPABORT("Need no or the same number of coeff as there are atoms.")
       END DO
       k = 0
@@ -2652,9 +2793,10 @@ CONTAINS
       TYPE(dft_control_type), INTENT(INOUT)              :: dft_control
       TYPE(section_vals_type), POINTER                   :: rtp_section
 
+      INTEGER                                            :: i, j, n_elems
       INTEGER, DIMENSION(:), POINTER                     :: tmp
-      LOGICAL                                            :: is_present
-      TYPE(section_vals_type), POINTER                   :: proj_mo_section
+      LOGICAL                                            :: is_present, local_moment_possible
+      TYPE(section_vals_type), POINTER                   :: proj_mo_section, subsection
 
       ALLOCATE (dft_control%rtp_control)
       CALL section_vals_val_get(rtp_section, "MAX_ITER", &
@@ -2665,9 +2807,9 @@ CONTAINS
                                 i_val=dft_control%rtp_control%aspc_order)
       CALL section_vals_val_get(rtp_section, "EXP_ACCURACY", &
                                 r_val=dft_control%rtp_control%eps_exp)
-      CALL section_vals_val_get(rtp_section, "RTP_METHOD", &
+      CALL section_vals_val_get(rtp_section, "RTBSE%_SECTION_PARAMETERS_", &
                                 i_val=dft_control%rtp_control%rtp_method)
-      CALL section_vals_val_get(rtp_section, "RTBSE_HAMILTONIAN", &
+      CALL section_vals_val_get(rtp_section, "RTBSE%RTBSE_HAMILTONIAN", &
                                 i_val=dft_control%rtp_control%rtbse_ham)
       CALL section_vals_val_get(rtp_section, "PROPAGATOR", &
                                 i_val=dft_control%rtp_control%propagator)
@@ -2717,8 +2859,155 @@ CONTAINS
       ELSE
          dft_control%rtp_control%is_proj_mo = .FALSE.
       END IF
+      ! Moment trace
+      local_moment_possible = (dft_control%rtp_control%rtp_method == rtp_method_bse) .OR. &
+                              ((.NOT. dft_control%rtp_control%periodic) .AND. dft_control%rtp_control%linear_scaling)
+      ! TODO : Implement for other moment operators
+      subsection => section_vals_get_subs_vals(rtp_section, "PRINT%MOMENTS")
+      CALL section_vals_get(subsection, explicit=is_present)
+      ! Trigger the flag
+      dft_control%rtp_control%save_local_moments = &
+         is_present .OR. dft_control%rtp_control%save_local_moments
+      IF (is_present .AND. (.NOT. local_moment_possible)) THEN
+         CALL cp_abort(__LOCATION__, "Moments trace printing only "// &
+                       "implemented in non-periodic systems in linear scaling. "// &
+                       "Please use DFT%PRINT%MOMENTS for other printing.")
+      END IF
+      CALL section_vals_val_get(rtp_section, "PRINT%MOMENTS%REFERENCE", &
+                                i_val=dft_control%rtp_control%moment_trace_ref_type)
+      CALL section_vals_val_get(rtp_section, "PRINT%MOMENTS%REFERENCE_POINT", &
+                                r_vals=dft_control%rtp_control%moment_trace_user_ref_point)
+      ! Moment Fourier transform
+      subsection => section_vals_get_subs_vals(rtp_section, "PRINT%MOMENTS_FT")
+      CALL section_vals_get(subsection, explicit=is_present)
+      ! Trigger the flag
+      dft_control%rtp_control%save_local_moments = &
+         is_present .OR. dft_control%rtp_control%save_local_moments
+      IF (is_present .AND. (.NOT. local_moment_possible)) THEN
+         ! Not implemented
+         CALL cp_abort(__LOCATION__, "Moments Fourier transform printing "// &
+                       "implemented only for non-periodic systems in linear scaling.")
+      END IF
+      ! General FT settings
+      CALL section_vals_val_get(rtp_section, "FT%DAMPING", &
+                                r_val=dft_control%rtp_control%ft_damping)
+      CALL section_vals_val_get(rtp_section, "FT%START_TIME", &
+                                r_val=dft_control%rtp_control%ft_t0)
+      ! Padé settings
+      subsection => section_vals_get_subs_vals(rtp_section, "FT%PADE")
+      CALL section_vals_val_get(subsection, "_SECTION_PARAMETERS_", &
+                                l_val=dft_control%rtp_control%pade_requested)
+      CALL section_vals_val_get(subsection, "E_MIN", &
+                                r_val=dft_control%rtp_control%pade_e_min)
+      CALL section_vals_val_get(subsection, "E_STEP", &
+                                r_val=dft_control%rtp_control%pade_e_step)
+      CALL section_vals_val_get(subsection, "E_MAX", &
+                                r_val=dft_control%rtp_control%pade_e_max)
+      CALL section_vals_val_get(subsection, "FIT_E_MIN", &
+                                r_val=dft_control%rtp_control%pade_fit_e_min)
+      CALL section_vals_val_get(subsection, "FIT_E_MAX", &
+                                r_val=dft_control%rtp_control%pade_fit_e_max)
+      ! If default settings used for fit_e_min/max, rewrite with appropriate values
+      IF (dft_control%rtp_control%pade_fit_e_min < 0) THEN
+         dft_control%rtp_control%pade_fit_e_min = dft_control%rtp_control%pade_e_min
+      END IF
+      IF (dft_control%rtp_control%pade_fit_e_max < 0) THEN
+         dft_control%rtp_control%pade_fit_e_max = dft_control%rtp_control%pade_e_max
+      END IF
+      ! Polarizability settings
+      subsection => section_vals_get_subs_vals(rtp_section, "PRINT%POLARIZABILITY")
+      CALL section_vals_get(subsection, explicit=is_present)
+      ! Trigger the flag
+      dft_control%rtp_control%save_local_moments = &
+         is_present .OR. dft_control%rtp_control%save_local_moments
+      IF (is_present .AND. (.NOT. local_moment_possible)) THEN
+         ! Not implemented
+         CALL cp_abort(__LOCATION__, "Polarizability printing "// &
+                       "implemented only for non-periodic systems.")
+      END IF
+      CALL section_vals_val_get(subsection, "ELEMENT", explicit=is_present, n_rep_val=n_elems)
+      NULLIFY (dft_control%rtp_control%print_pol_elements)
+      IF (is_present) THEN
+         ! Explicit list of elements
+         ! Allocate the array
+         ALLOCATE (dft_control%rtp_control%print_pol_elements(n_elems, 2))
+         DO i = 1, n_elems
+            CALL section_vals_val_get(subsection, "ELEMENT", i_vals=tmp, i_rep_val=i)
+            dft_control%rtp_control%print_pol_elements(i, :) = tmp(:)
+         END DO
+         ! Do basic sanity checks for pol_element
+         DO i = 1, n_elems
+            DO j = 1, 2
+               IF (dft_control%rtp_control%print_pol_elements(i, j) > 3 .OR. &
+                   dft_control%rtp_control%print_pol_elements(i, j) < 1) &
+                  CPABORT("Polarisation tensor element not 1,2 or 3 in at least one index")
+            END DO
+         END DO
+      END IF
+
+      ! Finally, allow printing of FT observables also in the case when they are not explicitly
+      ! required, but they are available, i.e. non-periodic linear scaling calculation
+      dft_control%rtp_control%save_local_moments = &
+         dft_control%rtp_control%save_local_moments .OR. &
+         ((.NOT. dft_control%rtp_control%periodic) .AND. dft_control%rtp_control%linear_scaling)
 
    END SUBROUTINE read_rtp_section
+! **************************************************************************************************
+!> \brief Tries to guess the elements of polarization to print
+!> \param dftc DFT parameters
+!> \param elems 2D array, where the guessed element indeces are stored
+!> \date 11.2025
+!> \author Stepan Marek
+! **************************************************************************************************
+   SUBROUTINE guess_pol_elements(dftc, elems)
+      TYPE(dft_control_type)                             :: dftc
+      INTEGER, DIMENSION(:, :), POINTER                  :: elems
+
+      INTEGER                                            :: i, i_nonzero, n_nonzero
+      LOGICAL                                            :: pol_vector_known
+      REAL(kind=dp), DIMENSION(3)                        :: pol_vector
+
+      pol_vector_known = .FALSE.
+
+      ! TODO : More relevant elements for magnetic pulse?
+      IF (dftc%rtp_control%apply_delta_pulse .OR. dftc%rtp_control%apply_delta_pulse_mag) THEN
+         pol_vector(:) = REAL(dftc%rtp_control%delta_pulse_direction(:), kind=dp)
+      ELSE
+         ! Maybe RT field is applied?
+         pol_vector(:) = dftc%efield_fields(1)%efield%polarisation(:)
+      END IF
+      IF (DOT_PRODUCT(pol_vector, pol_vector) > 0.0_dp) pol_vector_known = .TRUE.
+
+      IF (.NOT. pol_vector_known) THEN
+         CPABORT("Cannot guess polarization elements - please specify!")
+      ELSE
+         ! Check whether just one element is non-zero
+         n_nonzero = 0
+         DO i = 1, 3
+            IF (pol_vector(i) /= 0.0_dp) THEN
+               n_nonzero = n_nonzero + 1
+               i_nonzero = i
+            END IF
+         END DO
+         IF (n_nonzero > 1) THEN
+            CALL cp_abort(__LOCATION__, &
+                          "More than one non-zero field elements - "// &
+                          "cannot guess polarizability elements - please specify!")
+         ELSE IF (n_nonzero == 0) THEN
+            CALL cp_abort(__LOCATION__, &
+                          "No non-zero field elements - "// &
+                          "cannot guess polarizability elements - please specify!")
+         ELSE
+            ! Clear guess can be made
+            NULLIFY (elems)
+            ALLOCATE (elems(3, 2))
+            DO i = 1, 3
+               elems(i, 1) = i
+               elems(i, 2) = i_nonzero
+            END DO
+         END IF
+      END IF
+   END SUBROUTINE guess_pol_elements
 
 ! **************************************************************************************************
 !> \brief Parses the BLOCK_LIST keywords from the ADMM section
@@ -2748,5 +3037,55 @@ CONTAINS
       END DO
 
    END SUBROUTINE read_admm_block_list
+
+! **************************************************************************************************
+!> \brief ...
+!> \param dft_control ...
+!> \param hairy_probes_section ...
+!> \param
+!> \param
+! **************************************************************************************************
+   SUBROUTINE read_hairy_probes_sections(dft_control, hairy_probes_section)
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(section_vals_type), POINTER                   :: hairy_probes_section
+
+      INTEGER                                            :: i, j, jj, kk, n_rep
+      INTEGER, DIMENSION(:), POINTER                     :: tmplist
+
+      DO i = 1, SIZE(dft_control%probe)
+         NULLIFY (dft_control%probe(i)%atom_ids)
+
+         CALL section_vals_val_get(hairy_probes_section, "ATOM_IDS", i_rep_section=i, n_rep_val=n_rep)
+         jj = 0
+         DO kk = 1, n_rep
+            CALL section_vals_val_get(hairy_probes_section, "ATOM_IDS", i_rep_section=i, i_rep_val=kk, i_vals=tmplist)
+            jj = jj + SIZE(tmplist)
+         END DO
+
+         dft_control%probe(i)%natoms = jj
+         IF (dft_control%probe(i)%natoms < 1) &
+            CPABORT("Need at least 1 atom to use hair probes formalism")
+         ALLOCATE (dft_control%probe(i)%atom_ids(dft_control%probe(i)%natoms))
+
+         jj = 0
+         DO kk = 1, n_rep
+            CALL section_vals_val_get(hairy_probes_section, "ATOM_IDS", i_rep_section=i, i_rep_val=kk, i_vals=tmplist)
+            DO j = 1, SIZE(tmplist)
+               jj = jj + 1
+               dft_control%probe(i)%atom_ids(jj) = tmplist(j)
+            END DO
+         END DO
+
+         CALL section_vals_val_get(hairy_probes_section, "MU", i_rep_section=i, r_val=dft_control%probe(i)%mu)
+
+         CALL section_vals_val_get(hairy_probes_section, "T", i_rep_section=i, r_val=dft_control%probe(i)%T)
+
+         CALL section_vals_val_get(hairy_probes_section, "ALPHA", i_rep_section=i, r_val=dft_control%probe(i)%alpha)
+
+         CALL section_vals_val_get(hairy_probes_section, "eps_hp", i_rep_section=i, r_val=dft_control%probe(i)%eps_hp)
+      END DO
+
+   END SUBROUTINE read_hairy_probes_sections
+! **************************************************************************************************
 
 END MODULE cp_control_utils

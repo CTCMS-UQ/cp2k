@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -55,7 +55,7 @@ MODULE atom_sgp
       INTEGER                                  :: n_nlcc = 0
       REAL(KIND=dp), DIMENSION(:), POINTER     :: a_nlcc => Null()
       REAL(KIND=dp), DIMENSION(:), POINTER     :: c_nlcc => Null()
-   END TYPE
+   END TYPE atom_sgp_potential_type
 
    PRIVATE
    PUBLIC  :: atom_sgp_potential_type, atom_sgp_release

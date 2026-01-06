@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -23,9 +23,7 @@ MODULE qs_ot_types
                                               dbcsr_release_p,&
                                               dbcsr_set,&
                                               dbcsr_type,&
-                                              dbcsr_type_complex_default,&
-                                              dbcsr_type_no_symmetry,&
-                                              dbcsr_type_real_8
+                                              dbcsr_type_no_symmetry
    USE cp_dbcsr_operations,             ONLY: cp_dbcsr_m_by_n_from_row_template,&
                                               cp_dbcsr_m_by_n_from_template,&
                                               dbcsr_allocate_matrix_set,&
@@ -33,12 +31,12 @@ MODULE qs_ot_types
    USE cp_fm_struct,                    ONLY: cp_fm_struct_get,&
                                               cp_fm_struct_type
    USE input_constants,                 ONLY: &
-        cholesky_reduce, ls_2pnt, ls_3pnt, ls_gold, ls_none, ot_algo_irac, ot_algo_taylor_or_diag, &
-        ot_chol_irac, ot_lwdn_irac, ot_mini_broyden, ot_mini_cg, ot_mini_diis, ot_mini_sd, &
-        ot_poly_irac, ot_precond_full_all, ot_precond_full_kinetic, ot_precond_full_single, &
-        ot_precond_full_single_inverse, ot_precond_none, ot_precond_s_inverse, &
-        ot_precond_solver_default, ot_precond_solver_direct, ot_precond_solver_inv_chol, &
-        ot_precond_solver_update
+        cholesky_reduce, ls_2pnt, ls_3pnt, ls_adapt, ls_gold, ls_none, ot_algo_irac, &
+        ot_algo_taylor_or_diag, ot_chol_irac, ot_lwdn_irac, ot_mini_broyden, ot_mini_cg, &
+        ot_mini_diis, ot_mini_sd, ot_poly_irac, ot_precond_full_all, ot_precond_full_kinetic, &
+        ot_precond_full_single, ot_precond_full_single_inverse, ot_precond_none, &
+        ot_precond_s_inverse, ot_precond_solver_default, ot_precond_solver_direct, &
+        ot_precond_solver_inv_chol, ot_precond_solver_update
    USE input_section_types,             ONLY: section_vals_type,&
                                               section_vals_val_get
    USE kinds,                           ONLY: dp
@@ -59,8 +57,8 @@ MODULE qs_ot_types
    PUBLIC  :: qs_ot_settings_init
    PUBLIC  :: ot_readwrite_input
 
-   ! notice, this variable needs to be copyable !
-   ! needed for spins as e.g. in qs_ot_scf      !
+! **************************************************************************************************
+!> \brief notice, this variable needs to be copyable, needed for spins as e.g. in qs_ot_scf
 ! **************************************************************************************************
    TYPE qs_ot_settings_type
       LOGICAL           :: do_rotation = .FALSE., do_ener = .FALSE.
@@ -71,28 +69,30 @@ MODULE qs_ot_types
       CHARACTER(LEN=20) :: preconditioner_name = ""
       INTEGER           :: preconditioner_type = -1
       INTEGER           :: cholesky_type = -1
+      INTEGER           :: ot_state = 0
       CHARACTER(LEN=20) :: precond_solver_name = ""
       INTEGER           :: precond_solver_type = -1
       LOGICAL           :: safer_diis = .FALSE.
-      REAL(KIND=dp)   :: ds_min = -1.0_dp
-      REAL(KIND=dp)   :: energy_gap = -1.0_dp
+      REAL(KIND=dp)     :: ds_min = -1.0_dp
+      REAL(KIND=dp)     :: energy_gap = -1.0_dp
       INTEGER           :: diis_m = -1
-      REAL(KIND=dp)   :: gold_target = -1.0_dp
-      REAL(KIND=dp)   :: eps_taylor = -1.0_dp ! minimum accuracy of the taylor expansion
-      INTEGER           :: max_taylor = -1 ! maximum order of the taylor expansion before switching to diagonalization
-      INTEGER           :: irac_degree = -1 ! this is used to control the refinement polynomial degree
-      INTEGER           :: max_irac = -1 ! maximum number of iteration for the refinement
-      REAL(KIND=dp)   :: eps_irac = -1.0_dp ! target accuracy for the refinement
-      REAL(KIND=dp)   :: eps_irac_quick_exit = -1.0_dp
-      REAL(KIND=dp)          :: eps_irac_filter_matrix = -1.0_dp
-      REAL(KIND=dp)   :: eps_irac_switch = -1.0_dp
+      INTEGER           :: max_scf_diis = 0
+      REAL(KIND=dp)     :: gold_target = -1.0_dp
+      REAL(KIND=dp)     :: eps_taylor = -1.0_dp ! minimum accuracy of Taylor expansion
+      INTEGER           :: max_taylor = -1 ! maximum order of Taylor expansion before switching to diagonalization
+      INTEGER           :: irac_degree = -1 ! used to control the refinement polynomial degree
+      INTEGER           :: max_irac = -1 ! maximum number of iteration for refinement
+      REAL(KIND=dp)     :: eps_irac = -1.0_dp ! target accuracy for refinement
+      REAL(KIND=dp)     :: eps_irac_quick_exit = -1.0_dp
+      REAL(KIND=dp)     :: eps_irac_filter_matrix = -1.0_dp
+      REAL(KIND=dp)     :: eps_irac_switch = -1.0_dp
       LOGICAL           :: on_the_fly_loc = .FALSE.
       CHARACTER(LEN=4)  :: ortho_irac = ""
       LOGICAL           :: occupation_preconditioner = .FALSE., add_nondiag_energy = .FALSE.
-      REAL(KIND=dp)   :: nondiag_energy_strength = -1.0_dp
-      REAL(KIND=dp)   :: broyden_beta = -1.0_dp, broyden_gamma = -1.0_dp, broyden_sigma = -1.0_dp
-      REAL(KIND=dp)   :: broyden_eta = -1.0_dp, broyden_omega = -1.0_dp, broyden_sigma_decrease = -1.0_dp
-      REAL(KIND=dp)   :: broyden_sigma_min = -1.0_dp
+      REAL(KIND=dp)     :: nondiag_energy_strength = -1.0_dp
+      REAL(KIND=dp)     :: broyden_beta = -1.0_dp, broyden_gamma = -1.0_dp, broyden_sigma = -1.0_dp
+      REAL(KIND=dp)     :: broyden_eta = -1.0_dp, broyden_omega = -1.0_dp, broyden_sigma_decrease = -1.0_dp
+      REAL(KIND=dp)     :: broyden_sigma_min = -1.0_dp
       LOGICAL           :: broyden_forget_history = .FALSE., broyden_adaptive_sigma = .FALSE.
       LOGICAL           :: broyden_enable_flip = .FALSE.
    END TYPE qs_ot_settings_type
@@ -142,7 +142,8 @@ MODULE qs_ot_types
       ! OT / IR
       TYPE(dbcsr_type), POINTER :: buf1_k_k_nosym => NULL(), buf2_k_k_nosym => NULL(), &
                                    buf3_k_k_nosym => NULL(), buf4_k_k_nosym => NULL(), &
-                                   buf1_k_k_sym => NULL(), buf2_k_k_sym => NULL(), buf3_k_k_sym => NULL(), buf4_k_k_sym => NULL(), &
+                                   buf1_k_k_sym => NULL(), buf2_k_k_sym => NULL(), &
+                                   buf3_k_k_sym => NULL(), buf4_k_k_sym => NULL(), &
                                    p_k_k_sym => NULL(), buf1_n_k => NULL(), buf1_n_k_dp => NULL()
 
       ! only here for the ease of programming. These will have to be supplied
@@ -161,21 +162,21 @@ MODULE qs_ot_types
       REAL(KIND=dp), DIMENSION(:), POINTER  :: energy_h => NULL()
       INTEGER, DIMENSION(:), POINTER         :: ipivot => NULL()
 
-      REAL(KIND=dp)  :: ot_pos(53) = -1.0_dp, ot_energy(53) = -1.0_dp, ot_grad(53) = -1.0_dp ! HARD LIMIT FOR THE LS
+      REAL(KIND=dp)    :: ot_pos(53) = -1.0_dp, ot_energy(53) = -1.0_dp, ot_grad(53) = -1.0_dp ! HARD LIMIT FOR THE LS
       INTEGER          :: line_search_left = -1, line_search_right = -1, line_search_mid = -1
       INTEGER          :: line_search_count = -1
       LOGICAL          :: line_search_might_be_done = .FALSE.
-      REAL(KIND=dp)  :: delta = -1.0_dp, gnorm = -1.0_dp, gnorm_old = -1.0_dp, etotal = -1.0_dp, gradient = -1.0_dp
+      REAL(KIND=dp)    :: delta = -1.0_dp, gnorm = -1.0_dp, gnorm_old = -1.0_dp, etotal = -1.0_dp, gradient = -1.0_dp
       LOGICAL          :: energy_only = .FALSE.
       INTEGER          :: diis_iter = -1
       CHARACTER(LEN=8) :: OT_METHOD_FULL = ""
       INTEGER          :: OT_count = -1
-      REAL(KIND=dp)  :: ds_min = -1.0_dp
-      REAL(KIND=dp)  :: broyden_adaptive_sigma = -1.0_dp
+      REAL(KIND=dp)    :: ds_min = -1.0_dp
+      REAL(KIND=dp)    :: broyden_adaptive_sigma = -1.0_dp
 
       LOGICAL          :: do_taylor = .FALSE.
       INTEGER          :: taylor_order = -1
-      REAL(KIND=dp)  :: largest_eval_upper_bound = -1.0_dp
+      REAL(KIND=dp)    :: largest_eval_upper_bound = -1.0_dp
 
       ! second part of the variables, if an explicit rotation is required as well
       TYPE(dbcsr_type), POINTER :: rot_mat_u => NULL() ! rotation matrix
@@ -190,7 +191,8 @@ MODULE qs_ot_types
       TYPE(dbcsr_type), POINTER :: rot_mat_dx => NULL()
 
       REAL(KIND=dp), DIMENSION(:), POINTER :: rot_mat_evals => NULL()
-      TYPE(dbcsr_type), POINTER :: rot_mat_evec => NULL()
+      TYPE(dbcsr_type), POINTER :: rot_mat_evec_re => NULL()
+      TYPE(dbcsr_type), POINTER :: rot_mat_evec_im => NULL()
 
       ! third part of the variables, if we need to optimize orbital energies
       REAL(KIND=dp), POINTER, DIMENSION(:) :: ener_x => NULL()
@@ -233,6 +235,7 @@ CONTAINS
       settings%do_ener = .FALSE.
       settings%irac_degree = 4
       settings%max_irac = 50
+      settings%max_scf_diis = 0
       settings%eps_irac = 1.0E-10_dp
       settings%eps_irac_quick_exit = 1.0E-5_dp
       settings%eps_irac_switch = 1.0E-2
@@ -243,11 +246,11 @@ CONTAINS
       settings%occupation_preconditioner = .FALSE.
       settings%add_nondiag_energy = .FALSE.
       settings%nondiag_energy_strength = 0.0_dp
+
    END SUBROUTINE qs_ot_settings_init
 
-   ! init matrices, needs c0 and sc0 so that c0*sc0=1
 ! **************************************************************************************************
-!> \brief ...
+!> \brief init matrices, needs c0 and sc0 so that c0*sc0=1
 !> \param qs_ot_env ...
 ! **************************************************************************************************
    SUBROUTINE qs_ot_init(qs_ot_env)
@@ -289,11 +292,10 @@ CONTAINS
 
    END SUBROUTINE qs_ot_init
 
-   ! allocates the data in qs_ot_env, for a calculation with fm_struct_ref
-   ! ortho_k allows for specifying an additional orthogonal subspace (i.e. c will
-   ! be kept orthogonal provided c0 was, used in qs_ot_eigensolver)
 ! **************************************************************************************************
-!> \brief ...
+!> \brief allocates the data in qs_ot_env, for a calculation with fm_struct_ref
+!>        ortho_k allows for specifying an additional orthogonal subspace (i.e. c will
+!>        be kept orthogonal provided c0 was, used in qs_ot_eigensolver)
 !> \param qs_ot_env ...
 !> \param matrix_s ...
 !> \param fm_struct_ref ...
@@ -342,13 +344,13 @@ CONTAINS
          qs_ot_env%use_gx_old = .TRUE.
          qs_ot_env%use_dx = .TRUE.
       CASE ("DIIS", "BROY")
-         IF (m_diis .LT. 1) CPABORT("m_diis less than one")
+         IF (m_diis < 1) CPABORT("m_diis less than one")
       CASE DEFAULT
          CPABORT("Unknown option")
       END SELECT
 
-      IF (qs_ot_env%settings%ot_method .EQ. "DIIS" .OR. &
-          qs_ot_env%settings%ot_method .EQ. "BROY") THEN
+      IF (qs_ot_env%settings%ot_method == "DIIS" .OR. &
+          qs_ot_env%settings%ot_method == "BROY") THEN
          ALLOCATE (qs_ot_env%ls_diis(m_diis + 1, m_diis + 1))
          qs_ot_env%ls_diis = 0.0_dp
          ALLOCATE (qs_ot_env%lss_diis(m_diis + 1, m_diis + 1))
@@ -412,18 +414,18 @@ CONTAINS
 
       CALL dbcsr_init_p(qs_ot_env%matrix_gx)
       CALL cp_dbcsr_m_by_n_from_row_template(qs_ot_env%matrix_gx, template=matrix_s, n=k, &
-                                             sym=dbcsr_type_no_symmetry, data_type=dbcsr_type_real_8)
+                                             sym=dbcsr_type_no_symmetry)
 
       IF (qs_ot_env%use_dx) THEN
          CALL dbcsr_init_p(qs_ot_env%matrix_dx)
          CALL cp_dbcsr_m_by_n_from_row_template(qs_ot_env%matrix_dx, template=matrix_s, n=k, &
-                                                sym=dbcsr_type_no_symmetry, data_type=dbcsr_type_real_8)
+                                                sym=dbcsr_type_no_symmetry)
       END IF
 
       IF (qs_ot_env%use_gx_old) THEN
          CALL dbcsr_init_p(qs_ot_env%matrix_gx_old)
          CALL cp_dbcsr_m_by_n_from_row_template(qs_ot_env%matrix_gx_old, template=matrix_s, n=k, &
-                                                sym=dbcsr_type_no_symmetry, data_type=dbcsr_type_real_8)
+                                                sym=dbcsr_type_no_symmetry)
       END IF
 
       SELECT CASE (qs_ot_env%settings%ot_algorithm)
@@ -497,7 +499,7 @@ CONTAINS
          CALL cp_dbcsr_m_by_n_from_template(qs_ot_env%buf4_k_k_nosym, template=matrix_s, m=k, n=k, &
                                             sym=dbcsr_type_no_symmetry)
 
-! It claims to be symmetric but to avoid dbcsr conusion nonsymmetric is kept
+         ! It claims to be symmetric but to avoid dbcsr confusion nonsymmetric is kept
          CALL dbcsr_init_p(qs_ot_env%buf1_k_k_sym)
          CALL cp_dbcsr_m_by_n_from_template(qs_ot_env%buf1_k_k_sym, template=matrix_s, m=k, n=k, &
                                             sym=dbcsr_type_no_symmetry)
@@ -528,8 +530,8 @@ CONTAINS
 
       END SELECT
 
-      IF (qs_ot_env%settings%ot_method .EQ. "DIIS" .OR. &
-          qs_ot_env%settings%ot_method .EQ. "BROY") THEN
+      IF (qs_ot_env%settings%ot_method == "DIIS" .OR. &
+          qs_ot_env%settings%ot_method == "BROY") THEN
          NULLIFY (qs_ot_env%matrix_h_e)
          NULLIFY (qs_ot_env%matrix_h_x)
          CALL dbcsr_allocate_matrix_set(qs_ot_env%matrix_h_e, m_diis)
@@ -537,17 +539,18 @@ CONTAINS
          DO i = 1, m_diis
             CALL dbcsr_init_p(qs_ot_env%matrix_h_x(i)%matrix)
             CALL cp_dbcsr_m_by_n_from_row_template(qs_ot_env%matrix_h_x(i)%matrix, template=matrix_s, n=k, &
-                                                   sym=dbcsr_type_no_symmetry, data_type=dbcsr_type_real_8)
+                                                   sym=dbcsr_type_no_symmetry)
 
             CALL dbcsr_init_p(qs_ot_env%matrix_h_e(i)%matrix)
             CALL cp_dbcsr_m_by_n_from_row_template(qs_ot_env%matrix_h_e(i)%matrix, template=matrix_s, n=k, &
-                                                   sym=dbcsr_type_no_symmetry, data_type=dbcsr_type_real_8)
+                                                   sym=dbcsr_type_no_symmetry)
          END DO
       END IF
 
       NULLIFY (qs_ot_env%rot_mat_u, qs_ot_env%rot_mat_x, qs_ot_env%rot_mat_h_e, qs_ot_env%rot_mat_h_x, &
                qs_ot_env%rot_mat_gx, qs_ot_env%rot_mat_gx_old, qs_ot_env%rot_mat_dx, &
-               qs_ot_env%rot_mat_evals, qs_ot_env%rot_mat_evec, qs_ot_env%rot_mat_dedu, qs_ot_env%rot_mat_chc)
+               qs_ot_env%rot_mat_evals, qs_ot_env%rot_mat_dedu, qs_ot_env%rot_mat_chc, &
+               qs_ot_env%rot_mat_evec_re, qs_ot_env%rot_mat_evec_im)
 
       IF (qs_ot_env%settings%do_rotation) THEN
          CALL dbcsr_init_p(qs_ot_env%rot_mat_u)
@@ -566,7 +569,7 @@ CONTAINS
          CALL cp_dbcsr_m_by_n_from_template(qs_ot_env%rot_mat_chc, template=matrix_s, m=k, n=k, &
                                             sym=dbcsr_type_no_symmetry)
 
-         IF (qs_ot_env%settings%ot_method .EQ. "DIIS") THEN
+         IF (qs_ot_env%settings%ot_method == "DIIS") THEN
             CALL dbcsr_allocate_matrix_set(qs_ot_env%rot_mat_h_e, m_diis)
             CALL dbcsr_allocate_matrix_set(qs_ot_env%rot_mat_h_x, m_diis)
             DO i = 1, m_diis
@@ -581,10 +584,12 @@ CONTAINS
          END IF
 
          ALLOCATE (qs_ot_env%rot_mat_evals(k))
-
-         CALL dbcsr_init_p(qs_ot_env%rot_mat_evec)
-         CALL cp_dbcsr_m_by_n_from_template(qs_ot_env%rot_mat_evec, template=matrix_s, m=k, n=k, &
-                                            sym=dbcsr_type_no_symmetry, data_type=dbcsr_type_complex_default)
+         CALL dbcsr_init_p(qs_ot_env%rot_mat_evec_re)
+         CALL cp_dbcsr_m_by_n_from_template(qs_ot_env%rot_mat_evec_re, template=matrix_s, m=k, n=k, &
+                                            sym=dbcsr_type_no_symmetry)
+         CALL dbcsr_init_p(qs_ot_env%rot_mat_evec_im)
+         CALL cp_dbcsr_m_by_n_from_template(qs_ot_env%rot_mat_evec_im, template=matrix_s, m=k, n=k, &
+                                            sym=dbcsr_type_no_symmetry)
 
          CALL dbcsr_init_p(qs_ot_env%rot_mat_gx)
          CALL cp_dbcsr_m_by_n_from_template(qs_ot_env%rot_mat_gx, template=matrix_s, m=k, n=k, &
@@ -608,7 +613,7 @@ CONTAINS
          ncoef = k
          ALLOCATE (qs_ot_env%ener_x(ncoef))
 
-         IF (qs_ot_env%settings%ot_method .EQ. "DIIS") THEN
+         IF (qs_ot_env%settings%ot_method == "DIIS") THEN
             ALLOCATE (qs_ot_env%ener_h_e(m_diis, ncoef))
             ALLOCATE (qs_ot_env%ener_h_x(m_diis, ncoef))
          END IF
@@ -627,9 +632,8 @@ CONTAINS
 
    END SUBROUTINE qs_ot_allocate
 
-   ! deallocates data
 ! **************************************************************************************************
-!> \brief ...
+!> \brief deallocates data
 !> \param qs_ot_env ...
 ! **************************************************************************************************
    SUBROUTINE qs_ot_destroy(qs_ot_env)
@@ -674,8 +678,8 @@ CONTAINS
       IF (ASSOCIATED(qs_ot_env%buf1_n_k)) CALL dbcsr_release_p(qs_ot_env%buf1_n_k)
       IF (ASSOCIATED(qs_ot_env%buf1_n_k_dp)) CALL dbcsr_release_p(qs_ot_env%buf1_n_k_dp)
 
-      IF (qs_ot_env%settings%ot_method .EQ. "DIIS" .OR. &
-          qs_ot_env%settings%ot_method .EQ. "BROY") THEN
+      IF (qs_ot_env%settings%ot_method == "DIIS" .OR. &
+          qs_ot_env%settings%ot_method == "BROY") THEN
          CALL dbcsr_deallocate_matrix_set(qs_ot_env%matrix_h_x)
          CALL dbcsr_deallocate_matrix_set(qs_ot_env%matrix_h_e)
          DEALLOCATE (qs_ot_env%ls_diis)
@@ -693,14 +697,14 @@ CONTAINS
          IF (ASSOCIATED(qs_ot_env%rot_mat_dedu)) CALL dbcsr_release_p(qs_ot_env%rot_mat_dedu)
          IF (ASSOCIATED(qs_ot_env%rot_mat_chc)) CALL dbcsr_release_p(qs_ot_env%rot_mat_chc)
 
-         IF (qs_ot_env%settings%ot_method .EQ. "DIIS") THEN
+         IF (qs_ot_env%settings%ot_method == "DIIS") THEN
             CALL dbcsr_deallocate_matrix_set(qs_ot_env%rot_mat_h_x)
             CALL dbcsr_deallocate_matrix_set(qs_ot_env%rot_mat_h_e)
          END IF
 
          DEALLOCATE (qs_ot_env%rot_mat_evals)
-
-         IF (ASSOCIATED(qs_ot_env%rot_mat_evec)) CALL dbcsr_release_p(qs_ot_env%rot_mat_evec)
+         IF (ASSOCIATED(qs_ot_env%rot_mat_evec_re)) CALL dbcsr_release_p(qs_ot_env%rot_mat_evec_re)
+         IF (ASSOCIATED(qs_ot_env%rot_mat_evec_im)) CALL dbcsr_release_p(qs_ot_env%rot_mat_evec_im)
          IF (ASSOCIATED(qs_ot_env%rot_mat_gx)) CALL dbcsr_release_p(qs_ot_env%rot_mat_gx)
          IF (ASSOCIATED(qs_ot_env%rot_mat_gx_old)) CALL dbcsr_release_p(qs_ot_env%rot_mat_gx_old)
          IF (ASSOCIATED(qs_ot_env%rot_mat_dx)) CALL dbcsr_release_p(qs_ot_env%rot_mat_dx)
@@ -709,7 +713,7 @@ CONTAINS
       IF (qs_ot_env%settings%do_ener) THEN
          DEALLOCATE (qs_ot_env%ener_x)
          DEALLOCATE (qs_ot_env%ener_gx)
-         IF (qs_ot_env%settings%ot_method .EQ. "DIIS") THEN
+         IF (qs_ot_env%settings%ot_method == "DIIS") THEN
             DEALLOCATE (qs_ot_env%ener_h_x)
             DEALLOCATE (qs_ot_env%ener_h_e)
          END IF
@@ -792,6 +796,10 @@ CONTAINS
       CALL section_vals_val_get(ot_section, "ON_THE_FLY_LOC", l_val=settings%on_the_fly_loc)
 
       CALL section_vals_val_get(ot_section, "MINIMIZER", i_val=ot_method)
+      ! overwrite input if ot_state is set
+      IF (settings%ot_state == 1) THEN
+         ot_method = ot_mini_diis
+      END IF
       ! compatibility
       SELECT CASE (ot_method)
       CASE (ot_mini_sd)
@@ -826,6 +834,8 @@ CONTAINS
          settings%line_search_method = "2PNT"
       CASE (ls_3pnt)
          settings%line_search_method = "3PNT"
+      CASE (ls_adapt)
+         settings%line_search_method = "ADPT"
       CASE (ls_gold)
          settings%line_search_method = "GOLD"
          CALL section_vals_val_get(ot_section, "GOLD_TARGET", r_val=settings%gold_target)
@@ -846,6 +856,8 @@ CONTAINS
       CASE DEFAULT
          CPABORT("READ OTSCF SOLVER: Value unknown")
       END SELECT
+
+      CALL section_vals_val_get(ot_section, "MAX_SCF_DIIS", i_val=settings%max_scf_diis)
 
       !If these values are negative we will set them "optimal" for a given precondtioner below
       CALL section_vals_val_get(ot_section, "STEPSIZE", r_val=settings%ds_min)
@@ -952,7 +964,7 @@ CONTAINS
 
          WRITE (output_unit, '(A)') "  Precond_solver : "//TRIM(settings%precond_solver_name)
 
-         IF (settings%OT_METHOD .EQ. "SD" .OR. settings%OT_METHOD .EQ. "CG") THEN
+         IF (settings%OT_METHOD == "SD" .OR. settings%OT_METHOD == "CG") THEN
             SELECT CASE (settings%line_search_method)
             CASE ("2PNT")
                WRITE (output_unit, '(A)') "  Line search    : 2PNT                : 2 energies, one gradient"
@@ -969,11 +981,11 @@ CONTAINS
          END IF
          WRITE (output_unit, '(A,F14.8,T49,A,F14.8)') "  stepsize       :", settings%ds_min, &
             "  energy_gap     :", settings%energy_gap
-         IF (settings%ot_algorithm .EQ. 'TOD') THEN
+         IF (settings%ot_algorithm == 'TOD') THEN
             WRITE (output_unit, '(A,E14.5,T49,A,I14)') "  eps_taylor     :", settings%eps_taylor, &
                "  max_taylor     :", settings%max_taylor
          END IF
-         IF (settings%ot_algorithm .EQ. 'REF') THEN
+         IF (settings%ot_algorithm == 'REF') THEN
             WRITE (output_unit, '(A,1X,A,T49,A,I14)') "  ortho_irac     :", settings%ortho_irac, &
                "  irac_degree    :", settings%irac_degree
             WRITE (output_unit, '(A,I14,T49,A,E14.5)') "  max_irac       :", settings%max_irac, &
@@ -992,6 +1004,5 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE ot_readwrite_input
-! **************************************************************************************************
 
 END MODULE qs_ot_types

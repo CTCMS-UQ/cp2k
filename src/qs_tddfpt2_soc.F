@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -21,14 +21,15 @@ MODULE qs_tddfpt2_soc
    USE cp_dbcsr_api,                    ONLY: &
         dbcsr_copy, dbcsr_create, dbcsr_distribution_get, dbcsr_distribution_new, &
         dbcsr_distribution_release, dbcsr_distribution_type, dbcsr_get_info, dbcsr_multiply, &
-        dbcsr_p_type, dbcsr_print, dbcsr_release, dbcsr_reserve_all_blocks, dbcsr_scale, &
-        dbcsr_type, dbcsr_type_no_symmetry
+        dbcsr_p_type, dbcsr_release, dbcsr_scale, dbcsr_type, dbcsr_type_no_symmetry
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_print,&
+                                              dbcsr_reserve_all_blocks
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
                                               cp_dbcsr_sm_fm_multiply
    USE cp_fm_basic_linalg,              ONLY: cp_fm_scale,&
                                               cp_fm_transpose,&
-                                              cp_fm_upper_to_full
+                                              cp_fm_uplo_to_full
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                               cp_fm_struct_release,&
                                               cp_fm_struct_type
@@ -70,8 +71,7 @@ MODULE qs_tddfpt2_soc
    USE qs_kind_types,                   ONLY: get_qs_kind,&
                                               get_qs_kind_set,&
                                               qs_kind_type
-   USE qs_mo_types,                     ONLY: get_mo_set,&
-                                              mo_set_type
+   USE qs_mo_types,                     ONLY: mo_set_type
    USE qs_tddfpt2_soc_types,            ONLY: soc_atom_create,&
                                               soc_atom_env_type,&
                                               soc_atom_release,&
@@ -173,14 +173,14 @@ CONTAINS
       IF (do_os) CPABORT("SOC only implemented for closed shell.")
 
       IF (log_unit > 0) THEN
-         WRITE (log_unit, '(A)') "Starting from TDDFPT Excited States:"
+         WRITE (log_unit, '(A)') " Starting from TDDFPT Excited States:"
          WRITE (log_unit, '(A)') "      STATE          SINGLET/eV         TRIPLET/eV"
          DO istate = 1, SIZE(evals_a)
             WRITE (log_unit, '(6X,I3,11X,F10.5,6X,F10.5)') istate, evals_a(istate)*evolt, evals_b(istate)*evolt
          END DO
       END IF
 
-      IF (log_unit > 0) WRITE (log_unit, '(A)') "Starting restricted closed shell:"
+      IF (log_unit > 0) WRITE (log_unit, '(A)') " Starting restricted closed shell:"
       CALL tddfpt_soc_rcs(qs_env, evals_a, evals_b, evects_a, evects_b, log_unit, gs_mos)
 
       IF (log_unit > 0) THEN
@@ -190,7 +190,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE tddfpt_soc
 
 ! **************************************************************************************************
 !> \brief Will perform the soc-calculation for restricted-closed-shell systems
@@ -246,7 +246,6 @@ CONTAINS
                                                             dbcsr_sg, dbcsr_tmp, dbcsr_tp, &
                                                             dbcsr_work, orb_soc_x, orb_soc_y, &
                                                             orb_soc_z
-      TYPE(mo_set_type), DIMENSION(:), POINTER           :: mos
       TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(section_vals_type), POINTER                   :: soc_print_section, soc_section, &
                                                             tddfpt_print_section
@@ -275,9 +274,9 @@ CONTAINS
       CALL inititialize_soc(qs_env, soc_atom_env, soc_env, &
                             evects_sing, evects_trip, dipole_form, gs_mos)
 
-      NULLIFY (mos)
-      CALL get_qs_env(qs_env, mos=mos, para_env=para_env, blacs_env=blacs_env)
-      CALL get_mo_set(mos(1), nao=nao, homo=nactive)
+      CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
+      nactive = gs_mos(1)%nmo_active
+      CALL cp_fm_get_info(gs_mos(1)%mos_active, nrow_global=nao)
 
       ! this will create the H^SOC in an atomic basis
       CALL integrate_soc_atoms(soc_env%orb_soc, qs_env=qs_env, soc_atom_env=soc_atom_env)
@@ -371,8 +370,7 @@ CONTAINS
       CALL copy_fm_to_dbcsr(soc_env%b_coeff, dbcsr_tp)
 
       !Create the work and helper fms
-      !CALL get_mo_set(mos(1),mo_coeff=gs_coeffs)
-      gs_coeffs => gs_mos(1)%mos_occ
+      gs_coeffs => gs_mos(1)%mos_active
       CALL cp_fm_get_info(gs_coeffs, matrix_struct=vec_struct)
       CALL cp_fm_create(vec_soc_x, vec_struct)
       CALL cp_fm_create(vec_soc_y, vec_struct)
@@ -1027,11 +1025,11 @@ CONTAINS
             WRITE (log_unit, '(A)') "-----------------------------------------------------------------------------"
             mult = "   "
             DO iex = 1, SIZE(soc_env%soc_evals)
-               IF (evects_sort(iex + 1) .GT. nsg + ntp*2 + 1) THEN
+               IF (evects_sort(iex + 1) > nsg + ntp*2 + 1) THEN
                   mult = "T+1"
-               ELSE IF (evects_sort(iex + 1) .GT. nsg + ntp + 1) THEN
+               ELSE IF (evects_sort(iex + 1) > nsg + ntp + 1) THEN
                   mult = "T0"
-               ELSE IF (evects_sort(iex + 1) .GT. nsg + 1) THEN
+               ELSE IF (evects_sort(iex + 1) > nsg + 1) THEN
                   mult = "T-1"
                ELSE
                   mult = "S  "
@@ -1360,9 +1358,9 @@ CONTAINS
          DO igrid = 1, SIZE(grid_info, 1)
             IF (grid_info(igrid, 1) == kind_name) THEN
                READ (grid_info(igrid, 2), *, iostat=stat) na
-               IF (stat .NE. 0) CPABORT("The 'na' value for the GRID keyword must be an integer")
+               IF (stat /= 0) CPABORT("The 'na' value for the GRID keyword must be an integer")
                READ (grid_info(igrid, 3), *, iostat=stat) nr
-               IF (stat .NE. 0) CPABORT("The 'nr' value for the GRID keyword must be an integer")
+               IF (stat /= 0) CPABORT("The 'nr' value for the GRID keyword must be an integer")
                EXIT
             END IF
          END DO !igrid
@@ -1458,9 +1456,9 @@ CONTAINS
                                nrow_global=ntot, ncol_global=1)
 
       CALL cp_cfm_get_info(soc_evecs_cfm, matrix_struct=full_struct)
-      CALL cp_cfm_create(dip_cfm, dip_struct)
-      CALL cp_cfm_create(work1_cfm, full_struct)
-      CALL cp_cfm_create(work2_cfm, full_struct)
+      CALL cp_cfm_create(dip_cfm, dip_struct, set_zero=.TRUE.)
+      CALL cp_cfm_create(work1_cfm, full_struct, set_zero=.TRUE.)
+      CALL cp_cfm_create(work2_cfm, full_struct, set_zero=.TRUE.)
 
       ALLOCATE (transdip(ntot, 1))
 
@@ -1558,12 +1556,11 @@ CONTAINS
       TYPE(dbcsr_type), POINTER                          :: ao_op_i, dbcsr_ovlp, dbcsr_prod, &
                                                             dbcsr_sg, dbcsr_tmp, dbcsr_tp, &
                                                             dbcsr_work
-      TYPE(mo_set_type), DIMENSION(:), POINTER           :: mos
       TYPE(mp_para_env_type), POINTER                    :: para_env
 
       CALL timeset(routineN, handle)
 
-      NULLIFY (mos, gs_coeffs)
+      NULLIFY (gs_coeffs)
       NULLIFY (matrix_s)
       NULLIFY (para_env, blacs_env)
       NULLIFY (full_struct, gsgs_struct, std_struct, tmp_struct, sggs_struct)
@@ -1583,7 +1580,7 @@ CONTAINS
       ntp = nsg; nex = nsg !all the same by construction, keep them separate for clarity
       ntot = 1 + nsg + 3*ntp
 
-      CALL get_qs_env(qs_env, matrix_s=matrix_s, mos=mos, para_env=para_env, blacs_env=blacs_env)
+      CALL get_qs_env(qs_env, matrix_s=matrix_s, para_env=para_env, blacs_env=blacs_env)
       sqrt2 = SQRT(2.0_dp)
       dim_op = SIZE(ao_op)
 
@@ -1600,13 +1597,13 @@ CONTAINS
                                nrow_global=ntot, ncol_global=ntot)
       ALLOCATE (amew_op(dim_op))
       DO i = 1, dim_op
-         CALL cp_fm_create(amew_op(i), full_struct)
+         CALL cp_fm_create(amew_op(i), full_struct, set_zero=.TRUE.)
       END DO !i
 
       !  Deal with the GS-GS contribution <0|0> = 2*sum_j <phi_j|op|phi_j>
-      CALL get_mo_set(mos(1), nao=nao, homo=nactive)
-      gs_coeffs => gs_mos(1)%mos_occ
-      CALL cp_fm_get_info(gs_coeffs, matrix_struct=std_struct)
+      nactive = gs_mos(1)%nmo_active
+      gs_coeffs => gs_mos(1)%mos_active
+      CALL cp_fm_get_info(gs_coeffs, matrix_struct=std_struct, nrow_global=nao)
 
       CALL cp_fm_struct_create(gsgs_struct, &
                                context=blacs_env, para_env=para_env, &
@@ -1796,7 +1793,7 @@ CONTAINS
                                  t_firstcol=1 + nsg + 2*ntp + 1)
 
          ! Symmetrize the matrix (only upper triangle built)
-         CALL cp_fm_upper_to_full(amew_op(i), work_fm)
+         CALL cp_fm_uplo_to_full(amew_op(i), work_fm)
 
       END DO !i
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -97,7 +97,7 @@ CONTAINS
       IF (do_tip_scan) THEN
          iounit = cp_logger_get_default_io_unit(logger)
          cname = logger%iter_info%project_name
-         logger%iter_info%project_name = logger%iter_info%project_name//"+TIP_SCAN"
+         logger%iter_info%project_name = TRIM(logger%iter_info%project_name)//"+TIP_SCAN"
          plevel = logger%iter_info%print_level
          logger%iter_info%print_level = silent_print_level
 

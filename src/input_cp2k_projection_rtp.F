@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -79,7 +79,7 @@ CONTAINS
                           default_i_val=proj_mo_ref_scf, &
                           enum_desc=s2a("The reference MO is from an SCF calculation.", &
                                         "The reference MO is from an XAS_TDP analysis."), &
-                          enum_i_vals=(/proj_mo_ref_scf, proj_mo_ref_xas_tdp/))
+                          enum_i_vals=[proj_mo_ref_scf, proj_mo_ref_xas_tdp])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -100,8 +100,8 @@ CONTAINS
                           "Use this keyword if REFERENCE_TYPE=SCF. "// &
                           "Set to -1 to project on all the MO available. "// &
                           "One file will be generated per index defined.", &
-                          usage="MO_REF_INDEX 1 2", &
-                          default_i_vals=(/1/), &
+                          usage="REF_MO_INDEX 1 2", &
+                          default_i_vals=[1], &
                           n_var=-1, type_of_var=integer_t, repeats=.FALSE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -140,8 +140,8 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name="TD_MO_INDEX", &
                           description="Indexes of the time dependent MOs to project on the reference MOs. "// &
                           "Set to -1 to project on all the TD MOs.", &
-                          usage="MO_TD_INDEX 1 2", &
-                          default_i_vals=(/1/), &
+                          usage="TD_MO_INDEX 1 2", &
+                          default_i_vals=[1], &
                           n_var=-1, type_of_var=integer_t, repeats=.FALSE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -149,7 +149,7 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name="TD_MO_SPIN", &
                           description="Spin of the TD MOs to consider. 1 for ALPHA spin, 2 for BETA spin. "// &
                           "If the TD calculation is spin independent this key is not used.", &
-                          usage="MO_TD_SPIN 1", &
+                          usage="TD_MO_SPIN 1", &
                           default_i_val=1, &
                           n_var=1, type_of_var=integer_t)
       CALL section_add_keyword(section, keyword)

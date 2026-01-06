@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -13,17 +13,21 @@
 ! **************************************************************************************************
 MODULE ct_methods
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add, dbcsr_add_on_diag, dbcsr_copy, dbcsr_create, dbcsr_desymmetrize, &
-        dbcsr_distribution_get, dbcsr_distribution_type, dbcsr_dot, dbcsr_filter, dbcsr_finalize, &
-        dbcsr_frobenius_norm, dbcsr_func_inverse, dbcsr_function_of_elements, dbcsr_get_diag, &
-        dbcsr_get_info, dbcsr_get_stored_coordinates, dbcsr_hadamard_product, &
-        dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, dbcsr_iterator_start, &
-        dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, dbcsr_nblkcols_total, &
-        dbcsr_nblkrows_total, dbcsr_norm, dbcsr_norm_maxabsnorm, dbcsr_release, &
-        dbcsr_reserve_block2d, dbcsr_scale, dbcsr_set, dbcsr_set_diag, dbcsr_transposed, &
-        dbcsr_type, dbcsr_type_no_symmetry, dbcsr_work_create
+        dbcsr_add, dbcsr_copy, dbcsr_create, dbcsr_desymmetrize, dbcsr_filter, dbcsr_finalize, &
+        dbcsr_get_info, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
+        dbcsr_iterator_readonly_start, dbcsr_iterator_start, dbcsr_iterator_stop, &
+        dbcsr_iterator_type, dbcsr_multiply, dbcsr_put_block, dbcsr_release, dbcsr_scale, &
+        dbcsr_set, dbcsr_transposed, dbcsr_type, dbcsr_type_no_symmetry, dbcsr_work_create
    USE cp_dbcsr_cholesky,               ONLY: cp_dbcsr_cholesky_decompose,&
                                               cp_dbcsr_cholesky_invert
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_add_on_diag,&
+                                              dbcsr_dot,&
+                                              dbcsr_frobenius_norm,&
+                                              dbcsr_get_diag,&
+                                              dbcsr_hadamard_product,&
+                                              dbcsr_maxabs,&
+                                              dbcsr_reserve_diag_blocks,&
+                                              dbcsr_set_diag
    USE cp_dbcsr_diag,                   ONLY: cp_dbcsr_syevd
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_unit_nr,&
@@ -91,7 +95,7 @@ CONTAINS
          CPABORT("q-update is possible only with p-update")
       END IF
 
-      IF (cts_env%tensor_type .EQ. tensor_up_down) THEN
+      IF (cts_env%tensor_type == tensor_up_down) THEN
          CPABORT("riccati is not implemented for biorthogonal basis")
       END IF
 
@@ -125,8 +129,8 @@ CONTAINS
          END IF
       END IF
 
-      IF (cts_env%tensor_type .NE. tensor_up_down .AND. &
-          cts_env%tensor_type .NE. tensor_orthogonal) THEN
+      IF (cts_env%tensor_type /= tensor_up_down .AND. &
+          cts_env%tensor_type /= tensor_orthogonal) THEN
          CPABORT("illegal tensor flag")
       END IF
 
@@ -172,7 +176,7 @@ CONTAINS
          IF (ASSOCIATED(cts_env%matrix_x_guess)) THEN
             CALL dbcsr_copy(cts_env%matrix_x, &
                             cts_env%matrix_x_guess)
-            IF (cts_env%tensor_type .EQ. tensor_orthogonal) THEN
+            IF (cts_env%tensor_type == tensor_orthogonal) THEN
                ! bring x from contravariant-covariant representation
                ! to the orthogonal/cholesky representation
                ! use res as temporary storage
@@ -237,7 +241,7 @@ CONTAINS
             CALL matrix_forward_transform(cts_env%matrix_x, u_qq, u_pp, &
                                           cts_env%eps_filter)
 
-            IF (cts_env%max_iter .GE. 0) THEN
+            IF (cts_env%max_iter >= 0) THEN
 
                CALL solve_riccati_equation( &
                   pp=matrix_pp, &
@@ -301,7 +305,7 @@ CONTAINS
             CALL cp_dbcsr_cholesky_invert(u_pp, &
                                           para_env=cts_env%para_env, &
                                           blacs_env=cts_env%blacs_env, &
-                                          upper_to_full=.TRUE.)
+                                          uplo_to_full=.TRUE.)
             !CALL dbcsr_scale(u_pp,-1.0_dp)
 
             CALL dbcsr_create(u_qq, template=matrix_qq, &
@@ -315,7 +319,7 @@ CONTAINS
             CALL cp_dbcsr_cholesky_invert(u_qq, &
                                           para_env=cts_env%para_env, &
                                           blacs_env=cts_env%blacs_env, &
-                                          upper_to_full=.TRUE.)
+                                          uplo_to_full=.TRUE.)
 
             ! transform all riccati matrices (left-right preconditioner)
             CALL dbcsr_create(tmp1, template=matrix_qq, &
@@ -351,7 +355,7 @@ CONTAINS
 !CALL dbcsr_print(matrix_qp)
 !CALL dbcsr_print(matrix_pp)
 
-            IF (cts_env%max_iter .GE. 0) THEN
+            IF (cts_env%max_iter >= 0) THEN
 
                CALL solve_riccati_equation( &
                   pp=matrix_pp, &
@@ -403,7 +407,7 @@ CONTAINS
 
          IF (cts_env%update_p) THEN
 
-            IF (cts_env%tensor_type .EQ. tensor_up_down) THEN
+            IF (cts_env%tensor_type == tensor_up_down) THEN
                CPABORT("orbital update is NYI for this tensor type")
             END IF
 
@@ -477,7 +481,7 @@ CONTAINS
 
          ELSE ! do not update p
 
-            IF (cts_env%tensor_type .EQ. tensor_orthogonal) THEN
+            IF (cts_env%tensor_type == tensor_orthogonal) THEN
                ! bring x to contravariant-covariant representation
                CALL dbcsr_create(matrix_qp, &
                                  template=cts_env%matrix_qp_template, &
@@ -824,7 +828,7 @@ CONTAINS
       DO
 
          ! (re)-compute the residuals
-         IF (iteration .EQ. 0) THEN
+         IF (iteration == 0) THEN
             CALL dbcsr_copy(res, qp)
             IF (present_oo) THEN
                CALL dbcsr_multiply("N", "N", +1.0_dp, qq, x, 0.0_dp, res_trial, &
@@ -864,7 +868,7 @@ CONTAINS
                                       filter_eps=eps_filter)
                END IF
             END IF
-            CALL dbcsr_norm(res, dbcsr_norm_maxabsnorm, norm_scalar=best_norm)
+            best_norm = dbcsr_maxabs(res)
          ELSE
             CALL dbcsr_add(res, m, 1.0_dp, best_step_size)
             CALL dbcsr_add(res, n, 1.0_dp, -best_step_size*best_step_size)
@@ -872,8 +876,8 @@ CONTAINS
          END IF
 
          ! check convergence and other exit criteria
-         converged = (best_norm .LT. eps_convergence)
-         IF (converged .OR. (iteration .GE. max_iter)) THEN
+         converged = (best_norm < eps_convergence)
+         IF (converged .OR. (iteration >= max_iter)) THEN
             prepare_to_exit = .TRUE.
          END IF
 
@@ -881,7 +885,7 @@ CONTAINS
 
             ! update aux1=-pp-pq.x.oo and aux2=qq-vv.x.pq
             IF (quadratic_term) THEN
-               IF (iteration .EQ. 0) THEN
+               IF (iteration == 0) THEN
                   IF (present_oo) THEN
                      CALL dbcsr_multiply("N", "N", -1.0_dp, pq, x, 0.0_dp, oo1, &
                                          filter_eps=eps_filter)
@@ -942,7 +946,7 @@ CONTAINS
 
             ! compute preconditioner
             !IF (iteration.eq.0.OR.(mod(iteration,update_prec_freq).eq.0)) THEN
-            IF (iteration .EQ. 0) THEN
+            IF (iteration == 0) THEN
                CALL create_preconditioner(prec, aux1, aux2, eps_filter)
                !restart_conjugator=.TRUE.
 !CALL dbcsr_set(prec,1.0_dp)
@@ -950,7 +954,7 @@ CONTAINS
             END IF
 
             ! compute the conjugation coefficient - beta
-            IF ((iteration .EQ. 0) .OR. restart_conjugator) THEN
+            IF ((iteration == 0) .OR. restart_conjugator) THEN
                beta = 0.0_dp
             ELSE
                restart_conjugator = .FALSE.
@@ -1103,7 +1107,7 @@ CONTAINS
             ! find step size
             CALL analytic_line_search(c0, c1, c2, c3, step_size, nsteps)
 
-            IF (nsteps .EQ. 0) THEN
+            IF (nsteps == 0) THEN
                CPABORT("no step sizes!")
             END IF
             ! if we have several possible step sizes
@@ -1119,8 +1123,8 @@ CONTAINS
                ! RZK-warning objective function might be different in the case of
                ! tensor_up_down
                !obj_function=0.5_dp*(dbcsr_frobenius_norm(res_trial))**2
-               CALL dbcsr_norm(res_trial, dbcsr_norm_maxabsnorm, norm_scalar=obj_function)
-               IF (obj_function .LT. best_norm) THEN
+               obj_function = dbcsr_maxabs(res_trial)
+               IF (obj_function < best_norm) THEN
                   best_norm = obj_function
                   best_step_size = step_size(istep)
                END IF
@@ -1138,8 +1142,8 @@ CONTAINS
          !change_ecorr=ecorr-change_ecorr
 
          ! check convergence and other exit criteria
-         converged = (best_norm .LT. eps_convergence)
-         IF (converged .OR. (iteration .GE. max_iter)) THEN
+         converged = (best_norm < eps_convergence)
+         IF (converged .OR. (iteration >= max_iter)) THEN
             prepare_to_exit = .TRUE.
          END IF
 
@@ -1197,13 +1201,10 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'create_preconditioner'
 
-      INTEGER                                            :: col, handle, hold, iblock_col, &
-                                                            iblock_row, mynode, nblkcols_tot, &
-                                                            nblkrows_tot, p_nrows, q_nrows, row
-      LOGICAL                                            :: tr
+      INTEGER                                            :: handle, p_nrows, q_nrows
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: p_diagonal, q_diagonal
-      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: p_new_block
-      TYPE(dbcsr_distribution_type)                      :: dist
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: block
+      TYPE(dbcsr_iterator_type)                          :: iter
       TYPE(dbcsr_type)                                   :: pp_diag, qq_diag, t1, t2, tmp
 
 !LOGICAL, INTENT(IN)                      :: use_virt_orbs
@@ -1222,29 +1223,13 @@ CONTAINS
 !
       ! initialize a matrix to 1.0
       CALL dbcsr_create(tmp, template=prec)
-      ! use an ugly hack to set all elements of tmp to 1
-      ! because dbcsr_set does not do it (despite its name)
-      !CALL dbcsr_set(tmp,1.0_dp)
-      CALL dbcsr_get_info(tmp, distribution=dist)
-      CALL dbcsr_distribution_get(dist, mynode=mynode)
-      CALL dbcsr_work_create(tmp, work_mutable=.TRUE.)
-      nblkrows_tot = dbcsr_nblkrows_total(tmp)
-      nblkcols_tot = dbcsr_nblkcols_total(tmp)
-      DO row = 1, nblkrows_tot
-         DO col = 1, nblkcols_tot
-            tr = .FALSE.
-            iblock_row = row
-            iblock_col = col
-            CALL dbcsr_get_stored_coordinates(tmp, iblock_row, iblock_col, hold)
-            IF (hold .EQ. mynode) THEN
-               NULLIFY (p_new_block)
-               CALL dbcsr_reserve_block2d(tmp, iblock_row, iblock_col, p_new_block)
-               CPASSERT(ASSOCIATED(p_new_block))
-               p_new_block(:, :) = 1.0_dp
-            END IF ! mynode
-         END DO
+      CALL dbcsr_reserve_diag_blocks(tmp)
+      CALL dbcsr_iterator_start(iter, tmp)
+      DO WHILE (dbcsr_iterator_blocks_left(iter))
+         CALL dbcsr_iterator_next_block(iter, block=block)
+         block(:, :) = 1.0_dp
       END DO
-      CALL dbcsr_finalize(tmp)
+      CALL dbcsr_iterator_stop(iter)
 
       ! copy diagonal elements of pp into cols of a matrix
       CALL dbcsr_get_info(pp, nfullrows_total=p_nrows)
@@ -1310,12 +1295,37 @@ CONTAINS
       !CALL dbcsr_hadamard_product(res,qp,t2)
       !CALL dbcsr_add(prec,t2,1.0_dp,-2.0_dp)
       CALL dbcsr_release(t2)
-      CALL dbcsr_function_of_elements(prec, func=dbcsr_func_inverse)
+      CALL inverse_of_elements(prec)
       CALL dbcsr_filter(prec, eps_filter)
 
       CALL timestop(handle)
 
    END SUBROUTINE create_preconditioner
+
+! **************************************************************************************************
+!> \brief Computes 1/x of the matrix elements.
+!> \param matrix ...
+!> \author Ole Schuett
+! **************************************************************************************************
+   SUBROUTINE inverse_of_elements(matrix)
+      TYPE(dbcsr_type), INTENT(INOUT)                    :: matrix
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'inverse_of_elements'
+
+      INTEGER                                            :: handle
+      REAL(kind=dp), DIMENSION(:, :), POINTER            :: block
+      TYPE(dbcsr_iterator_type)                          :: iter
+
+      CALL timeset(routineN, handle)
+      CALL dbcsr_iterator_start(iter, matrix)
+      DO WHILE (dbcsr_iterator_blocks_left(iter))
+         CALL dbcsr_iterator_next_block(iter, block=block)
+         block = 1.0_dp/block
+      END DO
+      CALL dbcsr_iterator_stop(iter)
+      CALL timestop(handle)
+
+   END SUBROUTINE inverse_of_elements
 
 ! **************************************************************************************************
 !> \brief Finds real roots of a cubic equation
@@ -1377,9 +1387,9 @@ CONTAINS
       pi = ACOS(-1.0_dp)
 
       ! Step 0: Check coefficients and find the true order of the eq
-      IF (a .EQ. 0.0_dp) THEN
-         IF (b .EQ. 0.0_dp) THEN
-            IF (c .EQ. 0.0_dp) THEN
+      IF (a == 0.0_dp) THEN
+         IF (b == 0.0_dp) THEN
+            IF (c == 0.0_dp) THEN
                ! Non-equation, no valid solutions
                nroots = 0
             ELSE
@@ -1390,11 +1400,11 @@ CONTAINS
          ELSE
             ! Quadratic equation with max two roots.
             DD = c*c - 4.0_dp*b*d
-            IF (DD .GT. 0.0_dp) THEN
+            IF (DD > 0.0_dp) THEN
                nroots = 2
                x(1) = (-c + SQRT(DD))/2.0_dp/b
                x(2) = (-c - SQRT(DD))/2.0_dp/b
-            ELSE IF (DD .LT. 0.0_dp) THEN
+            ELSE IF (DD < 0.0_dp) THEN
                nroots = 0
             ELSE
                nroots = 1
@@ -1410,7 +1420,7 @@ CONTAINS
          ! Calculate DD
          DD = p*p*p/27.0_dp + q*q/4.0_dp
 
-         IF (DD .LT. 0.0_dp) THEN
+         IF (DD < 0.0_dp) THEN
             ! three real unequal roots -- use the trigonometric formulation
             phi = ACOS(-q/2.0_dp/SQRT(ABS(p*p*p)/27.0_dp))
             temp1 = 2.0_dp*SQRT(ABS(p)/3.0_dp)
@@ -1423,8 +1433,8 @@ CONTAINS
             temp2 = -q/2.0_dp - SQRT(DD)
             u = ABS(temp1)**(1.0_dp/3.0_dp)
             v = ABS(temp2)**(1.0_dp/3.0_dp)
-            IF (temp1 .LT. 0.0_dp) u = -u
-            IF (temp2 .LT. 0.0_dp) v = -v
+            IF (temp1 < 0.0_dp) u = -u
+            IF (temp2 < 0.0_dp) v = -v
             y1 = u + v
             y2r = -(u + v)/2.0_dp
             y2i = (u - v)*SQRT(3.0_dp)/2.0_dp
@@ -1438,12 +1448,12 @@ CONTAINS
          y2r = y2r - temp1
 
          ! Assign answers
-         IF (DD .LT. 0.0_dp) THEN
+         IF (DD < 0.0_dp) THEN
             nroots = 3
             x(1) = y1
             x(2) = y2
             x(3) = y3
-         ELSE IF (DD .EQ. 0.0_dp) THEN
+         ELSE IF (DD == 0.0_dp) THEN
             nroots = 2
             x(1) = y1
             x(2) = y2r
@@ -1463,7 +1473,7 @@ CONTAINS
          ! maximum or minimum? use the derivative
          ! 3*a*x**2+2*b*x+c
          der = 3.0_dp*a*x(i)*x(i) + 2.0_dp*b*x(i) + c
-         IF (der .GT. 0.0_dp) THEN
+         IF (der > 0.0_dp) THEN
             nmins = nmins + 1
             minima(nmins) = x(i)
 !write(*,'(a,i2,a,f10.5)') 'Minimum ', i, ', value: ', x(i)
@@ -1496,8 +1506,8 @@ CONTAINS
                                                             iblock_size, info, lwork, orbital
       LOGICAL                                            :: block_needed, do_eigenvalues
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: eigenvalues, work
-      REAL(kind=dp), ALLOCATABLE, DIMENSION(:, :)        :: data_copy
-      REAL(kind=dp), DIMENSION(:, :), POINTER            :: data_p, p_new_block
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:, :)        :: data_copy, new_block
+      REAL(kind=dp), DIMENSION(:, :), POINTER            :: data_p
       TYPE(dbcsr_iterator_type)                          :: iter
 
       CALL timeset(routineN, handle)
@@ -1513,7 +1523,7 @@ CONTAINS
       IF (do_eigenvalues) &
          CALL dbcsr_work_create(e, work_mutable=.TRUE.)
 
-      CALL dbcsr_iterator_start(iter, matrix)
+      CALL dbcsr_iterator_readonly_start(iter, matrix)
 
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
@@ -1532,32 +1542,27 @@ CONTAINS
             ! Query the optimal workspace for dsyev
             LWORK = -1
             ALLOCATE (WORK(MAX(1, LWORK)))
-            CALL DSYEV('V', 'L', iblock_size, data_copy, iblock_size, eigenvalues, WORK, LWORK, INFO)
+            CALL dsyev('V', 'L', iblock_size, data_copy, iblock_size, eigenvalues, WORK, LWORK, INFO)
             LWORK = INT(WORK(1))
             DEALLOCATE (WORK)
 
             ! Allocate the workspace and solve the eigenproblem
             ALLOCATE (WORK(MAX(1, LWORK)))
-            CALL DSYEV('V', 'L', iblock_size, data_copy, iblock_size, eigenvalues, WORK, LWORK, INFO)
-            IF (INFO .NE. 0) THEN
-               CPABORT("DSYEV failed")
-            END IF
+            CALL dsyev('V', 'L', iblock_size, data_copy, iblock_size, eigenvalues, WORK, LWORK, INFO)
+            IF (INFO /= 0) CPABORT("DSYEV failed")
 
             ! copy eigenvectors into a cp_dbcsr matrix
-            NULLIFY (p_new_block)
-            CALL dbcsr_reserve_block2d(c, iblock_row, iblock_col, p_new_block)
-            CPASSERT(ASSOCIATED(p_new_block))
-            p_new_block(:, :) = data_copy(:, :)
+            CALL dbcsr_put_block(c, iblock_row, iblock_col, block=data_copy)
 
             ! if requested copy eigenvalues into a cp_dbcsr matrix
             IF (do_eigenvalues) THEN
-               NULLIFY (p_new_block)
-               CALL dbcsr_reserve_block2d(e, iblock_row, iblock_col, p_new_block)
-               CPASSERT(ASSOCIATED(p_new_block))
-               p_new_block(:, :) = 0.0_dp
+               ALLOCATE (new_block(iblock_size, iblock_size))
+               new_block(:, :) = 0.0_dp
                DO orbital = 1, iblock_size
-                  p_new_block(orbital, orbital) = eigenvalues(orbital)
+                  new_block(orbital, orbital) = eigenvalues(orbital)
                END DO
+               CALL dbcsr_put_block(e, iblock_row, iblock_col, new_block)
+               DEALLOCATE (new_block)
             END IF
 
             DEALLOCATE (WORK)

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -30,15 +30,20 @@ MODULE machine
 #if defined(__LIBXSMM)
 #include "libxsmm_version.h"
 #if !defined(__LIBXSMM2) && (1 < __LIBXSMM || (1170000 < \
-   (LIBXSMM_CONFIG_VERSION_MAJOR*1000000 + LIBXSMM_CONFIG_VERSION_MINOR*10000 + LIBXSMM_CONFIG_VERSION_UPDATE*100 + LIBXSMM_CONFIG_VERSION_PATCH)))
+   (LIBXSMM_CONFIG_VERSION_MAJOR*1000000\
+   +LIBXSMM_CONFIG_VERSION_MINOR*10000\
+   +LIBXSMM_CONFIG_VERSION_UPDATE*100\
+   +LIBXSMM_CONFIG_VERSION_PATCH)))
 #define __LIBXSMM2
 #endif
+#if defined(__LIBXSMM2)
    USE libxsmm, ONLY: libxsmm_timer_tick, libxsmm_timer_duration, libxsmm_get_target_archid, &
                       LIBXSMM_TARGET_ARCH_GENERIC, LIBXSMM_X86_SSE4, LIBXSMM_X86_AVX, LIBXSMM_X86_AVX2, &
-#if defined(__LIBXSMM2)
                       LIBXSMM_X86_AVX512_SKX, LIBXSMM_AARCH64_V81, LIBXSMM_AARCH64_SVE128
 #else
-   LIBXSMM_X86_AVX512_SKX => LIBXSMM_X86_AVX512_CORE
+   USE libxsmm, ONLY: libxsmm_timer_tick, libxsmm_timer_duration, libxsmm_get_target_archid, &
+                      LIBXSMM_TARGET_ARCH_GENERIC, LIBXSMM_X86_SSE4, LIBXSMM_X86_AVX, LIBXSMM_X86_AVX2, &
+                      LIBXSMM_X86_AVX512_SKX => LIBXSMM_X86_AVX512_CORE
 #endif
 #endif
 
@@ -51,7 +56,8 @@ MODULE machine
    ! default_input_unit should never be used
    ! but we need to know what it is, as we should not try to open it for output
    INTEGER, PUBLIC, PARAMETER                   :: default_output_unit = output_unit, &
-                                                   default_input_unit = input_unit
+                                                   default_input_unit = input_unit, &
+                                                   timestamp_length = 23
 
 #include "machine_cpuid.h"
    ! Enumerates the target architectures or instruction set extensions.
@@ -80,7 +86,7 @@ MODULE machine
 
    PRIVATE
 
-   PUBLIC :: m_walltime, m_datum, m_hostnm, m_flush, &
+   PUBLIC :: m_walltime, m_timestamp, m_hostnm, m_flush, &
              m_getcwd, m_getlog, m_getpid, m_procrun, m_abort, &
              m_chdir, m_mov, m_memory, m_memory_details, m_energy, &
              m_cpuinfo, m_cpuid_static, m_cpuid, m_cpuid_name, &
@@ -131,7 +137,7 @@ CONTAINS
 
       IF (flush_should_flush) FLUSH (lunit)
 
-   END SUBROUTINE
+   END SUBROUTINE m_flush
 
 ! **************************************************************************************************
 !> \brief returns time from a real-time clock, protected against rolling
@@ -192,31 +198,38 @@ CONTAINS
 ! **************************************************************************************************
    PURE FUNCTION m_cpuid()
       INTEGER :: m_cpuid
-#if defined(__LIBXSMM)
-      m_cpuid = libxsmm_get_target_archid()
-      IF (LIBXSMM_X86_SSE4 <= m_cpuid .AND. m_cpuid < LIBXSMM_X86_AVX) THEN
-         m_cpuid = MACHINE_X86_SSE4
-      ELSE IF (LIBXSMM_X86_AVX <= m_cpuid .AND. m_cpuid < LIBXSMM_X86_AVX2) THEN
-         m_cpuid = MACHINE_X86_AVX
-      ELSE IF (LIBXSMM_X86_AVX2 <= m_cpuid .AND. m_cpuid < LIBXSMM_X86_AVX512_SKX) THEN
-         m_cpuid = MACHINE_X86_AVX2
-      ELSE IF (LIBXSMM_X86_AVX512_SKX <= m_cpuid .AND. m_cpuid <= 1999) THEN
-         m_cpuid = MACHINE_X86_AVX512
-#if defined(__LIBXSMM2)
-      ELSE IF (LIBXSMM_AARCH64_V81 <= m_cpuid .AND. m_cpuid < LIBXSMM_AARCH64_SVE128) THEN
-         m_cpuid = MACHINE_ARM_ARCH64
-      ELSE IF (LIBXSMM_AARCH64_SVE128 <= m_cpuid .AND. m_cpuid < 2401) THEN ! LIBXSMM_AARCH64_SVE512
-         m_cpuid = MACHINE_ARM_SVE256
-      ELSE IF (2401 <= m_cpuid .AND. m_cpuid <= 2999) THEN
-         m_cpuid = MACHINE_ARM_SVE512
-#endif
-      ELSE IF (LIBXSMM_TARGET_ARCH_GENERIC <= m_cpuid .AND. m_cpuid <= 2999) THEN
-         m_cpuid = MACHINE_CPU_GENERIC
-      ELSE
-         m_cpuid = MACHINE_CPU_UNKNOWN
-      END IF
-#else
+#if !defined(__LIBXSMM)
       m_cpuid = m_cpuid_static()
+#else
+
+      INTEGER :: archid
+      m_cpuid = MACHINE_CPU_UNKNOWN
+      archid = libxsmm_get_target_archid()
+      IF (LIBXSMM_X86_SSE4 <= archid .AND. archid < LIBXSMM_X86_AVX) THEN
+         m_cpuid = MACHINE_X86_SSE4
+      ELSE IF (LIBXSMM_X86_AVX <= archid .AND. archid < LIBXSMM_X86_AVX2) THEN
+         m_cpuid = MACHINE_X86_AVX
+      ELSE IF (LIBXSMM_X86_AVX2 <= archid .AND. archid < LIBXSMM_X86_AVX512_SKX) THEN
+         m_cpuid = MACHINE_X86_AVX2
+      ELSE IF (LIBXSMM_X86_AVX512_SKX <= archid .AND. archid <= 1999) THEN
+         m_cpuid = MACHINE_X86_AVX512
+      END IF
+
+#if defined(__LIBXSMM2)
+      IF (m_cpuid == MACHINE_CPU_UNKNOWN) THEN
+         IF (LIBXSMM_AARCH64_V81 <= archid .AND. archid < LIBXSMM_AARCH64_SVE128) THEN
+            m_cpuid = MACHINE_ARM_ARCH64
+         ELSE IF (LIBXSMM_AARCH64_SVE128 <= archid .AND. archid < 2401) THEN ! LIBXSMM_AARCH64_SVE512
+            m_cpuid = MACHINE_ARM_SVE256
+         ELSE IF (2401 <= archid .AND. archid <= 2999) THEN
+            m_cpuid = MACHINE_ARM_SVE512
+         END IF
+      END IF
+#endif
+
+      IF (m_cpuid == MACHINE_CPU_UNKNOWN .AND. LIBXSMM_TARGET_ARCH_GENERIC <= archid .AND. archid <= 2999) THEN
+         m_cpuid = MACHINE_CPU_GENERIC
+      END IF
 #endif
    END FUNCTION m_cpuid
 
@@ -229,10 +242,10 @@ CONTAINS
 !>      09.2024 update+arm [Hans Pabst]
 ! **************************************************************************************************
    PURE FUNCTION m_cpuid_name(cpuid)
-      INTEGER, OPTIONAL, INTENT(IN)         :: cpuid
-      CHARACTER(len=default_string_length)  :: m_cpuid_name
+      INTEGER, INTENT(IN), OPTIONAL                      :: cpuid
+      CHARACTER(len=default_string_length)               :: m_cpuid_name
 
-      INTEGER                               :: isa
+      INTEGER                                            :: isa
 
       IF (PRESENT(cpuid)) THEN
          isa = cpuid
@@ -273,9 +286,10 @@ CONTAINS
 !>      12.2024 created [Hans Pabst]
 ! **************************************************************************************************
    PURE FUNCTION m_cpuid_vlen(cpuid, typesize)
-      INTEGER, OPTIONAL, INTENT(IN) :: cpuid, typesize
+      INTEGER, INTENT(IN), OPTIONAL                      :: cpuid, typesize
+      INTEGER                                            :: m_cpuid_vlen
 
-      INTEGER                       :: isa, m_cpuid_vlen, nbytes
+      INTEGER                                            :: isa, nbytes
 
       IF (PRESENT(typesize)) THEN
          nbytes = typesize
@@ -359,7 +373,7 @@ CONTAINS
 999   CLOSE (121245)
       DATA(I:80) = ""
       READ (DATA, *, IOSTAT=iostat) raw
-      IF (iostat .NE. 0) THEN
+      IF (iostat /= 0) THEN
          wt = 0.0_dp
       ELSE
          ! convert from J to kJ
@@ -369,21 +383,23 @@ CONTAINS
 #endif
 
 ! **************************************************************************************************
-!> \brief returns a datum in human readable format using a standard Fortran routine
-!> \param cal_date ...
+!> \brief Returns a human readable timestamp
+!> \param timestamp Timestamp string
 !> \par History
 !>      10.2009 created [Joost VandeVondele]
+!>      08.2025 modified [Matthias Krack]
 ! **************************************************************************************************
-   SUBROUTINE m_datum(cal_date)
-      CHARACTER(len=*), INTENT(OUT)                      :: cal_date
+   SUBROUTINE m_timestamp(timestamp)
+      CHARACTER(len=timestamp_length), INTENT(OUT)       :: timestamp
 
       CHARACTER(len=10)                                  :: time
       CHARACTER(len=8)                                   :: date
 
       CALL DATE_AND_TIME(date=date, time=time)
-      cal_date = date(1:4)//"-"//date(5:6)//"-"//date(7:8)//" "//time(1:2)//":"//time(3:4)//":"//time(5:10)
+      timestamp = date(1:4)//"-"//date(5:6)//"-"//date(7:8)//" "// &
+                  time(1:2)//":"//time(3:4)//":"//time(5:10)
 
-   END SUBROUTINE m_datum
+   END SUBROUTINE m_timestamp
 
 ! **************************************************************************************************
 !> \brief Can be used to get a nice core
@@ -391,7 +407,7 @@ CONTAINS
    SUBROUTINE m_abort()
       INTERFACE
          SUBROUTINE abort() BIND(C, name="abort")
-         END SUBROUTINE
+         END SUBROUTINE abort
       END INTERFACE
 
       CALL abort()
@@ -404,19 +420,16 @@ CONTAINS
 !> \return ...
 ! **************************************************************************************************
    FUNCTION m_procrun(pid) RESULT(run_on)
-      INTEGER, INTENT(IN)       ::   pid
-      INTEGER                   ::   run_on
-#if defined(__MINGW)
-      run_on = 0
-#else
-      INTEGER                   ::   istat
+      INTEGER, INTENT(IN)                                :: pid
+      INTEGER                                            :: run_on
 
+      INTEGER                                            :: istat
       INTERFACE
-         FUNCTION kill(pid, sig) BIND(C, name="kill") RESULT(errno)
+         FUNCTION kill(pid, sig) RESULT(errno) BIND(C, name="kill")
             IMPORT
             INTEGER(KIND=C_INT), VALUE                :: pid, sig
             INTEGER(KIND=C_INT)                      :: errno
-         END FUNCTION
+         END FUNCTION kill
       END INTERFACE
 
       ! If sig is 0, then no signal is sent, but error checking is still
@@ -429,7 +442,6 @@ CONTAINS
       ELSE
          run_on = 0 ! error, process probably does not exist
       END IF
-#endif
    END FUNCTION m_procrun
 
 ! **************************************************************************************************
@@ -456,7 +468,7 @@ CONTAINS
          FUNCTION getpagesize() BIND(C, name="getpagesize") RESULT(RES)
             IMPORT
             INTEGER(C_INT) :: RES
-         END FUNCTION
+         END FUNCTION getpagesize
       END INTERFACE
 
       ! reading from statm
@@ -473,7 +485,7 @@ CONTAINS
       ! m2 = resident
       ! m3 = shared
       READ (DATA, *, IOSTAT=iostat) m1, m2, m3
-      IF (iostat .NE. 0) THEN
+      IF (iostat /= 0) THEN
          mem_local = 0
       ELSE
          mem_local = m2
@@ -553,23 +565,23 @@ CONTAINS
 !> \return ...
 ! **************************************************************************************************
       INTEGER(int_8) FUNCTION get_field_value_in_bytes(field)
-         CHARACTER(LEN=*)                                   :: field
+      CHARACTER(LEN=*)                                   :: field
 
-         INTEGER                                            :: start
-         INTEGER(KIND=int_8)                                :: value
+      INTEGER                                            :: start
+      INTEGER(KIND=int_8)                                :: value
 
          get_field_value_in_bytes = 0
          start = INDEX(meminfo, field)
-         IF (start .NE. 0) THEN
+         IF (start /= 0) THEN
             start = start + LEN_TRIM(field)
-            IF (start .LT. Nbuffer) THEN
+            IF (start < Nbuffer) THEN
                READ (meminfo(start:), *, ERR=999, END=999) value
                ! XXXXXXX convert from Kb to bytes XXXXXXXX
                get_field_value_in_bytes = value*1024
 999            CONTINUE
             END IF
          END IF
-      END FUNCTION
+      END FUNCTION get_field_value_in_bytes
    END SUBROUTINE m_memory_details
 
 ! **************************************************************************************************
@@ -578,11 +590,6 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE m_hostnm(hname)
       CHARACTER(len=*), INTENT(OUT)            :: hname
-#if defined(__MINGW)
-      ! While there is a gethostname in the Windows (POSIX) API, it requires that winsocks is
-      ! initialised prior to using it via WSAStartup(..), respectively cleaned up at the end via WSACleanup().
-      hname = "<unknown>"
-#else
       INTEGER                                  :: istat, i
       CHARACTER(len=default_path_length)       :: buf
 
@@ -592,7 +599,7 @@ CONTAINS
             CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: buf
             INTEGER(KIND=C_INT), VALUE               :: buflen
             INTEGER(KIND=C_INT)                      :: errno
-         END FUNCTION
+         END FUNCTION gethostname
       END INTERFACE
 
       istat = gethostname(buf, LEN(buf))
@@ -602,7 +609,6 @@ CONTAINS
       END IF
       i = INDEX(buf, c_null_char) - 1
       hname = buf(1:i)
-#endif
    END SUBROUTINE m_hostnm
 
 ! **************************************************************************************************
@@ -621,7 +627,7 @@ CONTAINS
             CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: buf
             INTEGER(KIND=C_INT), VALUE               :: buflen
             TYPE(C_PTR)                              :: stat
-         END FUNCTION
+         END FUNCTION getcwd
       END INTERFACE
 
       stat = getcwd(tmp, LEN(tmp))
@@ -647,7 +653,7 @@ CONTAINS
             IMPORT
             CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: path
             INTEGER(KIND=C_INT)                      :: errno
-         END FUNCTION
+         END FUNCTION chdir
       END INTERFACE
 
       ierror = chdir(TRIM(dir)//c_null_char)
@@ -664,7 +670,7 @@ CONTAINS
          FUNCTION getpid() BIND(C, name="getpid") RESULT(pid)
             IMPORT
             INTEGER(KIND=C_INT)              :: pid
-         END FUNCTION
+         END FUNCTION getpid
       END INTERFACE
 
       pid = getpid()
@@ -686,7 +692,7 @@ CONTAINS
             IMPORT
             CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: path
             INTEGER(KIND=C_INT)                      :: errno
-         END FUNCTION
+         END FUNCTION unlink
       END INTERFACE
 
       istat = unlink(TRIM(path)//c_null_char)
@@ -708,7 +714,7 @@ CONTAINS
             IMPORT
             CHARACTER(KIND=C_CHAR), DIMENSION(*)     :: src, dest
             INTEGER(KIND=C_INT)                      :: errno
-         END FUNCTION
+         END FUNCTION rename
       END INTERFACE
 
       IF (TARGET == source) THEN
@@ -716,13 +722,13 @@ CONTAINS
          RETURN
       END IF
 
-      ! first remove target (needed on windows / mingw)
+      ! first remove target (needed on windows)
       istat = m_unlink(TARGET)
       ! ignore istat of unlink
 
       ! now move
       istat = rename(TRIM(source)//c_null_char, TRIM(TARGET)//c_null_char)
-      IF (istat .NE. 0) THEN
+      IF (istat /= 0) THEN
          WRITE (*, *) "Trying to move "//TRIM(source)//" to "//TRIM(TARGET)//"."
          WRITE (*, *) "rename returned status: ", istat
          WRITE (*, *) "Problem moving file"

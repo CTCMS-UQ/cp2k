@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -39,14 +39,19 @@ MODULE cell_types
                                                cell_sym_hexagonal_gamma_120 = 10, &
                                                cell_sym_cubic = 11
 
-   INTEGER, PARAMETER, PUBLIC               :: use_perd_x = 0, &
-                                               use_perd_y = 1, &
-                                               use_perd_z = 2, &
-                                               use_perd_xy = 3, &
-                                               use_perd_xz = 4, &
-                                               use_perd_yz = 5, &
-                                               use_perd_xyz = 6, &
-                                               use_perd_none = 7
+   INTEGER, PARAMETER, PUBLIC               :: use_perd_none = 0, &
+                                               use_perd_x = 1, &
+                                               use_perd_y = 2, &
+                                               use_perd_z = 3, &
+                                               use_perd_xy = 4, &
+                                               use_perd_xz = 5, &
+                                               use_perd_yz = 6, &
+                                               use_perd_xyz = 7
+
+   CHARACTER(LEN=3), DIMENSION(7), &
+      PARAMETER, PUBLIC                     :: periodicity_string = ["  X", "  Y", "  Z", &
+                                                                     " XY", " XZ", " YZ", &
+                                                                     "XYZ"]
 
 ! **************************************************************************************************
 !> \brief   Type defining parameters related to the simulation cell
@@ -416,7 +421,7 @@ CONTAINS
       DO icell = -periodic(1), periodic(1)
          DO jcell = -periodic(2), periodic(2)
             DO kcell = -periodic(3), periodic(3)
-               r = REAL((/icell, jcell, kcell/), dp)
+               r = REAL([icell, jcell, kcell], dp)
                CALL scaled_to_real(s2r, r, cell)
                rb_image(:) = rb_pbc(:) + s2r
                rab(:) = rb_image(:) - ra_pbc(:)

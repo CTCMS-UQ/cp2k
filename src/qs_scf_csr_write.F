@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -13,12 +13,12 @@
 ! **************************************************************************************************
 MODULE qs_scf_csr_write
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add, dbcsr_convert_dbcsr_to_csr, dbcsr_copy, dbcsr_create, &
-        dbcsr_csr_create_from_dbcsr, dbcsr_csr_dbcsr_blkrow_dist, dbcsr_csr_destroy, &
-        dbcsr_csr_type, dbcsr_csr_write, dbcsr_desymmetrize, dbcsr_finalize, dbcsr_get_block_p, &
-        dbcsr_has_symmetry, dbcsr_p_type, dbcsr_put_block, dbcsr_release, dbcsr_set, dbcsr_type, &
-        dbcsr_type_antisymmetric, dbcsr_type_complex_8, dbcsr_type_no_symmetry, dbcsr_type_real_8, &
-        dbcsr_type_symmetric
+        dbcsr_convert_dbcsr_to_csr, dbcsr_copy, dbcsr_create, &
+        dbcsr_csr_create_and_convert_complex, dbcsr_csr_create_from_dbcsr, &
+        dbcsr_csr_dbcsr_blkrow_dist, dbcsr_csr_destroy, dbcsr_csr_type, dbcsr_csr_write, &
+        dbcsr_desymmetrize, dbcsr_finalize, dbcsr_get_block_p, dbcsr_has_symmetry, dbcsr_p_type, &
+        dbcsr_put_block, dbcsr_release, dbcsr_set, dbcsr_type, dbcsr_type_antisymmetric, &
+        dbcsr_type_no_symmetry, dbcsr_type_symmetric
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_alloc_block_from_nbl
    USE cp_dbcsr_operations,             ONLY: dbcsr_allocate_matrix_set,&
                                               dbcsr_deallocate_matrix_set
@@ -46,6 +46,8 @@ MODULE qs_scf_csr_write
                                               neighbor_list_iterator_p_type,&
                                               neighbor_list_iterator_release,&
                                               neighbor_list_set_p_type
+   USE qs_rho_types,                    ONLY: qs_rho_get,&
+                                              qs_rho_type
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -54,7 +56,9 @@ MODULE qs_scf_csr_write
    ! Global parameters
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_scf_csr_write'
    PUBLIC :: write_ks_matrix_csr, &
-             write_s_matrix_csr
+             write_s_matrix_csr, &
+             write_p_matrix_csr, &
+             write_hcore_matrix_csr
 
 ! **************************************************************************************************
 
@@ -159,6 +163,106 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE write_s_matrix_csr
+
+!**************************************************************************************************
+!> \brief writing the density matrix in csr format into a file
+!> \param qs_env qs environment
+!> \param input the input
+!> \par History
+!> \author Mohammad Hossein Bani-Hashemian
+! **************************************************************************************************
+   SUBROUTINE write_p_matrix_csr(qs_env, input)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(section_vals_type), POINTER                   :: input
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'write_p_matrix_csr'
+
+      INTEGER                                            :: handle, output_unit
+      LOGICAL                                            :: do_kpoints, do_p_csr_write, real_space
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: rho_ao_kp
+      TYPE(kpoint_type), POINTER                         :: kpoints
+      TYPE(qs_rho_type), POINTER                         :: rho
+      TYPE(section_vals_type), POINTER                   :: dft_section
+
+      CALL timeset(routineN, handle)
+
+      NULLIFY (dft_section)
+
+      logger => cp_get_default_logger()
+      output_unit = cp_logger_get_default_io_unit(logger)
+
+      dft_section => section_vals_get_subs_vals(input, "DFT")
+      do_p_csr_write = BTEST(cp_print_key_should_output(logger%iter_info, dft_section, &
+                                                        "PRINT%P_CSR_WRITE"), cp_p_file)
+
+      IF (do_p_csr_write) THEN
+         CALL get_qs_env(qs_env=qs_env, kpoints=kpoints, rho=rho, do_kpoints=do_kpoints)
+         CALL qs_rho_get(rho, rho_ao_kp=rho_ao_kp)
+         CALL section_vals_val_get(dft_section, "PRINT%P_CSR_WRITE%REAL_SPACE", &
+                                   l_val=real_space)
+
+         IF (do_kpoints .AND. .NOT. real_space) THEN
+            CALL write_matrix_kp_csr(mat=rho_ao_kp, dft_section=dft_section, &
+                                     kpoints=kpoints, prefix="P")
+         ELSE
+            CALL write_matrix_csr(dft_section, mat=rho_ao_kp, kpoints=kpoints, do_kpoints=do_kpoints, &
+                                  prefix="P")
+         END IF
+      END IF
+
+      CALL timestop(handle)
+
+   END SUBROUTINE write_p_matrix_csr
+
+!**************************************************************************************************
+!> \brief writing the core Hamiltonian matrix in csr format into a file
+!> \param qs_env qs environment
+!> \param input the input
+!> \par History
+!> \author Mohammad Hossein Bani-Hashemian
+! **************************************************************************************************
+   SUBROUTINE write_hcore_matrix_csr(qs_env, input)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(section_vals_type), POINTER                   :: input
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'write_hcore_matrix_csr'
+
+      INTEGER                                            :: handle, output_unit
+      LOGICAL                                            :: do_h_csr_write, do_kpoints, real_space
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_h
+      TYPE(kpoint_type), POINTER                         :: kpoints
+      TYPE(section_vals_type), POINTER                   :: dft_section
+
+      CALL timeset(routineN, handle)
+
+      NULLIFY (dft_section)
+
+      logger => cp_get_default_logger()
+      output_unit = cp_logger_get_default_io_unit(logger)
+
+      dft_section => section_vals_get_subs_vals(input, "DFT")
+      do_h_csr_write = BTEST(cp_print_key_should_output(logger%iter_info, dft_section, &
+                                                        "PRINT%HCORE_CSR_WRITE"), cp_p_file)
+
+      IF (do_h_csr_write) THEN
+         CALL get_qs_env(qs_env=qs_env, kpoints=kpoints, matrix_h_kp=matrix_h, do_kpoints=do_kpoints)
+         CALL section_vals_val_get(dft_section, "PRINT%HCORE_CSR_WRITE%REAL_SPACE", &
+                                   l_val=real_space)
+
+         IF (do_kpoints .AND. .NOT. real_space) THEN
+            CALL write_matrix_kp_csr(mat=matrix_h, dft_section=dft_section, &
+                                     kpoints=kpoints, prefix="HCORE")
+         ELSE
+            CALL write_matrix_csr(dft_section, mat=matrix_h, kpoints=kpoints, do_kpoints=do_kpoints, &
+                                  prefix="HCORE")
+         END IF
+      END IF
+
+      CALL timestop(handle)
+
+   END SUBROUTINE write_hcore_matrix_csr
 
 ! **************************************************************************************************
 !> \brief helper function to print the real space representation of KS or S matrix to file
@@ -320,8 +424,6 @@ CONTAINS
       CHARACTER(*), INTENT(in)                           :: prefix
 
       CHARACTER(len=*), PARAMETER :: routineN = 'write_matrix_kp_csr'
-      COMPLEX(KIND=dp), PARAMETER :: cone = CMPLX(1.0_dp, 0.0_dp, KIND=dp), &
-         ione = CMPLX(0.0_dp, 1.0_dp, KIND=dp)
 
       CHARACTER(LEN=default_path_length)                 :: file_name, fileformat, subs_string
       INTEGER                                            :: handle, igroup, ik, ikp, ispin, kplocal, &
@@ -334,8 +436,8 @@ CONTAINS
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_csr_type)                               :: mat_csr
       TYPE(dbcsr_type)                                   :: matrix_nosym
-      TYPE(dbcsr_type), POINTER                          :: cmatrix, imatrix, imatrix_nosym, &
-                                                            rmatrix, rmatrix_nosym, tmatrix
+      TYPE(dbcsr_type), POINTER                          :: imatrix, imatrix_nosym, rmatrix, &
+                                                            rmatrix_nosym
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
          POINTER                                         :: sab_nl
 
@@ -369,24 +471,16 @@ CONTAINS
 
       IF (.NOT. use_real_wfn) THEN
          ! Allocate temporary variables
-         ALLOCATE (rmatrix_nosym, imatrix, imatrix_nosym, cmatrix, tmatrix)
+         ALLOCATE (rmatrix_nosym, imatrix, imatrix_nosym)
          CALL dbcsr_create(rmatrix_nosym, template=mat(1, 1)%matrix, &
                            matrix_type=dbcsr_type_no_symmetry)
          CALL dbcsr_create(imatrix, template=mat(1, 1)%matrix, &
                            matrix_type=dbcsr_type_antisymmetric)
          CALL dbcsr_create(imatrix_nosym, template=mat(1, 1)%matrix, &
                            matrix_type=dbcsr_type_no_symmetry)
-         CALL dbcsr_create(cmatrix, template=mat(1, 1)%matrix, &
-                           matrix_type=dbcsr_type_no_symmetry, &
-                           data_type=dbcsr_type_complex_8)
-         CALL dbcsr_create(tmatrix, template=mat(1, 1)%matrix, &
-                           matrix_type=dbcsr_type_no_symmetry, &
-                           data_type=dbcsr_type_complex_8)
          CALL cp_dbcsr_alloc_block_from_nbl(rmatrix_nosym, sab_nl)
          CALL cp_dbcsr_alloc_block_from_nbl(imatrix, sab_nl)
          CALL cp_dbcsr_alloc_block_from_nbl(imatrix_nosym, sab_nl)
-         CALL cp_dbcsr_alloc_block_from_nbl(cmatrix, sab_nl)
-         CALL cp_dbcsr_alloc_block_from_nbl(tmatrix, sab_nl)
       END IF
 
       kplocal = kp_range(2) - kp_range(1) + 1
@@ -415,12 +509,11 @@ CONTAINS
                   ! cmatrix
                   CALL dbcsr_desymmetrize(rmatrix, rmatrix_nosym)
                   CALL dbcsr_desymmetrize(imatrix, imatrix_nosym)
-                  CALL dbcsr_copy(cmatrix, rmatrix_nosym)
-                  CALL dbcsr_copy(tmatrix, imatrix_nosym)
-                  CALL dbcsr_add(cmatrix, tmatrix, cone, ione)
                   ! Convert to csr
-                  CALL dbcsr_csr_create_from_dbcsr(cmatrix, mat_csr, dbcsr_csr_dbcsr_blkrow_dist)
-                  CALL dbcsr_convert_dbcsr_to_csr(cmatrix, mat_csr)
+                  CALL dbcsr_csr_create_and_convert_complex(rmatrix=rmatrix_nosym, &
+                                                            imatrix=imatrix_nosym, &
+                                                            csr_mat=mat_csr, &
+                                                            dist_format=dbcsr_csr_dbcsr_blkrow_dist)
                END IF
                ! Write to file
                WRITE (file_name, '(2(A,I0))') prefix//"_SPIN_", ispin, "_K_", ik
@@ -441,9 +534,7 @@ CONTAINS
          CALL dbcsr_release(rmatrix_nosym)
          CALL dbcsr_release(imatrix)
          CALL dbcsr_release(imatrix_nosym)
-         CALL dbcsr_release(cmatrix)
-         CALL dbcsr_release(tmatrix)
-         DEALLOCATE (rmatrix_nosym, imatrix, imatrix_nosym, cmatrix, tmatrix)
+         DEALLOCATE (rmatrix_nosym, imatrix, imatrix_nosym)
       END IF
       CALL timestop(handle)
 
@@ -531,8 +622,7 @@ CONTAINS
             ALLOCATE (mat_nosym(ispin, ic)%matrix)
             CALL dbcsr_create(matrix=mat_nosym(ispin, ic)%matrix, &
                               template=mat(1, 1)%matrix, &
-                              matrix_type=dbcsr_type_no_symmetry, &
-                              data_type=dbcsr_type_real_8)
+                              matrix_type=dbcsr_type_no_symmetry)
             CALL cp_dbcsr_alloc_block_from_nbl(mat_nosym(ispin, ic)%matrix, &
                                                sab_nl, desymmetrize=.TRUE.)
             CALL dbcsr_set(mat_nosym(ispin, ic)%matrix, 0.0_dp)

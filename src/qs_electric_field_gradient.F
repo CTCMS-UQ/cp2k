@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -319,7 +319,7 @@ CONTAINS
 
          DO iat = 1, natomkind
             iatom = atom_list(iat)
-            CALL diagonalise(efg_tensor(:, :, iatom), 3, "UPPER", &
+            CALL diagonalise(efg_tensor(:, :, iatom), 3, "U", &
                              eigenvalues, eigenvectors)
             CALL efgsort(eigenvalues, efg_diagval(:, iatom))
          END DO
@@ -458,7 +458,7 @@ CONTAINS
          DO iset2 = 1, nset
             CALL get_none0_cg_list(my_CG, lmin(iset1), lmax(iset1), lmin(iset2), lmax(iset2), &
                                    max_s_harm, llmax, cg_list, cg_n_list, max_iso_not0_local)
-            CPASSERT(max_iso_not0_local .LE. max_iso_not0)
+            CPASSERT(max_iso_not0_local <= max_iso_not0)
 
             n1s = nsoset(lmax(iset1))
             DO ipgf1 = 1, npgf(iset1)

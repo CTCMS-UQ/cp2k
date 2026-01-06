@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -32,6 +32,7 @@ MODULE qs_mo_types
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_get_info,&
                                               cp_fm_release,&
+                                              cp_fm_set_all,&
                                               cp_fm_to_fm,&
                                               cp_fm_type
    USE kinds,                           ONLY: dp
@@ -238,7 +239,7 @@ CONTAINS
 !> \param fm_struct ...
 !> \param name ...
 !> \par History
-!>      11.2002 rewamped [fawzi]
+!>      11.2002 revamped [fawzi]
 !> \author Fawzi Mohamed
 ! **************************************************************************************************
    SUBROUTINE init_mo_set(mo_set, fm_pool, fm_ref, fm_struct, name)
@@ -268,6 +269,7 @@ CONTAINS
          CPASSERT(ASSOCIATED(fm_struct))
          CALL cp_fm_create(mo_set%mo_coeff, fm_struct, name=name)
       END IF
+      CALL cp_fm_set_all(mo_set%mo_coeff, 0.0_dp)
       CALL cp_fm_get_info(mo_set%mo_coeff, nrow_global=nao, ncol_global=nmo)
 
       CPASSERT(nao >= mo_set%nao)

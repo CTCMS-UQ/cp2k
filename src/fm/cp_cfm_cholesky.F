@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -13,9 +13,10 @@
 MODULE cp_cfm_cholesky
    USE cp_cfm_types, ONLY: cp_cfm_type
    USE kinds, ONLY: dp
-
 #if defined(__DLAF)
-   USE cp_cfm_dlaf_api, ONLY: cp_cfm_pzpotrf_dlaf
+   USE cp_cfm_dlaf_api, ONLY: cp_cfm_pzpotrf_dlaf, cp_cfm_pzpotri_dlaf
+   USE cp_dlaf_utils_api, ONLY: cp_dlaf_initialize, cp_dlaf_create_grid
+   USE cp_fm_cholesky, ONLY: cholesky_type, dlaf_cholesky_n_min, FM_CHOLESKY_TYPE_DLAF
 #endif
 
 #include "../base/base_uses.f90"
@@ -45,10 +46,11 @@ CONTAINS
 !>      12.2002 updated, added n optional parm [fawzi]
 !>      09.2021 removed CPASSERT(info == 0) since there is already check of info [Jan Wilhelm]
 !>      12.2024 Added DLA-Future support [Rocco Meli]
+!>      03.2025 Moved DLA-Future support to cp_cfm_cholesky_decompose_dlaf [Rocco Meli]
 !> \author Joost
 ! **************************************************************************************************
    SUBROUTINE cp_cfm_cholesky_decompose(matrix, n, info_out)
-      TYPE(cp_cfm_type), INTENT(IN)                   :: matrix
+      TYPE(cp_cfm_type), INTENT(IN)                      :: matrix
       INTEGER, INTENT(in), OPTIONAL                      :: n
       INTEGER, INTENT(out), OPTIONAL                     :: info_out
 
@@ -75,12 +77,22 @@ CONTAINS
 
 #if defined(__parallel)
       desca(:) = matrix%matrix_struct%descriptor(:)
-
 #if defined(__DLAF)
-      CALL cp_cfm_pzpotrf_dlaf('U', my_n, a, 1, 1, desca, info)
-#else
-      CALL pzpotrf('U', my_n, a(1, 1), 1, 1, desca, info)
+      IF (cholesky_type == FM_CHOLESKY_TYPE_DLAF .AND. matrix%matrix_struct%nrow_global >= dlaf_cholesky_n_min) THEN
+         ! Initialize DLA-Future on-demand; if already initialized, does nothing
+         CALL cp_dlaf_initialize()
+
+         ! Create DLAF grid from BLACS context; if already present, does nothing
+         CALL cp_dlaf_create_grid(matrix%matrix_struct%context%get_handle())
+
+         CALL cp_cfm_pzpotrf_dlaf('U', my_n, a(:, :), 1, 1, desca, info)
+      ELSE
 #endif
+         CALL pzpotrf('U', my_n, a(1, 1), 1, 1, desca, info)
+#if defined(__DLAF)
+      END IF
+#endif
+
 #else
       lda = SIZE(a, 1)
       CALL zpotrf('U', my_n, a(1, 1), lda, info)
@@ -91,7 +103,7 @@ CONTAINS
       ELSE
          IF (info /= 0) &
             CALL cp_abort(__LOCATION__, &
-                          "Cholesky decompose failed: matrix is not positive definite  or ill-conditioned")
+                          "Cholesky decompose failed: matrix is not positive definite or ill-conditioned")
       END IF
 
       CALL timestop(handle)
@@ -109,12 +121,12 @@ CONTAINS
 !> \author Lianheng Tong
 ! **************************************************************************************************
    SUBROUTINE cp_cfm_cholesky_invert(matrix, n, info_out)
-      TYPE(cp_cfm_type), INTENT(IN)           :: matrix
+      TYPE(cp_cfm_type), INTENT(IN)              :: matrix
       INTEGER, INTENT(in), OPTIONAL              :: n
       INTEGER, INTENT(out), OPTIONAL             :: info_out
 
       CHARACTER(len=*), PARAMETER :: routineN = 'cp_cfm_cholesky_invert'
-      COMPLEX(kind=dp), DIMENSION(:, :), POINTER  :: aa
+      COMPLEX(kind=dp), DIMENSION(:, :), POINTER :: aa
       INTEGER                                    :: info, handle
       INTEGER                                    :: my_n
 #if defined(__parallel)
@@ -134,7 +146,21 @@ CONTAINS
 
 #if defined(__parallel)
       desca = matrix%matrix_struct%descriptor
-      CALL pzpotri('U', my_n, aa(1, 1), 1, 1, desca, info)
+#if defined(__DLAF)
+      IF (cholesky_type == FM_CHOLESKY_TYPE_DLAF .AND. matrix%matrix_struct%nrow_global >= dlaf_cholesky_n_min) THEN
+         ! Initialize DLA-Future on-demand; if already initialized, does nothing
+         CALL cp_dlaf_initialize()
+
+         ! Create DLAF grid from BLACS context; if already present, does nothing
+         CALL cp_dlaf_create_grid(matrix%matrix_struct%context%get_handle())
+
+         CALL cp_cfm_pzpotri_dlaf('U', my_n, aa(:, :), 1, 1, desca, info)
+      ELSE
+#endif
+         CALL pzpotri('U', my_n, aa(1, 1), 1, 1, desca, info)
+#if defined(__DLAF)
+      END IF
+#endif
 #else
       CALL zpotri('U', my_n, aa(1, 1), SIZE(aa, 1), info)
 #endif

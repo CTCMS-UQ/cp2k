@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -99,7 +99,7 @@ MODULE mp2_types
 
    TYPE mp2_direct_type
       LOGICAL                                            :: big_send = .FALSE.
-   END TYPE
+   END TYPE mp2_direct_type
 
    TYPE mp2_gpw_type
       REAL(KIND=dp)                                      :: eps_grid = 0.0_dp, &
@@ -109,7 +109,7 @@ MODULE mp2_types
       REAL(KIND=dp)                                      :: cutoff = 0.0_dp, &
                                                             relative_cutoff = 0.0_dp
       INTEGER                                            :: size_lattice_sum = 0
-   END TYPE
+   END TYPE mp2_gpw_type
 
    TYPE ri_mp2_type
       INTEGER                                            :: block_size = 0, &
@@ -397,11 +397,13 @@ MODULE mp2_types
       TYPE(cp_eri_mme_param), POINTER                    :: eri_mme_param => NULL()
       INTEGER, DIMENSION(:), POINTER                     :: eri_blksize => NULL()
       LOGICAL                                            :: do_svd = .FALSE.
+      REAL(KIND=dp)                                      :: eps_svd = -1.0_dp
       REAL(KIND=dp)                                      :: eps_range = 0.0_dp
       TYPE(libint_potential_type)                        :: ri_metric = libint_potential_type()
       TYPE(local_gemm_ctxt_type)                         :: local_gemm_ctx = local_gemm_ctxt_type()
       REAL(dp)                                           :: e_gap = 0.0_dp, &
                                                             e_range = 0.0_dp
+      LOGICAL                                            :: ri_aux_auto_generated = .FALSE.
    END TYPE mp2_type
 
    TYPE integ_mat_buffer_type
@@ -446,7 +448,7 @@ CONTAINS
       IF (ASSOCIATED(mp2_env%ri_rpa%xc_section_aux)) CALL section_vals_release(mp2_env%ri_rpa%xc_section_aux)
       IF (ASSOCIATED(mp2_env%ri_rpa%xc_section_primary)) CALL section_vals_release(mp2_env%ri_rpa%xc_section_primary)
 
-      IF (mp2_env%eri_method .EQ. do_eri_mme) CALL cp_eri_mme_finalize(mp2_env%eri_mme_param)
+      IF (mp2_env%eri_method == do_eri_mme) CALL cp_eri_mme_finalize(mp2_env%eri_mme_param)
       IF (ASSOCIATED(mp2_env%eri_mme_param)) DEALLOCATE (mp2_env%eri_mme_param)
       IF (ASSOCIATED(mp2_env%ri_rpa_im_time%tau_tj)) DEALLOCATE (mp2_env%ri_rpa_im_time%tau_tj)
       IF (ASSOCIATED(mp2_env%ri_rpa_im_time%tau_wj)) DEALLOCATE (mp2_env%ri_rpa_im_time%tau_wj)

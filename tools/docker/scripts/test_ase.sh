@@ -2,16 +2,10 @@
 
 # author: Ole Schuett
 
-# Compile CP2K.
-./build_cp2k_cmake.sh "ubuntu" "ssmp" || exit 0
-
-# Fake installation of data files.
-mkdir -p ./share/cp2k
-ln -s ../../data ./share/cp2k/data
-
 cat > /usr/bin/cp2k_shell << EndOfMessage
 #!/bin/bash -e
 export OMP_NUM_THREADS=1
+source /opt/cp2k-toolchain/install/setup
 /opt/cp2k/build/bin/cp2k.ssmp --shell "\$@"
 EndOfMessage
 chmod +x /usr/bin/cp2k_shell
@@ -21,6 +15,7 @@ chmod +x /usr/bin/cp2k_shell
 cat > /usr/bin/cp2k << EndOfMessage
 #!/bin/bash -e
 export OMP_NUM_THREADS=1
+source /opt/cp2k-toolchain/install/setup
 /opt/cp2k/build/bin/cp2k.ssmp "\$@"
 EndOfMessage
 chmod +x /usr/bin/cp2k

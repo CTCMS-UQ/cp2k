@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -369,7 +369,7 @@ CONTAINS
       nmax2 = NINT(0.25_dp + hmat(2, 2)*alpha*tol1/pi)
       nmax3 = NINT(0.25_dp + hmat(3, 3)*alpha*tol1/pi)
       fac = 1.e0_dp/deth
-      fvec = 2.0_dp*pi/(/hmat(1, 1), hmat(2, 2), hmat(3, 3)/)
+      fvec = 2.0_dp*pi/[hmat(1, 1), hmat(2, 2), hmat(3, 3)]
       ndim = (nmax1 + 1)*(2*nmax2 + 1)*(2*nmax3 + 1) - 1
       ALLOCATE (LG(ndim))
       ALLOCATE (gx(ndim))

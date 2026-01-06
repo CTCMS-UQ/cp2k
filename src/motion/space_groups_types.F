@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -26,6 +26,7 @@ MODULE space_groups_types
 
    TYPE spgr_type
       LOGICAL                                     :: keep_space_group = .FALSE.
+      LOGICAL                                     :: show_space_group = .FALSE.
       LOGICAL                                     :: symlib = .FALSE.
       LOGICAL                                     :: print_atoms = .FALSE.
       INTEGER                                     :: iunit = -1

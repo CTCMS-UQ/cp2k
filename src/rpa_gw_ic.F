@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -269,9 +269,9 @@ CONTAINS
 
          Delta_Sigma_Neaton_prv(n_start:n_end) = &
             Delta_Sigma_Neaton_prv(n_start:n_end) + &
-            (/(DOT_PRODUCT(block_1(:, n, n), &
-                           block_2(:, n, n)), &
-               n=n_start_block, n_end_block)/)
+            [(DOT_PRODUCT(block_1(:, n, n), &
+                          block_2(:, n, n)), &
+              n=n_start_block, n_end_block)]
          DEALLOCATE (block_1, block_2)
       END DO
       CALL dbt_iterator_stop(iter)
@@ -282,7 +282,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE trace_ic_gw
 
 ! **************************************************************************************************
 !> \brief ...

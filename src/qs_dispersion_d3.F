@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -392,7 +392,7 @@ CONTAINS
                ELSE
                   CPABORT("Unknown DFT-D3 damping function:")
                END IF
-               IF (dispersion_env%srb .AND. dr .LT. 30.0d0) THEN
+               IF (dispersion_env%srb .AND. dr < 30.0d0) THEN
                   srbe = ssrb*(REAL((za*zb), KIND=dp))**t1srb*EXP(-gsrb*dr*dispersion_env%r0ab(za, zb)**t2srb)
                   esrb = esrb + srbe
                   evdw = evdw - srbe
@@ -424,7 +424,7 @@ CONTAINS
                      CPABORT("Unknown DFT-D3 damping function:")
                   END IF
                   fdij(:) = (de6 + de8)*rij(:)/dr*fac
-                  IF (dispersion_env%srb .AND. dr .LT. 30.0d0) THEN
+                  IF (dispersion_env%srb .AND. dr < 30.0d0) THEN
                      fdij(:) = fdij(:) + srbe*gsrb*dispersion_env%r0ab(za, zb)**t2srb*rij(:)/dr
                   END IF
                   atom_a = atom_of_kind(iatom)
@@ -815,18 +815,18 @@ CONTAINS
       END IF
 
       ! set dispersion energy
-      IF (para_env%is_source()) THEN
-         evdw = evdw + (elrc6 + elrc8 + elrc9)
-      END IF
 
       CALL para_env%sum(e6tot)
       CALL para_env%sum(e8tot)
       CALL para_env%sum(e9tot)
+      CALL para_env%sum(evdw)
       CALL para_env%sum(nab)
       CALL para_env%sum(nabc)
       e6tot = e6tot + elrc6
       e8tot = e8tot + elrc8
       e9tot = e9tot + elrc9
+      ! For printing, we need all contributions
+      evdw = evdw + (elrc6 + elrc8 + elrc9)
       IF (unit_nr > 0) THEN
          WRITE (unit_nr, "(A,F20.0)") "  E6 vdW terms              :", nab
          WRITE (unit_nr, *) " E6 vdW energy [au/kcal]   :", e6tot, e6tot*kcalmol
@@ -841,6 +841,8 @@ CONTAINS
             WRITE (unit_nr, *) " E LRC C9 [au/kcal]        :", elrc9, elrc9*kcalmol
          END IF
       END IF
+
+      evdw = evdw/para_env%num_pe
 
       DEALLOCATE (dodisp, exclude, atomnumber, rcpbc, radd2, c6d2)
 
@@ -923,13 +925,13 @@ CONTAINS
       iadr = 1
       jadr = 1
       i = 100
-      DO WHILE (iat .GT. 100)
+      DO WHILE (iat > 100)
          iat = iat - 100
          iadr = iadr + 1
       END DO
 
       i = 100
-      DO WHILE (jat .GT. 100)
+      DO WHILE (jat > 100)
          jat = jat - 100
          jadr = jadr + 1
       END DO

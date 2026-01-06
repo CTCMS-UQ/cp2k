@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -88,8 +88,8 @@ CONTAINS
 
             Maxdr = MAX(Maxdr, el_struct%dr)
             Mindr = MIN(Mindr, el_struct%dr)
-            IF (ALL(Maxdr .EQ. el_struct%dr)) qmmm_env%gridlevel_info%coarser_grid = Ilevel
-            IF (ALL(Mindr .EQ. el_struct%dr)) qmmm_env%gridlevel_info%auxbas_grid = Ilevel
+            IF (ALL(Maxdr == el_struct%dr)) qmmm_env%gridlevel_info%coarser_grid = Ilevel
+            IF (ALL(Mindr == el_struct%dr)) qmmm_env%gridlevel_info%auxbas_grid = Ilevel
 
             CALL pw_grid_release(el_struct)
 

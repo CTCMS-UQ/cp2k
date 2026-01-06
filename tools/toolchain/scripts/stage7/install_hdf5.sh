@@ -6,8 +6,8 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-hdf5_ver="1.14.5"
-hdf5_sha256="ec2e13c52e60f9a01491bb3158cb3778c985697131fc6a342262d32a26e58e44"
+hdf5_ver="1.14.6"
+hdf5_sha256="e4defbac30f50d64e1556374aa49e574417c9e72c6b1de7a4ff88c4b1bea6e9b"
 
 source "${SCRIPT_DIR}"/common_vars.sh
 source "${SCRIPT_DIR}"/tool_kit.sh
@@ -22,7 +22,7 @@ cd "${BUILDDIR}"
 
 case "$with_hdf5" in
   __INSTALL__)
-    echo "==================== Installing hdf5 ===================="
+    echo "==================== Installing HDF5 ===================="
     pkg_install_dir="${INSTALLDIR}/hdf5-${hdf5_ver}"
     install_lock_file="$pkg_install_dir/install_successful"
     if verify_checksums "${install_lock_file}"; then
@@ -54,9 +54,9 @@ case "$with_hdf5" in
     HDF5_LDFLAGS="-L'${pkg_install_dir}/lib' -Wl,-rpath,'${pkg_install_dir}/lib'"
     ;;
   __SYSTEM__)
-    echo "==================== Finding hdf5 from system paths ===================="
+    echo "==================== Finding HDF5 from system paths ===================="
     check_command pkg-config --modversion hdf5
-    pkg_install_dir=$(h5cc -show | tr " " "\n" | grep "\-L" | cut -c3- | sed 's/\/lib$//')
+    pkg_install_dir=$(h5cc -showconfig | grep "Installation point" | awk '{print $3}')
     if [ -d ${pkg_install_dir}/include ]; then
       HDF5_INCLUDE_DIR=${pkg_install_dir}/include
     else
@@ -74,7 +74,7 @@ case "$with_hdf5" in
     # Nothing to do
     ;;
   *)
-    echo "==================== Linking hdf5 to user paths ===================="
+    echo "==================== Linking HDF5 to user paths ===================="
     pkg_install_dir="${with_hdf5}"
     check_dir "${pkg_install_dir}/lib"
     check_dir "${pkg_install_dir}/include"

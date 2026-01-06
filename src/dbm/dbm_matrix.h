@@ -1,17 +1,16 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
-
 #ifndef DBM_MATRIX_H
 #define DBM_MATRIX_H
 
-#include <stdbool.h>
-
 #include "dbm_distribution.h"
 #include "dbm_shard.h"
+
+#include <stdbool.h>
 
 /*******************************************************************************
  * \brief Internal struct for storing a matrix.
@@ -165,6 +164,12 @@ double dbm_checksum(const dbm_matrix_t *matrix);
  * \author Ole Schuett
  ******************************************************************************/
 double dbm_maxabs(const dbm_matrix_t *matrix);
+
+/*******************************************************************************
+ * \brief Calculates maximum relative difference between matrix_a and matrix_b.
+ * \author Hans Pabst
+ ******************************************************************************/
+double dbm_maxeps(const dbm_matrix_t *matrix_a, const dbm_matrix_t *matrix_b);
 
 /*******************************************************************************
  * \brief Returns the name of the matrix of the given matrix.

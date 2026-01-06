@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -24,7 +24,8 @@ MODULE fp_methods
    USE cp_subsys_types,                 ONLY: cp_subsys_get,&
                                               cp_subsys_type
    USE fp_types,                        ONLY: fp_type
-   USE kinds,                           ONLY: dp
+   USE kinds,                           ONLY: default_string_length,&
+                                              dp
    USE mathconstants,                   ONLY: fac,&
                                               maxfac,&
                                               oorootpi
@@ -42,7 +43,7 @@ MODULE fp_methods
 CONTAINS
 
 ! **************************************************************************************************
-!> \brief computest the forces and the energy due to the flexible potential & bias,
+!> \brief Computes the forces and the energy due to the flexible potential & bias,
 !>     and writes the weights file
 !> \param fp_env ...
 !> \param subsys ...
@@ -55,9 +56,9 @@ CONTAINS
       TYPE(cp_subsys_type), POINTER                      :: subsys
       TYPE(cell_type), POINTER                           :: cell
 
-      CHARACTER(len=*), PARAMETER                        :: routineN = 'fp_eval'
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'fp_eval'
 
-      CHARACTER(LEN=15)                                  :: tmpstr
+      CHARACTER(LEN=default_string_length)               :: tmpstr
       INTEGER                                            :: handle, i, icenter, iparticle, &
                                                             output_unit
       LOGICAL                                            :: zero_weight
@@ -194,7 +195,7 @@ CONTAINS
       IF (output_unit > 0) THEN
          tmpstr = cp_iter_string(logger%iter_info, fp_env%print_section)
          WRITE (output_unit, '(T2,A15,6(1X,F16.10),4(1X,I4),4(1X,F16.10))') &
-            tmpstr, &
+            TRIM(tmpstr), &
             fp_env%weight, fp_env%comb_weight, fp_env%bias_weight, &
             fp_env%energy, fp_env%restraint_energy, fp_env%bias_energy, &
             fp_env%i1, fp_env%i2, fp_env%o1, fp_env%o2, &
@@ -231,6 +232,6 @@ CONTAINS
       c = (1.0_dp + ERF(arg))/2.0_dp
       dcdr = (-oorootpi/width)*EXP(-arg**2)
 
-   END SUBROUTINE
+   END SUBROUTINE smooth_count
 
 END MODULE fp_methods

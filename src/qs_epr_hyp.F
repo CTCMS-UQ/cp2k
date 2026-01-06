@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -229,7 +229,7 @@ CONTAINS
 
             ! Now calculate hard-soft anisotropic contributions for the other nuclei
             DO jatom = 1, natom
-               IF (jatom .EQ. iatom) CYCLE ! iatom already done
+               IF (jatom == iatom) CYCLE ! iatom already done
                rab = pbc(particle_set(iatom)%r, particle_set(jatom)%r, cell)
                rab2 = DOT_PRODUCT(rab, rab)
                ! SQRT(rab2) <= int_radius

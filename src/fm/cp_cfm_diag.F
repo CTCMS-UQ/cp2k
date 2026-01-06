@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -25,15 +25,17 @@ MODULE cp_cfm_diag
 #if defined(__DLAF)
    USE cp_cfm_dlaf_api, ONLY: cp_cfm_diag_gen_dlaf, &
                               cp_cfm_diag_dlaf
+   USE cp_dlaf_utils_api, ONLY: cp_dlaf_initialize, cp_dlaf_create_grid
    USE cp_fm_diag, ONLY: diag_type, dlaf_neigvec_min, FM_DIAG_TYPE_DLAF
 #endif
    USE kinds, ONLY: dp
+   USE mathconstants, ONLY: z_one, &
+                            z_zero
 #if defined (__HAS_IEEE_EXCEPTIONS)
    USE ieee_exceptions, ONLY: ieee_get_halting_mode, &
                               ieee_set_halting_mode, &
                               IEEE_ALL
 #endif
-
 #include "../base/base_uses.f90"
 
    IMPLICIT NONE
@@ -67,6 +69,12 @@ CONTAINS
 
 #if defined(__DLAF)
       IF (diag_type == FM_DIAG_TYPE_DLAF .AND. matrix%matrix_struct%nrow_global >= dlaf_neigvec_min) THEN
+         ! Initialize DLA-Future on-demand; if already initialized, does nothing
+         CALL cp_dlaf_initialize()
+
+         ! Create DLAF grid from BLACS context; if already present, does nothing
+         CALL cp_dlaf_create_grid(matrix%matrix_struct%context%get_handle())
+
          CALL cp_cfm_diag_dlaf(matrix, eigenvectors, eigenvalues)
       ELSE
 #endif
@@ -106,9 +114,9 @@ CONTAINS
       INTEGER, DIMENSION(9)                    :: descm, descv
       COMPLEX(KIND=dp), DIMENSION(:, :), &
          POINTER                               :: v
+#endif
 #if defined (__HAS_IEEE_EXCEPTIONS)
       LOGICAL, DIMENSION(5)                    :: halt
-#endif
 #endif
 
       CALL timeset(routineN, handle)
@@ -131,42 +139,39 @@ CONTAINS
       ! Let's add some margin to avoid crashes.
       lwork = CEILING(REAL(work(1), KIND=dp)) + 1000
       ! needed to correct for a bug in scalapack, unclear how much the right number is
-      lrwork = CEILING(REAL(rwork(1), KIND=dp)) + 1000000
+      lrwork = CEILING(rwork(1)) + 1000000
       liwork = iwork(1)
 #else
       CALL zheevd('V', 'U', n, m(1, 1), SIZE(m, 1), eigenvalues(1), &
                   work(1), lwork, rwork(1), lrwork, iwork(1), liwork, info)
       lwork = CEILING(REAL(work(1), KIND=dp))
-      lrwork = CEILING(REAL(rwork(1), KIND=dp))
+      lrwork = CEILING(rwork(1))
       liwork = iwork(1)
 #endif
 
       DEALLOCATE (iwork, rwork, work)
       ALLOCATE (iwork(liwork), rwork(lrwork), work(lwork))
 
-#if defined(__parallel)
-! Scalapack takes advantage of IEEE754 exceptions for speedup.
+! (Sca-)LAPACK takes advantage of IEEE754 exceptions for speedup.
 ! Therefore, we disable floating point traps temporarily.
 #if defined (__HAS_IEEE_EXCEPTIONS)
       CALL ieee_get_halting_mode(IEEE_ALL, halt)
       CALL ieee_set_halting_mode(IEEE_ALL, .FALSE.)
 #endif
-
+#if defined(__parallel)
       CALL pzheevd('V', 'U', n, m(1, 1), 1, 1, descm, eigenvalues(1), v(1, 1), 1, 1, descv, &
                    work(1), lwork, rwork(1), lrwork, iwork(1), liwork, info)
-
-#if defined (__HAS_IEEE_EXCEPTIONS)
-      CALL ieee_set_halting_mode(IEEE_ALL, halt)
-#endif
 #else
-      CALL ZHEEVD('V', 'U', n, m(1, 1), SIZE(m, 1), eigenvalues(1), &
+      CALL zheevd('V', 'U', n, m(1, 1), SIZE(m, 1), eigenvalues(1), &
                   work(1), lwork, rwork(1), lrwork, iwork(1), liwork, info)
       eigenvectors%local_data = matrix%local_data
 #endif
+#if defined (__HAS_IEEE_EXCEPTIONS)
+      CALL ieee_set_halting_mode(IEEE_ALL, halt)
+#endif
 
       DEALLOCATE (iwork, rwork, work)
-      IF (info /= 0) &
-         CPABORT("Diagonalisation of a complex matrix failed")
+      IF (info /= 0) CPABORT("Diagonalisation of a complex matrix failed")
 
       CALL timestop(handle)
 
@@ -202,6 +207,14 @@ CONTAINS
 
 #if defined(__DLAF)
       IF (diag_type == FM_DIAG_TYPE_DLAF .AND. amatrix%matrix_struct%nrow_global >= dlaf_neigvec_min) THEN
+         ! Initialize DLA-Future on-demand; if already initialized, does nothing
+         CALL cp_dlaf_initialize()
+
+         ! Create DLAF grid from BLACS context; if already present, does nothing
+         CALL cp_dlaf_create_grid(amatrix%matrix_struct%context%get_handle())
+         CALL cp_dlaf_create_grid(bmatrix%matrix_struct%context%get_handle())
+         CALL cp_dlaf_create_grid(eigenvectors%matrix_struct%context%get_handle())
+
          ! Use DLA-Future generalized eigenvalue solver for large matrices
          CALL cp_cfm_diag_gen_dlaf(amatrix, bmatrix, work, evals)
       ELSE
@@ -248,8 +261,6 @@ CONTAINS
       REAL(KIND=dp), INTENT(IN)                          :: epseig
 
       CHARACTER(len=*), PARAMETER :: routineN = 'cp_cfm_geeig_canon'
-      COMPLEX(KIND=dp), PARAMETER :: cone = CMPLX(1.0_dp, 0.0_dp, KIND=dp), &
-         czero = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
 
       COMPLEX(KIND=dp), ALLOCATABLE, DIMENSION(:)        :: cevals
       INTEGER                                            :: handle, i, icol, irow, nao, nc, ncol, &
@@ -264,7 +275,7 @@ CONTAINS
       ALLOCATE (evals(nao), cevals(nao))
 
       ! Diagonalize -S matrix, this way the NULL space is at the end of the spectrum
-      CALL cp_cfm_scale(-cone, bmatrix)
+      CALL cp_cfm_scale(-z_one, bmatrix)
       CALL cp_cfm_heevd(bmatrix, work, evals)
       evals(:) = -evals(:)
       nc = nao
@@ -285,7 +296,7 @@ CONTAINS
          ! Set NULL space in eigenvector matrix of S to zero
          DO icol = nc + 1, nao
             DO irow = 1, nao
-               CALL cp_cfm_set_element(work, irow, icol, czero)
+               CALL cp_cfm_set_element(work, irow, icol, z_zero)
             END DO
          END DO
          ! Set small eigenvalues to a dummy save value
@@ -295,8 +306,8 @@ CONTAINS
       cevals(:) = CMPLX(1.0_dp/SQRT(evals(:)), 0.0_dp, KIND=dp)
       CALL cp_cfm_column_scale(work, cevals)
       ! Reduce to get U^(-C) * H * U^(-1)
-      CALL cp_cfm_gemm("C", "N", nao, nao, nao, cone, work, amatrix, czero, bmatrix)
-      CALL cp_cfm_gemm("N", "N", nao, nao, nao, cone, bmatrix, work, czero, amatrix)
+      CALL cp_cfm_gemm("C", "N", nao, nao, nao, z_one, work, amatrix, z_zero, bmatrix)
+      CALL cp_cfm_gemm("N", "N", nao, nao, nao, z_one, bmatrix, work, z_zero, amatrix)
       IF (nc /= nao) THEN
          ! set diagonal values to save large value
          DO icol = nc + 1, nao
@@ -308,7 +319,7 @@ CONTAINS
       eigenvalues(1:nmo) = evals(1:nmo)
       nx = MIN(nc, nmo)
       ! Restore vectors C = U^(-1) * C*
-      CALL cp_cfm_gemm("N", "N", nao, nx, nc, cone, work, bmatrix, czero, eigenvectors)
+      CALL cp_cfm_gemm("N", "N", nao, nx, nc, z_one, work, bmatrix, z_zero, eigenvectors)
 
       DEALLOCATE (evals)
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -254,17 +254,12 @@ CONTAINS
       u = bs_env%unit_nr
 
       IF (u > 0) THEN
-         WRITE (u, *) ' '
-         WRITE (u, '(T2,2A)') '-------------------------------------------------', &
-            '------------------------------'
-         WRITE (u, '(T2,2A)') '-                                                ', &
-            '                             -'
-         WRITE (u, '(T2,2A)') '-                          BANDSTRUCTURE CALCULATION', &
-            '                          -'
-         WRITE (u, '(T2,2A)') '-                                                ', &
-            '                             -'
-         WRITE (u, '(T2,2A)') '--------------------------------------------------', &
-            '-----------------------------'
+         WRITE (u, '(T2,A)') ' '
+         WRITE (u, '(T2,A)') REPEAT('-', 79)
+         WRITE (u, '(T2,A,A78)') '-', '-'
+         WRITE (u, '(T2,A,A51,A27)') '-', 'BANDSTRUCTURE CALCULATION', '-'
+         WRITE (u, '(T2,A,A78)') '-', '-'
+         WRITE (u, '(T2,A)') REPEAT('-', 79)
          WRITE (u, '(T2,A)') ' '
       END IF
 
@@ -421,7 +416,7 @@ CONTAINS
       ! we need in periodic directions at least 4 k-points in the SCF
       DO i_dim = 1, 3
          IF (bs_env%periodic(i_dim) == 1) THEN
-            CPASSERT(nkp_grid(i_dim) .GE. 4)
+            CPASSERT(nkp_grid(i_dim) >= 4)
          END IF
       END DO
 
@@ -452,7 +447,7 @@ CONTAINS
       IF (ASSOCIATED(kpoints%cell_to_index)) DEALLOCATE (kpoints%cell_to_index)
 
       ALLOCATE (kpoints%cell_to_index(-cixd(1):cixd(1), -cixd(2):cixd(2), -cixd(3):cixd(3)))
-      ALLOCATE (kpoints%index_to_cell(nimages, 3))
+      ALLOCATE (kpoints%index_to_cell(3, nimages))
 
       img = 0
       DO i_cell_x = -cixd(1), cixd(1)
@@ -460,7 +455,7 @@ CONTAINS
             DO k_cell_z = -cixd(3), cixd(3)
                img = img + 1
                kpoints%cell_to_index(i_cell_x, j_cell_y, k_cell_z) = img
-               kpoints%index_to_cell(img, 1:3) = (/i_cell_x, j_cell_y, k_cell_z/)
+               kpoints%index_to_cell(1:3, img) = [i_cell_x, j_cell_y, k_cell_z]
             END DO
          END DO
       END DO
@@ -538,7 +533,7 @@ CONTAINS
 
       IF (ASSOCIATED(kpoints%index_to_cell)) DEALLOCATE (kpoints%index_to_cell)
 
-      ALLOCATE (kpoints%index_to_cell(bs_env%nimages_scf_desymm, 3))
+      ALLOCATE (kpoints%index_to_cell(3, bs_env%nimages_scf_desymm))
       kpoints%index_to_cell(:, :) = bs_env%kpoints_scf_desymm%index_to_cell(:, :)
 
       u = bs_env%unit_nr
@@ -785,7 +780,7 @@ CONTAINS
 
          ! check if Cholesky decomposition failed (Cholesky decomposition only works for
          ! positive definite matrices
-         IF (info .NE. 0) THEN
+         IF (info /= 0) THEN
             u = bs_env%unit_nr
 
             IF (u > 0) THEN
@@ -886,7 +881,7 @@ CONTAINS
 
       ! Marek : Get and save the rtp method
       CALL get_qs_env(qs_env=qs_env, input=input)
-      CALL section_vals_val_get(input, "DFT%REAL_TIME_PROPAGATION%RTP_METHOD", i_val=bs_env%rtp_method)
+      CALL section_vals_val_get(input, "DFT%REAL_TIME_PROPAGATION%RTBSE%_SECTION_PARAMETERS_", i_val=bs_env%rtp_method)
 
       IF (u > 0) THEN
          WRITE (u, FMT="(T2,2A,T73,I8)") "Number of occupied molecular orbitals (MOs) ", &
@@ -1216,7 +1211,7 @@ CONTAINS
          IF (bs_env%do_soc) THEN
 
             ! only print eigenvalues of DOS k-points in case no bandstructure path has been given
-            print_DOS_kpoints = (bs_env%nkp_only_bs .LE. 0)
+            print_DOS_kpoints = (bs_env%nkp_only_bs <= 0)
             ! in kpoints_DOS, the last nkp_only_bs are bandstructure k-points
             is_bandstruc_kpoint = (ikp > bs_env%nkp_only_DOS)
             print_ikp = print_DOS_kpoints .OR. is_bandstruc_kpoint
@@ -1397,12 +1392,11 @@ CONTAINS
          CALL bs_env%para_env%min(i_y_start_glob)
          CALL bs_env%para_env%max(i_y_end_glob)
 
-         ALLOCATE (n_sum_for_bins(bin_mesh(1), bin_mesh(2)))
-         n_sum_for_bins(:, :) = 0
+         ALLOCATE (n_sum_for_bins(bin_mesh(1), bin_mesh(2)), SOURCE=0)
 
          ! transform interval [i_x_start, i_x_end] to [1, bin_mesh(1)] (and same for y)
-         DO i_x = i_x_start, i_x_end
-            DO i_y = i_y_start, i_y_end
+         DO i_y = i_y_start, i_y_end
+            DO i_x = i_x_start, i_x_end
                i_x_bin = bin_mesh(1)*(i_x - i_x_start_glob)/(i_x_end_glob - i_x_start_glob + 1) + 1
                i_y_bin = bin_mesh(2)*(i_y - i_y_start_glob)/(i_y_end_glob - i_y_start_glob + 1) + 1
                LDOS_2d_bins(i_x_bin, i_y_bin, :) = LDOS_2d_bins(i_x_bin, i_y_bin, :) + &
@@ -1415,8 +1409,8 @@ CONTAINS
          CALL bs_env%para_env%sum(n_sum_for_bins)
 
          ! divide by number of terms in the sum so we have the average LDOS(x,y,E)
-         DO i_x_bin = 1, bin_mesh(1)
-            DO i_y_bin = 1, bin_mesh(2)
+         DO i_y_bin = 1, bin_mesh(2)
+            DO i_x_bin = 1, bin_mesh(1)
                LDOS_2d_bins(i_x_bin, i_y_bin, :) = LDOS_2d_bins(i_x_bin, i_y_bin, :)/ &
                                                    REAL(n_sum_for_bins(i_x_bin, i_y_bin), KIND=dp)
             END DO
@@ -1475,8 +1469,8 @@ CONTAINS
 
       IF (bs_env%para_env%is_source()) THEN
 
-         DO i_x = i_x_start, i_x_end
-            DO i_y = i_y_start, i_y_end
+         DO i_y = i_y_start, i_y_end
+            DO i_x = i_x_start, i_x_end
 
                idx(1) = (REAL(i_x, KIND=dp) - 0.5_dp)/REAL(n_x, KIND=dp)
                idx(2) = (REAL(i_y, KIND=dp) - 0.5_dp)/REAL(n_y, KIND=dp)
@@ -2008,7 +2002,7 @@ CONTAINS
          n_occ_spinor = bs_env%n_occ(1) + bs_env%n_occ(bs_env%n_spin)
 
          DO i_mo = 1, SIZE(eigenval_spinor)
-            IF (i_mo .LE. n_occ_spinor) occ_vir = 'occ'
+            IF (i_mo <= n_occ_spinor) occ_vir = 'occ'
             IF (i_mo > n_occ_spinor) occ_vir = 'vir'
             IF (PRESENT(eigenval_spinor_G0W0)) THEN
                ! SCF+SOC and G0W0+SOC eigenvalues
@@ -2133,7 +2127,7 @@ CONTAINS
          DO iatom = 1, bs_env%n_atom
             CALL get_atomic_kind(atomic_kind=particle_set(iatom)%atomic_kind, &
                                  kind_number=i_kind, name=atom_name)
-            elements(i_kind) = atom_name
+            elements(i_kind) = atom_name(1:3)
          END DO
 
          WRITE (output_string, "(A,I1,A)") "(", n_A, "A)"
@@ -2174,7 +2168,7 @@ CONTAINS
          Gaussian = 0.0_dp
       END IF
 
-   END FUNCTION
+   END FUNCTION Gaussian
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2229,20 +2223,20 @@ CONTAINS
          CALL cp_cfm_to_cfm(cfm_s, cfm_s_i_kind)
 
          ! set entries in overlap matrix to zero which do not belong to atoms of i_kind
-         DO i_row = 1, nrow_local
-            DO j_col = 1, ncol_local
+         DO j_col = 1, ncol_local
+            DO i_row = 1, nrow_local
 
                i_global = row_indices(i_row)
 
-               IF (i_global .LE. n_ao) THEN
+               IF (i_global <= n_ao) THEN
                   i_atom = atom_from_bf(i_global)
-               ELSE IF (i_global .LE. 2*n_ao) THEN
+               ELSE IF (i_global <= 2*n_ao) THEN
                   i_atom = atom_from_bf(i_global - n_ao)
                ELSE
                   CPABORT("Wrong indices.")
                END IF
 
-               IF (i_kind .NE. kind_of(i_atom)) THEN
+               IF (i_kind /= kind_of(i_atom)) THEN
                   cfm_s_i_kind%local_data(i_row, j_col) = z_zero
                END IF
 
@@ -2357,7 +2351,7 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'cfm_ikp_from_fm_Gamma'
 
-      INTEGER :: col_global, handle, i, i_atom, i_atom_old, i_cell, i_mic_cell, i_row, j, j_atom, &
+      INTEGER :: col_global, handle, i_atom, i_atom_old, i_cell, i_mic_cell, i_row, j_atom, &
          j_atom_old, j_cell, j_col, n_bf, ncol_local, nrow_local, num_cells, row_global
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: atom_from_bf
       INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
@@ -2405,8 +2399,8 @@ CONTAINS
       i_atom_old = 0
       j_atom_old = 0
 
-      DO i_row = 1, nrow_local
-         DO j_col = 1, ncol_local
+      DO j_col = 1, ncol_local
+         DO i_row = 1, nrow_local
 
             row_global = row_indices(i_row)
             col_global = col_indices(j_col)
@@ -2415,7 +2409,7 @@ CONTAINS
             j_atom = atom_from_bf(col_global)
 
             ! we only need to check for new MIC cell for new i_atom-j_atom pair
-            IF (i_atom .NE. i_atom_old .OR. j_atom .NE. j_atom_old) THEN
+            IF (i_atom /= i_atom_old .OR. j_atom /= j_atom_old) THEN
                DO i_cell = 1, num_cells
 
                   ! only check nearest neigbors
@@ -2451,11 +2445,8 @@ CONTAINS
                   REAL(index_to_cell(2, i_mic_cell), dp)*kpoints%xkp(2, ikp) + &
                   REAL(index_to_cell(3, i_mic_cell), dp)*kpoints%xkp(3, ikp)
 
-            i = i_row
-            j = j_col
-
-            cfm_ikp%local_data(i, j) = COS(twopi*arg)*fm_Gamma%local_data(i, j)*z_one + &
-                                       SIN(twopi*arg)*fm_Gamma%local_data(i, j)*gaussi
+            cfm_ikp%local_data(i_row, j_col) = COS(twopi*arg)*fm_Gamma%local_data(i_row, j_col)*z_one + &
+                                               SIN(twopi*arg)*fm_Gamma%local_data(i_row, j_col)*gaussi
 
             j_atom_old = j_atom
             i_atom_old = i_atom
@@ -2484,7 +2475,7 @@ CONTAINS
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(cp_fm_type)                                   :: fm_W_MIC_freq_j
       TYPE(cp_cfm_type)                                  :: cfm_W_ikp_freq_j
-      INTEGER                                            :: ikp
+      INTEGER, INTENT(IN)                                :: ikp
       TYPE(kpoint_type), POINTER                         :: kpoints
       CHARACTER(LEN=*)                                   :: basis_type
       REAL(KIND=dp), OPTIONAL                            :: wkp_ext
@@ -2536,8 +2527,8 @@ CONTAINS
       iatom_old = 0
       jatom_old = 0
 
-      DO irow = 1, nrow_local
-         DO jcol = 1, ncol_local
+      DO jcol = 1, ncol_local
+         DO irow = 1, nrow_local
 
             i_bf = row_indices(irow)
             j_bf = col_indices(jcol)
@@ -2561,7 +2552,7 @@ CONTAINS
                END SELECT
             END IF
 
-            IF (iatom .NE. iatom_old .OR. jatom .NE. jatom_old) THEN
+            IF (iatom /= iatom_old .OR. jatom /= jatom_old) THEN
 
                CALL compute_weight_re_im(weight_re, weight_im, &
                                          num_cells, iatom, jatom, xkp(1:3, ikp), wkp_of_ikp, &

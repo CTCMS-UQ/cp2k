@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -57,7 +57,7 @@ MODULE kinds
    INTEGER, PARAMETER :: default_string_length = 80
    INTEGER, PARAMETER :: default_path_length = 1024
    INTEGER, PARAMETER :: max_line_length = 2*default_path_length
-   CHARACTER(LEN=1), PARAMETER, PUBLIC :: default_blank_character(2) = (/" ", CHAR(9)/)
+   CHARACTER(LEN=1), PARAMETER, PUBLIC :: default_blank_character(2) = [" ", CHAR(9)]
 
 CONTAINS
 

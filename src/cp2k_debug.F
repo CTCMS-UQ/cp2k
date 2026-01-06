@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -417,7 +417,7 @@ CONTAINS
       IF (debug_dipole) THEN
          IF (force_env%in_use == use_qs_force) THEN
             CALL get_qs_env(force_env%qs_env, dft_control=dft_control)
-            poldir = (/0.0_dp, 0.0_dp, 1.0_dp/)
+            poldir = [0.0_dp, 0.0_dp, 1.0_dp]
             amplitude = 0.0_dp
             CALL set_efield(dft_control, amplitude, poldir)
             CALL force_env_calc_energy_force(force_env, calc_force=.TRUE.)
@@ -491,7 +491,7 @@ CONTAINS
       IF (debug_polar) THEN
          IF (force_env%in_use == use_qs_force) THEN
             CALL get_qs_env(force_env%qs_env, dft_control=dft_control)
-            poldir = (/0.0_dp, 0.0_dp, 1.0_dp/)
+            poldir = [0.0_dp, 0.0_dp, 1.0_dp]
             amplitude = 0.0_dp
             CALL set_efield(dft_control, amplitude, poldir)
             CALL force_env_calc_energy_force(force_env, calc_force=.FALSE.)
@@ -499,7 +499,7 @@ CONTAINS
             description = "[POLAR]"
             IF (test_for_result(results, description=description)) THEN
                CALL get_results(results, description=description, values=pvals)
-               polar_analytic(1:3, 1:3) = RESHAPE(pvals(1:9), (/3, 3/))
+               polar_analytic(1:3, 1:3) = RESHAPE(pvals(1:9), [3, 3])
             ELSE
                CALL cp_warn(__LOCATION__, "Debug of polarizabilities needs PROPERTIES/LINRES/POLAR section enabled")
                CPABORT("DEBUG")

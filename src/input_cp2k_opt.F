@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -115,7 +115,7 @@ CONTAINS
                           enum_desc=s2a("Set all parameters in the basis to be variable.", &
                                         "Set all coefficients in the basis set to be variable.", &
                                         "Set all exponents in the basis to be variable."), &
-                          enum_i_vals=(/do_lri_opt_all, do_lri_opt_coeff, do_lri_opt_exps/), &
+                          enum_i_vals=[do_lri_opt_all, do_lri_opt_coeff, do_lri_opt_exps], &
                           default_i_val=do_lri_opt_exps)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -181,14 +181,14 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name="SPIN_DENS_CONV_MAX", &
                           description="Convergence criterion for "// &
                           "the maximum electron density difference.", &
-                          usage="DENS_CONV_MAX 0.01", default_r_val=0.01_dp)
+                          usage="SPIN_DENS_CONV_MAX 0.01", default_r_val=0.01_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="SPIN_DENS_CONV_INT", &
                           description="Convergence criterion for "// &
                           "the integrated electron density difference.", &
-                          usage="DENS_CONV_INT 0.1", default_r_val=0.1_dp)
+                          usage="SPIN_DENS_CONV_INT 0.1", default_r_val=0.1_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -198,7 +198,7 @@ CONTAINS
                           default_i_val=embed_steep_desc, &
                           enum_c_vals=s2a("STEEPEST_DESCENT", "QUASI_NEWTON", "LEVEL_SHIFT"), &
                           enum_desc=s2a("Steepest descent.", "Quasi-Newton.", "Level shift."), &
-                          enum_i_vals=(/embed_steep_desc, embed_quasi_newton, embed_level_shift/))
+                          enum_i_vals=[embed_steep_desc, embed_quasi_newton, embed_level_shift])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -234,7 +234,7 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name="VW_SMOOTH_CUT_RANGE", &
                           description="Smooth cutoff range for von Weizsacker potential in "// &
                           "the FAB optimization procedure.", &
-                          usage="VW_CUTOFF 1.0", default_r_val=1.0_dp)
+                          usage="VW_SMOOTH_CUT_RANGE 1.0", default_r_val=1.0_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -242,14 +242,14 @@ CONTAINS
                           description="Specifies the guess of the embedding  "// &
                           "potential. For optimization in finite basis (not grid optimization) "// &
                           "in is a constant part to be added to the one in finite basis. ", &
-                          usage="DEGREES_OF_FREEDOM ALL", &
+                          usage="POT_GUESS NONE", &
                           enum_c_vals=s2a("NONE", "DIFF", "Fermi_Amaldi", "RESP"), &
                           enum_desc=s2a("Initial guess is zero grid.", &
                                         "Initial density difference. A euristic but working approach.", &
                                         "Fermi-Amaldi potential. More rigorous than DIFF, although less efficient.", &
                                         "Coulomb interaction between the subsystem using RESP charges)"// &
                                         " on the total system."), &
-                          enum_i_vals=(/embed_none, embed_diff, embed_fa, embed_resp/), &
+                          enum_i_vals=[embed_none, embed_diff, embed_fa, embed_resp], &
                           default_i_val=embed_none)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -358,14 +358,14 @@ CONTAINS
                           description="Convergence criterion for "// &
                           "the maximum element of the beta-spin density "// &
                           "matrix difference.", &
-                          usage="DM_CONV_MAX 0.01", default_r_val=0.01_dp)
+                          usage="BETA_DM_CONV_MAX 0.01", default_r_val=0.01_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="BETA_DM_CONV_INT", &
                           description="Convergence criterion for "// &
                           "the total beta-spin density matrix difference.", &
-                          usage="DM_CONV_INT 0.1", default_r_val=0.1_dp)
+                          usage="BETA_DM_CONV_INT 0.1", default_r_val=0.1_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -405,7 +405,7 @@ CONTAINS
                           description="The stride (X,Y,Z) used to write the cube file "// &
                           "(larger values result in smaller cube files). You can provide 3 numbers (for X,Y,Z) or"// &
                           " 1 number valid for all components.", &
-                          usage="STRIDE 2 2 2", n_var=-1, default_i_vals=(/2, 2, 2/), type_of_var=integer_t)
+                          usage="STRIDE 2 2 2", n_var=-1, default_i_vals=[2, 2, 2], type_of_var=integer_t)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
 
@@ -433,7 +433,7 @@ CONTAINS
                           description="The stride (X,Y,Z) used to write the cube file "// &
                           "(larger values result in smaller cube files). You can provide 3 numbers (for X,Y,Z) or"// &
                           " 1 number valid for all components.", &
-                          usage="STRIDE 1 1 1", n_var=-1, default_i_vals=(/1, 1, 1/), type_of_var=integer_t)
+                          usage="STRIDE 1 1 1", n_var=-1, default_i_vals=[1, 1, 1], type_of_var=integer_t)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
 
@@ -481,7 +481,7 @@ CONTAINS
                           description="The stride (X,Y,Z) used to write the cube file "// &
                           "(larger values result in smaller cube files). You can provide 3 numbers (for X,Y,Z) or"// &
                           " 1 number valid for all components.", &
-                          usage="STRIDE 1 1 1", n_var=-1, default_i_vals=(/1, 1, 1/), type_of_var=integer_t)
+                          usage="STRIDE 1 1 1", n_var=-1, default_i_vals=[1, 1, 1], type_of_var=integer_t)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
 
@@ -491,7 +491,7 @@ CONTAINS
                           default_i_val=embed_grid_bohr, &
                           enum_c_vals=s2a("BOHR", "ANGSTROM"), &
                           enum_desc=s2a("Atomic units: Bohr", "Metric units: Angstrom."), &
-                          enum_i_vals=(/embed_grid_bohr, embed_grid_angstrom/))
+                          enum_i_vals=[embed_grid_bohr, embed_grid_angstrom])
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
 

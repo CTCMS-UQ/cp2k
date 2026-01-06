@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -155,7 +155,7 @@ CONTAINS
 
       ! initialize PEXSI
       IF (ls_scf_env%do_pexsi) THEN
-         IF (dft_control%qs_control%eps_filter_matrix .NE. 0.0_dp) &
+         IF (dft_control%qs_control%eps_filter_matrix /= 0.0_dp) &
             CPABORT("EPS_FILTER_MATRIX must be set to 0 for PEXSI.")
          CALL lib_pexsi_init(ls_scf_env%pexsi, ls_scf_env%para_env, ls_scf_env%nspins)
       END IF
@@ -269,7 +269,7 @@ CONTAINS
       pexsi_section => section_vals_get_subs_vals(input, "DFT%LS_SCF%PEXSI")
       CALL section_vals_get(pexsi_section)
 
-      ls_scf_env%do_pexsi = ls_scf_env%purification_method .EQ. ls_scf_pexsi &
+      ls_scf_env%do_pexsi = ls_scf_env%purification_method == ls_scf_pexsi &
                             .AND. .NOT. ls_scf_env%do_transport
       IF (ls_scf_env%do_pexsi) THEN
          CALL pexsi_init_read_input(pexsi_section, ls_scf_env%pexsi)
@@ -323,16 +323,16 @@ CONTAINS
          CPABORT("CURVY_STEPS requires the use of the sqrt inversion.")
 
       ! verify requirements for direct submatrix sign methods
-      IF (ls_scf_env%sign_method .EQ. ls_scf_sign_submatrix &
+      IF (ls_scf_env%sign_method == ls_scf_sign_submatrix &
           .AND. ( &
-          ls_scf_env%submatrix_sign_method .EQ. ls_scf_submatrix_sign_direct &
-          .OR. ls_scf_env%submatrix_sign_method .EQ. ls_scf_submatrix_sign_direct_muadj &
-          .OR. ls_scf_env%submatrix_sign_method .EQ. ls_scf_submatrix_sign_direct_muadj_lowmem &
+          ls_scf_env%submatrix_sign_method == ls_scf_submatrix_sign_direct &
+          .OR. ls_scf_env%submatrix_sign_method == ls_scf_submatrix_sign_direct_muadj &
+          .OR. ls_scf_env%submatrix_sign_method == ls_scf_submatrix_sign_direct_muadj_lowmem &
           ) .AND. .NOT. ls_scf_env%sign_symmetric) &
          CPABORT("DIRECT submatrix sign methods require SIGN_SYMMETRIC being set.")
       IF (ls_scf_env%fixed_mu .AND. ( &
-          ls_scf_env%submatrix_sign_method .EQ. ls_scf_submatrix_sign_direct_muadj &
-          .OR. ls_scf_env%submatrix_sign_method .EQ. ls_scf_submatrix_sign_direct_muadj_lowmem &
+          ls_scf_env%submatrix_sign_method == ls_scf_submatrix_sign_direct_muadj &
+          .OR. ls_scf_env%submatrix_sign_method == ls_scf_submatrix_sign_direct_muadj_lowmem &
           )) CPABORT("Invalid submatrix sign method for FIXED_MU.")
 
       ! sign_symmetric requires computation of s_sqrt
@@ -459,15 +459,11 @@ CONTAINS
             CPABORT("Unknown cluster type")
          END SELECT
 
+         WRITE (unit_nr, '(T2,A,T61,L20)') "Computing Chebyshev", ls_scf_env%chebyshev%compute_chebyshev
          IF (ls_scf_env%chebyshev%compute_chebyshev) THEN
-            WRITE (unit_nr, '(T2,A,T61,A20)') "Computing Chebyshev", ADJUSTR("TRUE")
             WRITE (unit_nr, '(T2,A,T61,I20)') "N_CHEBYSHEV:", ls_scf_env%chebyshev%n_chebyshev
             WRITE (unit_nr, '(T2,A,T61,I20)') "N_GRIDPOINT_DOS:", ls_scf_env%chebyshev%n_gridpoint_dos
-         ELSE
-            WRITE (unit_nr, '(T2,A,T61,A20)') "Computing Chebyshev", ADJUSTR("FALSE")
          END IF
-
-         WRITE (unit_nr, '(T2,A,T61,L20)') "Using PAO", ls_scf_env%do_pao
 
          WRITE (unit_nr, '(T2,A)') REPEAT("-", 79)
          WRITE (unit_nr, '()')

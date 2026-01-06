@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -78,11 +78,11 @@ CONTAINS
                           "- `MACDONALD`"//newline// &
                           "- `GENERAL`"//newline// &
                           newline// &
-                          "For `MONKHORST-PACK` and `MACDONALD` the number of k points in all "// &
-                          "3 dimensions has to be supplied along with the keyword. "// &
-                          "E.g. `MONKHORST-PACK 12 12 8`", &
+                          "For `MONKHORST-PACK` the number of k points in all 3 dimensions has to"// &
+                          " be supplied along with the keyword. For `MACDONALD` also the list of shifts."// &
+                          " E.g. `MONKHORST-PACK 12 12 8`, `MACDONALD 4 4 4 0.25 0.25 0.25`", &
                           usage="SCHEME {KPMETHOD} {integer} {integer} ..", &
-                          citations=(/Monkhorst1976, MacDonald1978/), &
+                          citations=[Monkhorst1976, MacDonald1978], &
                           n_var=-1, type_of_var=char_t)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -151,7 +151,7 @@ CONTAINS
                           enum_c_vals=s2a("REAL", "COMPLEX"), &
                           enum_desc=s2a("Use real wavefunctions (if possible by kpoints specified).", &
                                         "Use complex wavefunctions (default)."), &
-                          enum_i_vals=(/use_real_wfn, use_complex_wfn/))
+                          enum_i_vals=[use_real_wfn, use_complex_wfn])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -20,7 +20,6 @@ MODULE qs_tddfpt2_types
                                               dbcsr_deallocate_matrix_set
    USE cp_fm_pool_types,                ONLY: cp_fm_pool_p_type,&
                                               fm_pool_create,&
-                                              fm_pool_create_fm,&
                                               fm_pool_release
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                               cp_fm_struct_p_type,&
@@ -100,6 +99,14 @@ MODULE qs_tddfpt2_types
       !> it is mainly needed to make the restart file transferable
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: phases_occ
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: phases_virt
+      !> number of occupied orbitals
+      INTEGER                                            :: nmo_occ = -1
+      !> number of active occupied orbitals
+      INTEGER                                            :: nmo_active = -1
+      !> indexing of active orbitals
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: index_active
+      !> active occupied MOs stored in a matrix form [nao x nmo_active]
+      TYPE(cp_fm_type), POINTER                          :: mos_active => NULL()
    END TYPE tddfpt_ground_state_mos
 
 ! **************************************************************************************************
@@ -111,9 +118,9 @@ MODULE qs_tddfpt2_types
       !
       ! *** globally distributed dense matrices ***
       !
-      !> pool of dense [nao x nmo_occ(spin)] matrices;
+      !> pool of dense [nao x nmo_active(spin)] matrices;
       !> used mainly to dynamically expand the list of trial vectors
-      TYPE(cp_fm_pool_p_type), ALLOCATABLE, DIMENSION(:) :: fm_pool_ao_mo_occ
+      TYPE(cp_fm_pool_p_type), ALLOCATABLE, DIMENSION(:) :: fm_pool_ao_mo_active
       !> S * mos_occ(spin)
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: S_C0
       !> S * \rho_0(spin)
@@ -143,7 +150,7 @@ MODULE qs_tddfpt2_types
       ! *** sparse matrices distributed across parallel (sub)groups ***
       !
       !> sparse matrix with shape [nao x nao] distributed across subgroups;
-      !> Aop_evects_sub(spin,:) = A_ia_munu_sub(spin) * mos_occ(spin)
+      !> Aop_evects_sub(spin,:) = A_ia_munu_sub(spin) * mos_active(spin)
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: A_ia_munu_sub => NULL()
       !
       ! *** structures to store electron densities distributed across parallel (sub)groups ***
@@ -214,26 +221,28 @@ CONTAINS
 !> \param do_admm ...
 !> \param do_hfxlr ...
 !> \param do_exck ...
+!> \param do_sf ...
 !> \param qs_env         Quickstep environment
 !> \param sub_env        parallel group environment
 !> \par History
 !>    * 02.2017 created [Sergey Chulkov]
 ! **************************************************************************************************
    SUBROUTINE tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, do_hfx, do_admm, &
-                                          do_hfxlr, do_exck, qs_env, sub_env)
+                                          do_hfxlr, do_exck, do_sf, qs_env, sub_env)
       TYPE(tddfpt_work_matrices), INTENT(out)            :: work_matrices
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          INTENT(in)                                      :: gs_mos
       INTEGER, INTENT(in)                                :: nstates
-      LOGICAL, INTENT(in)                                :: do_hfx, do_admm, do_hfxlr, do_exck
+      LOGICAL, INTENT(in)                                :: do_hfx, do_admm, do_hfxlr, do_exck, do_sf
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(tddfpt_subgroup_env_type), INTENT(in)         :: sub_env
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_create_work_matrices'
 
-      INTEGER                                            :: handle, igroup, ispin, istate, nao, &
-                                                            nao_aux, natom, ngroups, nspins
-      INTEGER, DIMENSION(maxspins)                       :: nmo_occ, nmo_virt
+      INTEGER                                            :: evecs_dim, handle, igroup, ispin, &
+                                                            istate, nao, nao_aux, natom, ngroups, &
+                                                            nspins
+      INTEGER, DIMENSION(maxspins)                       :: nactive, nmo_occ, nmo_virt
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -271,11 +280,17 @@ CONTAINS
       NULLIFY (work_matrices%rho_xc_struct_sub)
 
       nspins = SIZE(gs_mos)
+      IF (do_sf) THEN
+         evecs_dim = 1
+      ELSE
+         evecs_dim = nspins
+      END IF
       CALL get_qs_env(qs_env, blacs_env=blacs_env, matrix_s=matrix_s)
       CALL dbcsr_get_info(matrix_s(1)%matrix, nfullrows_total=nao)
 
       DO ispin = 1, nspins
-         nmo_occ(ispin) = SIZE(gs_mos(ispin)%evals_occ)
+         nactive(ispin) = gs_mos(ispin)%nmo_active
+         nmo_occ(ispin) = gs_mos(ispin)%nmo_occ
          nmo_virt(ispin) = SIZE(gs_mos(ispin)%evals_virt)
       END DO
 
@@ -287,11 +302,11 @@ CONTAINS
       END IF
 
       NULLIFY (fm_struct)
-      ALLOCATE (work_matrices%fm_pool_ao_mo_occ(nspins))
+      ALLOCATE (work_matrices%fm_pool_ao_mo_active(nspins))
       DO ispin = 1, nspins
-         NULLIFY (work_matrices%fm_pool_ao_mo_occ(ispin)%pool)
-         CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nmo_occ(ispin), context=blacs_env)
-         CALL fm_pool_create(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, fm_struct)
+         NULLIFY (work_matrices%fm_pool_ao_mo_active(ispin)%pool)
+         CALL cp_fm_struct_create(fm_struct, template_fmstruct=gs_mos(ispin)%mos_active%matrix_struct, context=blacs_env)
+         CALL fm_pool_create(work_matrices%fm_pool_ao_mo_active(ispin)%pool, fm_struct)
          CALL cp_fm_struct_release(fm_struct)
       END DO
 
@@ -304,34 +319,35 @@ CONTAINS
 
       ALLOCATE (work_matrices%S_C0(nspins))
       DO ispin = 1, nspins
-         CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, work_matrices%S_C0(ispin))
-
+         CALL cp_fm_struct_create(fm_struct, template_fmstruct=gs_mos(ispin)%mos_occ%matrix_struct, context=blacs_env)
+         CALL cp_fm_create(work_matrices%S_C0(ispin), fm_struct)
          CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, gs_mos(ispin)%mos_occ, work_matrices%S_C0(ispin), &
                                       ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
          CALL parallel_gemm('N', 'T', nao, nao, nmo_occ(ispin), 1.0_dp, work_matrices%S_C0(ispin), &
                             gs_mos(ispin)%mos_occ, 0.0_dp, work_matrices%S_C0_C0T(ispin))
+         CALL cp_fm_struct_release(fm_struct)
       END DO
 
       IF (sub_env%is_split) THEN
-         DO ispin = 1, nspins
-            CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, nrow_global=nao, &
-                                     ncol_global=nmo_occ(ispin), context=sub_env%blacs_env)
+         DO ispin = 1, evecs_dim
+            CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, template_fmstruct=gs_mos(ispin)%mos_active%matrix_struct, &
+                                     context=sub_env%blacs_env)
          END DO
 
-         ALLOCATE (work_matrices%evects_sub(nspins, nstates), work_matrices%Aop_evects_sub(nspins, nstates))
+         ALLOCATE (work_matrices%evects_sub(evecs_dim, nstates), work_matrices%Aop_evects_sub(evecs_dim, nstates))
 
          CALL blacs_env%get(para_env=para_env)
          igroup = sub_env%group_distribution(para_env%mepos)
          ngroups = sub_env%ngroups
 
          DO istate = ngroups - igroup, nstates, ngroups
-            DO ispin = 1, nspins
+            DO ispin = 1, evecs_dim
                CALL cp_fm_create(work_matrices%evects_sub(ispin, istate), fm_struct_evects(ispin)%struct)
                CALL cp_fm_create(work_matrices%Aop_evects_sub(ispin, istate), fm_struct_evects(ispin)%struct)
             END DO
          END DO
 
-         DO ispin = nspins, 1, -1
+         DO ispin = evecs_dim, 1, -1
             CALL cp_fm_struct_release(fm_struct_evects(ispin)%struct)
          END DO
       END IF
@@ -356,8 +372,8 @@ CONTAINS
 
       ! group-specific dbcsr matrices
       NULLIFY (work_matrices%A_ia_munu_sub)
-      CALL dbcsr_allocate_matrix_set(work_matrices%A_ia_munu_sub, nspins)
-      DO ispin = 1, nspins
+      CALL dbcsr_allocate_matrix_set(work_matrices%A_ia_munu_sub, evecs_dim)
+      DO ispin = 1, evecs_dim
          CALL dbcsr_init_p(work_matrices%A_ia_munu_sub(ispin)%matrix)
          CALL tddfpt_dbcsr_create_by_dist(work_matrices%A_ia_munu_sub(ispin)%matrix, template=matrix_s(1)%matrix, &
                                           dbcsr_dist=sub_env%dbcsr_dist, sab=sub_env%sab_orb)
@@ -518,8 +534,8 @@ CONTAINS
       ! matrices needed to do HFX long range calllculations
       IF (do_hfxlr) THEN
          DO ispin = 1, nspins
-            CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, nrow_global=nao, &
-                                     ncol_global=nmo_occ(ispin), context=sub_env%blacs_env)
+            CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, template_fmstruct=gs_mos(ispin)%mos_active%matrix_struct, &
+                                     context=sub_env%blacs_env)
          END DO
          CALL dbcsr_init_p(work_matrices%shalf)
          CALL dbcsr_create(work_matrices%shalf, template=matrix_s(1)%matrix)
@@ -642,7 +658,7 @@ CONTAINS
 
       INTEGER                                            :: handle, igroup, ispin, istate, nao, &
                                                             ngroups, nspins
-      INTEGER, DIMENSION(maxspins)                       :: nmo_occ, nmo_virt
+      INTEGER, DIMENSION(maxspins)                       :: nactive, nmo_occ, nmo_virt
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_p_type), DIMENSION(maxspins)     :: fm_struct_evects
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
@@ -658,16 +674,17 @@ CONTAINS
       CALL dbcsr_get_info(matrix_s(1)%matrix, nfullrows_total=nao)
 
       DO ispin = 1, nspins
-         nmo_occ(ispin) = SIZE(gs_mos(ispin)%evals_occ)
+         nactive(ispin) = gs_mos(ispin)%nmo_active
+         nmo_occ(ispin) = gs_mos(ispin)%nmo_occ
          nmo_virt(ispin) = SIZE(gs_mos(ispin)%evals_virt)
       END DO
 
       NULLIFY (fm_struct)
-      ALLOCATE (work_matrices%fm_pool_ao_mo_occ(nspins))
+      ALLOCATE (work_matrices%fm_pool_ao_mo_active(nspins))
       DO ispin = 1, nspins
-         NULLIFY (work_matrices%fm_pool_ao_mo_occ(ispin)%pool)
-         CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nmo_occ(ispin), context=blacs_env)
-         CALL fm_pool_create(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, fm_struct)
+         NULLIFY (work_matrices%fm_pool_ao_mo_active(ispin)%pool)
+         CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nactive(ispin), context=blacs_env)
+         CALL fm_pool_create(work_matrices%fm_pool_ao_mo_active(ispin)%pool, fm_struct)
          CALL cp_fm_struct_release(fm_struct)
       END DO
 
@@ -680,17 +697,18 @@ CONTAINS
 
       ALLOCATE (work_matrices%S_C0(nspins))
       DO ispin = 1, nspins
-         CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, work_matrices%S_C0(ispin))
-
+         CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nmo_occ(ispin), context=blacs_env)
+         CALL cp_fm_create(work_matrices%S_C0(ispin), fm_struct)
          CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, gs_mos(ispin)%mos_occ, work_matrices%S_C0(ispin), &
                                       ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
          CALL parallel_gemm('N', 'T', nao, nao, nmo_occ(ispin), 1.0_dp, work_matrices%S_C0(ispin), &
                             gs_mos(ispin)%mos_occ, 0.0_dp, work_matrices%S_C0_C0T(ispin))
+         CALL cp_fm_struct_release(fm_struct)
       END DO
 
       DO ispin = 1, nspins
          CALL cp_fm_struct_create(fm_struct_evects(ispin)%struct, nrow_global=nao, &
-                                  ncol_global=nmo_occ(ispin), context=sub_env%blacs_env)
+                                  ncol_global=nactive(ispin), context=sub_env%blacs_env)
       END DO
 
       IF (sub_env%is_split) THEN
@@ -897,10 +915,10 @@ CONTAINS
       CALL cp_fm_release(work_matrices%S_C0)
       CALL cp_fm_release(work_matrices%S_C0_C0T)
 
-      DO ispin = SIZE(work_matrices%fm_pool_ao_mo_occ), 1, -1
-         CALL fm_pool_release(work_matrices%fm_pool_ao_mo_occ(ispin)%pool)
+      DO ispin = SIZE(work_matrices%fm_pool_ao_mo_active), 1, -1
+         CALL fm_pool_release(work_matrices%fm_pool_ao_mo_active(ispin)%pool)
       END DO
-      DEALLOCATE (work_matrices%fm_pool_ao_mo_occ)
+      DEALLOCATE (work_matrices%fm_pool_ao_mo_active)
 
       ! sTDA
       IF (ASSOCIATED(work_matrices%gamma_exchange)) THEN

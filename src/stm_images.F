@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -266,7 +266,7 @@ CONTAINS
       LOGICAL, INTENT(IN)                                :: append_cube
 
       CHARACTER(LEN=*), DIMENSION(0:9), PARAMETER :: &
-         torb_string = (/"  s", " px", " py", " pz", "dxy", "dyz", "dzx", "dx2", "dy2", "dz2"/)
+         torb_string = ["  s", " px", " py", " pz", "dxy", "dyz", "dzx", "dx2", "dy2", "dz2"]
       CHARACTER(len=*), PARAMETER                        :: routineN = 'stm_cubes'
 
       CHARACTER(LEN=default_path_length)                 :: filename

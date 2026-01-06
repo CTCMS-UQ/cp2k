@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -139,6 +139,7 @@ MODULE post_scf_bandstructure_types
       INTEGER                                         :: nparam_pade = -1, &
                                                          num_points_per_magnitude = -1
       REAL(KIND=dp)                                   :: freq_max_fit = -1.0_dp, &
+                                                         input_regularization_minimax = -1.0_dp, &
                                                          regularization_minimax = -1.0_dp, &
                                                          stabilize_exp = -1.0_dp
 
@@ -222,7 +223,7 @@ MODULE post_scf_bandstructure_types
                                                       atoms_j_t_group
       LOGICAL, DIMENSION(:, :), ALLOCATABLE        :: skip_Sigma_occ, &
                                                       skip_Sigma_vir
-      ! Marek : rtp_method
+      ! Marek : rtbse_method
       INTEGER                                      :: rtp_method = rtp_method_bse
 
       ! check-arrays and names for restarting
@@ -288,6 +289,13 @@ MODULE post_scf_bandstructure_types
       INTEGER                                      :: n_tasks_Delta_R_local = -1
       INTEGER, DIMENSION(:), ALLOCATABLE           :: task_Delta_R
       INTEGER, DIMENSION(:, :), ALLOCATABLE        :: nblocks_3c
+      LOGICAL, DIMENSION(:), ALLOCATABLE           :: skip_DR_chi, &
+                                                      skip_DR_Sigma
+      LOGICAL, DIMENSION(:, :, :), ALLOCATABLE     :: skip_DR_R_R2_MxM_chi, &
+                                                      skip_DR_R1_R_MxM_Sigma, &
+                                                      skip_DR_R12_S_Goccx3c_chi, &
+                                                      skip_DR_R12_S_Gvirx3c_chi, &
+                                                      skip_DR_R1_S2_Gx3c_Sigma
 
       ! cfm for k-dep overl mat S_µν(k), KS mat h_µν(k,spin) and mo coeff C_μn(k,spin) from SCF
       TYPE(cp_cfm_type), DIMENSION(:), ALLOCATABLE      :: cfm_s_kp
@@ -362,6 +370,13 @@ CONTAINS
       IF (ASSOCIATED(bs_env%cell_to_index_Delta_R)) DEALLOCATE (bs_env%cell_to_index_Delta_R)
       IF (ALLOCATED(bs_env%task_Delta_R)) DEALLOCATE (bs_env%task_Delta_R)
       IF (ALLOCATED(bs_env%nblocks_3c)) DEALLOCATE (bs_env%nblocks_3c)
+      IF (ALLOCATED(bs_env%skip_DR_chi)) DEALLOCATE (bs_env%skip_DR_chi)
+      IF (ALLOCATED(bs_env%skip_DR_Sigma)) DEALLOCATE (bs_env%skip_DR_Sigma)
+      IF (ALLOCATED(bs_env%skip_DR_R_R2_MxM_chi)) DEALLOCATE (bs_env%skip_DR_R_R2_MxM_chi)
+      IF (ALLOCATED(bs_env%skip_DR_R1_R_MxM_Sigma)) DEALLOCATE (bs_env%skip_DR_R1_R_MxM_Sigma)
+      IF (ALLOCATED(bs_env%skip_DR_R12_S_Goccx3c_chi)) DEALLOCATE (bs_env%skip_DR_R12_S_Goccx3c_chi)
+      IF (ALLOCATED(bs_env%skip_DR_R12_S_Gvirx3c_chi)) DEALLOCATE (bs_env%skip_DR_R12_S_Gvirx3c_chi)
+      IF (ALLOCATED(bs_env%skip_DR_R1_S2_Gx3c_Sigma)) DEALLOCATE (bs_env%skip_DR_R1_S2_Gx3c_Sigma)
 
       CALL cp_fm_release(bs_env%fm_s_Gamma)
       CALL cp_fm_release(bs_env%fm_ks_Gamma(1))
@@ -379,8 +394,7 @@ CONTAINS
       CALL cp_fm_release(bs_env%fm_RI_RI)
       CALL cp_fm_release(bs_env%fm_chi_Gamma_freq)
       CALL cp_fm_release(bs_env%fm_W_MIC_freq)
-      ! TODO : Test whether IF (rtp_method == rtp_method_gw) is needed
-      CALL cp_fm_release(bs_env%fm_W_MIC_freq_zero)
+      IF (bs_env%rtp_method == rtp_method_bse) CALL cp_fm_release(bs_env%fm_W_MIC_freq_zero)
       CALL cp_fm_release(bs_env%fm_W_MIC_freq_1_extra)
       CALL cp_fm_release(bs_env%fm_W_MIC_freq_1_no_extra)
       CALL cp_cfm_release(bs_env%cfm_work_mo)

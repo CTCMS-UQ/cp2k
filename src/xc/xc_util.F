@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -61,7 +61,7 @@ CONTAINS
       requires = (xc_deriv_id == xc_deriv_spline2) .OR. &
                  (xc_deriv_id == xc_deriv_spline3) .OR. &
                  (xc_deriv_id == xc_deriv_pw)
-   END FUNCTION
+   END FUNCTION xc_requires_tmp_g
 
 ! **************************************************************************************************
 !> \brief ...
@@ -251,7 +251,7 @@ CONTAINS
          TYPE(pw_c1d_gs_type), INTENT(IN), OPTIONAL            :: pw_g
 
          CHARACTER(len=*), PARAMETER                        :: routineN = 'xc_pw_derive'
-         INTEGER, DIMENSION(3, 3), PARAMETER :: nd = RESHAPE((/1, 0, 0, 0, 1, 0, 0, 0, 1/), (/3, 3/))
+         INTEGER, DIMENSION(3, 3), PARAMETER :: nd = RESHAPE([1, 0, 0, 0, 1, 0, 0, 0, 1], [3, 3])
 
          INTEGER                                            :: handle
          LOGICAL                                            :: my_copy_to_vxcr

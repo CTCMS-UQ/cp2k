@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -166,7 +166,7 @@ CONTAINS
       my_do_reflection_b = .FALSE.
       IF (PRESENT(do_reflection_b) .AND. PRESENT(reflection_z_b)) my_do_reflection_b = do_reflection_b
 
-      G_count = 0; R_count = 0; 
+      G_count = 0; R_count = 0
       ! get mapping between ERIs and atoms, sets, set offsets
       CALL get_eri_offsets(qs_env, basis_type_b, eri_offsets)
 
@@ -418,7 +418,7 @@ CONTAINS
 
       IF (PRESENT(force_a) .OR. PRESENT(force_b)) THEN
          CPASSERT(PRESENT(pab))
-         CPASSERT(ALL(SHAPE(pab) .EQ. SHAPE(hab)))
+         CPASSERT(ALL(SHAPE(pab) == SHAPE(hab)))
       END IF
 
       la_max_d = la_max
@@ -741,9 +741,11 @@ CONTAINS
          END IF
 
          basis_set_a => basis_set_list_a(ikind)%gto_basis_set
-         IF (.NOT. ASSOCIATED(basis_set_a)) CYCLE
+         ! When RI_AUX NONE is invoked, the pointers to basis_set_a and basis_set_b are created,
+         ! but not filled. Therefore, we check for the association and the number of entries.
+         IF (.NOT. ASSOCIATED(basis_set_a) .OR. SUM(basis_set_a%nsgf_set) <= 0) CYCLE
          basis_set_b => basis_set_list_b(jkind)%gto_basis_set
-         IF (.NOT. ASSOCIATED(basis_set_b)) CYCLE
+         IF (.NOT. ASSOCIATED(basis_set_b) .OR. SUM(basis_set_b%nsgf_set) <= 0) CYCLE
          atom_a = atom_of_kind(iatom)
          atom_b = atom_of_kind(jatom)
 
@@ -810,12 +812,12 @@ CONTAINS
                CALL dbcsr_get_block_p(matrix=pabc(ic)%matrix, &
                                       row=irow, col=icol, block=pab_block, found=found)
                CPASSERT(found)
-               IF (irow .EQ. iatom) THEN
-                  to_be_asserted = SIZE(pab_block, 1) .EQ. SIZE(pabc_block, 1) .AND. SIZE(pab_block, 2) .EQ. SIZE(pabc_block, 2)
+               IF (irow == iatom) THEN
+                  to_be_asserted = SIZE(pab_block, 1) == SIZE(pabc_block, 1) .AND. SIZE(pab_block, 2) == SIZE(pabc_block, 2)
                   CPASSERT(to_be_asserted)
                   pabc_block(:, :, ic) = pab_block(:, :)
                ELSE
-                  to_be_asserted = SIZE(pab_block, 2) .EQ. SIZE(pabc_block, 1) .AND. SIZE(pab_block, 1) .EQ. SIZE(pabc_block, 2)
+                  to_be_asserted = SIZE(pab_block, 2) == SIZE(pabc_block, 1) .AND. SIZE(pab_block, 1) == SIZE(pabc_block, 2)
                   CPASSERT(to_be_asserted)
                   pabc_block(:, :, ic) = TRANSPOSE(pab_block(:, :))
                END IF
@@ -908,7 +910,7 @@ CONTAINS
                            $:                         'force_b=force_b(jkind)%forces(:, atom_b), &'*doforce_2
                            $:                         'force_c=force_c(kkind)%forces(:, atom_c), &'*doforce_3
                                                 do_symmetric=do_symmetric, &
-                                                on_diagonal=iatom .EQ. jatom, &
+                                                on_diagonal=iatom == jatom, &
                            $:                         'hdabc=hdabc, &'*dabc
                            $:                         'hadbc=hadbc, &'*adbc
                            $:                         'habdc=habdc, &'*abdc
@@ -933,12 +935,12 @@ CONTAINS
                                    row=irow, col=icol, block=munu_block, found=found)
             CPASSERT(found)
             munu_block(:, :) = 0.0_dp
-            IF (irow .EQ. iatom) THEN
-               to_be_asserted = SIZE(munu_block, 1) .EQ. SIZE(habc, 1) .AND. SIZE(munu_block, 2) .EQ. SIZE(habc, 2)
+            IF (irow == iatom) THEN
+               to_be_asserted = SIZE(munu_block, 1) == SIZE(habc, 1) .AND. SIZE(munu_block, 2) == SIZE(habc, 2)
                CPASSERT(to_be_asserted)
                munu_block(:, :) = habc(:, :, ic)
             ELSE
-               to_be_asserted = SIZE(munu_block, 2) .EQ. SIZE(habc, 1) .AND. SIZE(munu_block, 1) .EQ. SIZE(habc, 2)
+               to_be_asserted = SIZE(munu_block, 2) == SIZE(habc, 1) .AND. SIZE(munu_block, 1) == SIZE(habc, 2)
                CPASSERT(to_be_asserted)
                munu_block(:, :) = TRANSPOSE(habc(:, :, ic))
             END IF
@@ -953,7 +955,7 @@ CONTAINS
                                             row=irow, col=icol, block=munu_block, found=found)
                      CPASSERT(found)
                      munu_block(:, :) = 0.0_dp
-                     IF (irow .EQ. iatom) THEN
+                     IF (irow == iatom) THEN
                         munu_block(:, :) = hdabc(i_xyz, :, :, ic)
                      ELSE
                         munu_block(:, :) = TRANSPOSE(hdabc(i_xyz, :, :, ic))
@@ -965,7 +967,7 @@ CONTAINS
                                             row=irow, col=icol, block=munu_block, found=found)
                      CPASSERT(found)
                      munu_block(:, :) = 0.0_dp
-                     IF (irow .EQ. iatom) THEN
+                     IF (irow == iatom) THEN
                         munu_block(:, :) = hadbc(i_xyz, :, :, ic)
                      ELSE
                         munu_block(:, :) = TRANSPOSE(hadbc(i_xyz, :, :, ic))
@@ -977,7 +979,7 @@ CONTAINS
                                             row=irow, col=icol, block=munu_block, found=found)
                      CPASSERT(found)
                      munu_block(:, :) = 0.0_dp
-                     IF (irow .EQ. iatom) THEN
+                     IF (irow == iatom) THEN
                         munu_block(:, :) = habdc(i_xyz, :, :, ic)
                      ELSE
                         munu_block(:, :) = TRANSPOSE(habdc(i_xyz, :, :, ic))
@@ -1320,11 +1322,9 @@ CONTAINS
          ! in the RI basis, there is only a single primitive Gaussian
          kpgf = 1
 
-         IF (lc_max == 0) THEN
-            nc_start = 1
-         ELSE
-            nc_start = ncoset(lc_max - 1) + 1
-         END IF
+         ! ncoset is indexed by -1,..., ,5
+         ! e.g. for pure s: lc_min = lc_max = 0, nc_start = 1
+         nc_start = ncoset(lc_min - 1) + 1
          nc_end = ncoset(lc_max)
 
          CALL coulomb3(la_max, npgfa, zeta(:), rpgfa(:), la_min, &

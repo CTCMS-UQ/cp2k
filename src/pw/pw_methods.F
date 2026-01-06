@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -33,7 +33,8 @@ MODULE pw_methods
                         accurate_sum
    USE kinds, ONLY: dp
    USE machine, ONLY: m_memory
-   USE mathconstants, ONLY: z_zero
+   USE mathconstants, ONLY: gaussi, &
+                            z_zero
    USE pw_copy_all, ONLY: pw_copy_match
    USE pw_fpga, ONLY: pw_fpga_c1dr3d_3d_dp, &
                       pw_fpga_c1dr3d_3d_sp, &
@@ -2005,7 +2006,7 @@ CONTAINS
                         CPABORT("Nonnegative exponents are not supported!")
 
                      m = SUM(n)
-                     im = CMPLX(0.0_dp, 1.0_dp, KIND=dp)**m
+                     im = gaussi**m
 
                      DO idir = 1, 3
                         IF (n(idir) == 1) THEN

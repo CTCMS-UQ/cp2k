@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -29,7 +29,7 @@ MODULE uff_vdw_radii_table
    REAL(KIND=dp), PARAMETER ::  NAN = -1.0_dp
    ! the table: units are in Angstrom, in the order of z
    REAL(KIND=dp), DIMENSION(NELEMENTS), PARAMETER :: uff_vdw_radius = &
-                                                     (/ &
+                                                     [ &
                                                      1.443_dp, & !  1 H
                                                      1.181_dp, & !  2 He
                                                      1.226_dp, & !  3 Li
@@ -148,7 +148,7 @@ MODULE uff_vdw_radii_table
                                                      NAN, & !116 Lv
                                                      NAN, & !117 Uus
                                                      NAN & !118 Uuo
-                                                     /)
+                                                     ]
 
 CONTAINS
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -63,7 +63,7 @@ CONTAINS
       CALL section_vals_val_get(topology_section, "CHARGE_OCCUP", l_val=topology%charge_occup)
       CALL section_vals_val_get(topology_section, "CHARGE_BETA", l_val=topology%charge_beta)
       CALL section_vals_val_get(topology_section, "CHARGE_EXTENDED", l_val=topology%charge_extended)
-      ival = COUNT((/topology%charge_occup, topology%charge_beta, topology%charge_extended/))
+      ival = COUNT([topology%charge_occup, topology%charge_beta, topology%charge_extended])
       IF (ival > 1) &
          CPABORT("Only one between <CHARGE_OCCUP,CHARGE_BETA,CHARGE_EXTENDED> can be defined! ")
       CALL section_vals_val_get(topology_section, "PARA_RES", l_val=topology%para_res)
@@ -488,7 +488,9 @@ CONTAINS
             topology%const_colv = .TRUE.
             DO ig = 1, ncons
                CALL section_vals_val_get(collective_section, "COLVAR", i_rep_section=ig, i_val=icolvar)
-               CPASSERT(icolvar <= SIZE(colvar_p))
+               IF (icolvar > SIZE(colvar_p)) THEN
+                  CPABORT("More collective constraints than collective variables specified.")
+               END IF
             END DO
             cons_info%nconst_colv = ncons
             ALLOCATE (cons_info%const_colv_mol(ncons))

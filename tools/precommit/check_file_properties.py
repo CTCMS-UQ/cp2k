@@ -18,24 +18,27 @@ T = TypeVar("T")
 CP2K_DIR = pathlib.Path(__file__).resolve().parents[2]
 
 FLAG_EXCEPTIONS = (
-    r"\$\{..*\}\$",
-    r"__..*__",
-    r"_M_..*",
+    r"\$\{.+\}\$",
+    r"__.+__",
+    r"_M_.+",
     r"__ARM_ARCH",
-    r"__ARM_FEATURE_..*",
+    r"__ARM_FEATURE_.+",
     r"CUDA_VERSION",
-    r"DBM_LIBXSMM_PREFETCH",
-    r"DBM_VALIDATE_AGAINST_DBCSR",
+    r"DBM_.+",
     r"OPENMP_TRACE_SYMBOL",
-    r"OPENCL_DBM_..*",
+    r"OPENCL_.+",
+    r"ACC_OPENCL_.+",
     r"FD_DEBUG",
     r"GRID_DO_COLLOCATE",
     r"INTEL_MKL_VERSION",
     r"LIBINT2_MAX_AM_eri",
+    r"LIBGRPP",
+    r"M_",
     r"LIBINT_CONTRACTED_INTS",
     r"XC_MAJOR_VERSION",
     r"XC_MINOR_VERSION",
     r"NDEBUG",
+    r"M_PI",
     r"OMP_DEFAULT_NONE_WITH_OOP",
     r"FTN_NO_DEFAULT_INIT",
     r"_OPENMP",
@@ -45,10 +48,11 @@ FLAG_EXCEPTIONS = (
     r"__COMPILE_REVISION",
     r"__CRAY_PM_FAKE_ENERGY",
     r"__DATA_DIR",
-    r"__FFTW3_UNALIGNED",
     r"__FORCE_USE_FAST_MATH",
     r"__INTEL_LLVM_COMPILER",
     r"__INTEL_COMPILER",
+    r"OFFLOAD_MEMPOOL_OMPALLOC",
+    r"OFFLOAD_BUFFER_MEMPOOL",
     r"OFFLOAD_CHECK",
     r"__OFFLOAD_CUDA",
     r"__OFFLOAD_HIP",
@@ -67,9 +71,26 @@ FLAG_EXCEPTIONS = (
     r"LIBXSMM_VERSION2",
     r"LIBXSMM_VERSION3",
     r"LIBXSMM_VERSION4",
+    r"LIBGRPP_.+",
+    r"TEST_LIBGRPP_.+",
     r"__LIBXSMM2",
     r"CPVERSION",
     r"_WIN32",
+    # TODO: Add CMake support for the following flags or remove the corresponding code.
+    # See also https://github.com/cp2k/cp2k/issues/4611
+    r"__PW_FPGA",
+    r"__PW_FPGA_SP",
+    r"__NO_SOCKETS",
+    r"__SCALAPACK_NO_WA",
+    r"__CRAY_PM_ACCEL_ENERGY",
+    r"__CRAY_PM_ENERGY",
+    r"__NO_STATM_ACCESS",
+    r"__STATM_RESIDENT",
+    r"__STATM_TOTAL",
+    r"__CRAY_PM_ACCEL_ENERGY",
+    r"__CRAY_PM_ENERGY",
+    r"__STATM_RESIDENT",
+    r"__STATM_TOTAL",
 )
 
 FLAG_EXCEPTIONS_RE = re.compile(r"|".join(FLAG_EXCEPTIONS))
@@ -79,6 +100,7 @@ NUM_RE = re.compile(r"[0-9]+[ulUL]*")
 CP2K_FLAGS_RE = re.compile(
     r"FUNCTION cp2k_flags\(\)(.*)END FUNCTION cp2k_flags", re.DOTALL
 )
+CMAKE_OPTION_RE = re.compile(r"option\(\s*(\w+)", re.DOTALL)
 STR_END_NOSPACE_RE = re.compile(r'[^ ]"\s*//\s*&')
 STR_BEGIN_NOSPACE_RE = re.compile(r'^\s*"[^ ]')
 STR_END_SPACE_RE = re.compile(r' "\s*//\s*&')
@@ -115,17 +137,35 @@ BANNER_C = """\
 
 C_EXTENSIONS = (".c", ".cu", ".cpp", ".cc", ".h", ".hpp")
 
-BSD_PATHS = ("src/offload/", "src/grid/", "src/dbm/", "src/base/openmp_trace.c")
+# Non-GPL licenses (directory, file, basename, or generally "startswith")
+BSD_PATHS = (
+    "src/base/openmp_trace.c",
+    "src/mpiwrap/cp_mpi.",
+    "src/offload/",
+    "src/grid/",
+    "src/dbm/",
+)
+MIT_PATHS = ("src/grpp/",)
 
 
 @lru_cache(maxsize=None)
-def get_install_txt() -> str:
-    return CP2K_DIR.joinpath("INSTALL.md").read_text(encoding="utf8")
+def get_src_cmakelists_txt() -> str:
+    return "\n".join(
+        (CP2K_DIR / fn).read_text(encoding="utf8")
+        for fn in ["src/CMakeLists.txt", "cmake/CompilerConfiguration.cmake"]
+    )
+
+
+@lru_cache(maxsize=None)
+def get_build_docs() -> str:
+    files = list((CP2K_DIR / "docs/technologies").glob("**/*.md"))
+    files.append(CP2K_DIR / "docs/getting-started/build-from-source.md")
+    return "\n".join(fn.read_text(encoding="utf8") for fn in files)
 
 
 @lru_cache(maxsize=None)
 def get_flags_src() -> str:
-    cp2k_info = CP2K_DIR.joinpath("src/cp2k_info.F").read_text(encoding="utf8")
+    cp2k_info = (CP2K_DIR / "src/cp2k_info.F").read_text(encoding="utf8")
     match = CP2K_FLAGS_RE.search(cp2k_info)
     assert match
     return match.group(1)
@@ -133,7 +173,7 @@ def get_flags_src() -> str:
 
 @lru_cache(maxsize=None)
 def get_bibliography_dois() -> List[str]:
-    bib = CP2K_DIR.joinpath("src/common/bibliography.F").read_text(encoding="utf8")
+    bib = (CP2K_DIR / "src/common/bibliography.F").read_text(encoding="utf8")
     matches = re.findall(r'doi="([^"]+)"', bib, flags=re.IGNORECASE)
     assert len(matches) > 260 and "10.1016/j.cpc.2004.12.014" in matches
     return matches
@@ -147,7 +187,7 @@ def check_file(path: pathlib.Path) -> List[str]:
     - undocumented preprocessor flags
     - stray unicode characters
     """
-    warnings = []
+    warnings: List[str] = []
 
     fn_ext = path.suffix
     abspath = path.resolve()
@@ -191,7 +231,14 @@ def check_file(path: pathlib.Path) -> List[str]:
     # check banner
     year = datetime.now(timezone.utc).year
     bsd_licensed = any(str(path).startswith(p) for p in BSD_PATHS)
-    spdx = "BSD-3-Clause    " if bsd_licensed else "GPL-2.0-or-later"
+    mit_licensed = any(str(path).startswith(p) for p in MIT_PATHS)
+    if bsd_licensed:
+        spdx = "BSD-3-Clause    "
+    elif mit_licensed:
+        spdx = "MIT             "
+    else:
+        spdx = "GPL-2.0-or-later"
+
     if fn_ext == ".F" and not content.startswith(BANNER_F.format(year, spdx)):
         warnings += [f"{path}: Copyright banner malformed"]
     if fn_ext == ".fypp" and not content.startswith(BANNER_SHELL.format(year, spdx)):
@@ -244,10 +291,20 @@ def check_file(path: pathlib.Path) -> List[str]:
             continue
         if flag == "_OMP_H" and fn_ext == ".cu":
             continue
-        if flag not in get_install_txt():
-            warnings += [f"{path}: Flag '{flag}' not mentioned in INSTALL.md"]
+        if flag not in get_src_cmakelists_txt():
+            warnings += [
+                f"{path}: Flag '{flag}' not mentioned in src/CMakeLists.txt nor cmake/CompilerConfiguration.cmake"
+            ]
         if flag not in get_flags_src():
             warnings += [f"{path}: Flag '{flag}' not mentioned in cp2k_flags()"]
+
+    if "cmake" in str(path).lower():
+        options = CMAKE_OPTION_RE.findall(content)
+        for opt in options:
+            if opt not in get_build_docs():
+                warnings += [
+                    f"{path}: CMake option {opt} not mentioned in docs/technologies section nor build-from-source.md"
+                ]
 
     # Check for DOIs that could be a bibliography reference.
     if re.match(r"docs/[^/]+/.*\.md", str(path)) and "docs/CP2K_INPUT" not in str(path):

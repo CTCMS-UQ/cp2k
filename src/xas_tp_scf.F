@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -540,7 +540,7 @@ CONTAINS
                                       component*component
                END DO ! i size
 
-               IF (sto_state_overlap .GT. max_overlap) THEN
+               IF (sto_state_overlap > max_overlap) THEN
                   max_overlap = sto_state_overlap
                   my_state = istate
                END IF
@@ -558,7 +558,7 @@ CONTAINS
 
       CALL para_env%sync()
       !Calculate the virtual states from the KS matrix matrix_ks(1)
-      IF (nvirtual2 .GT. 0) THEN
+      IF (nvirtual2 > 0) THEN
          NULLIFY (mo_coeff)
          CALL get_mo_set(mos(my_spin), mo_coeff=mo_coeff, nmo=nmo)
          IF (output_unit > 0) THEN
@@ -612,7 +612,7 @@ CONTAINS
          DO istate = 1, nmo
             all_evals(istate) = eigenvalues(istate)
          END DO
-         IF (nvirtual2 .GT. 0) THEN
+         IF (nvirtual2 > 0) THEN
             CALL cp_fm_to_fm(uno_orbs, all_vectors, ncol=nvirtual2, &
                              source_start=1, target_start=1 + nmo)
             DO istate = 1, nvirtual2

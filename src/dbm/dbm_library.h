@@ -1,6 +1,6 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
@@ -32,7 +32,7 @@ void dbm_library_counter_increment(const int m, const int n, const int k);
  * \author Ole Schuett
  ******************************************************************************/
 void dbm_library_print_stats(const int fortran_comm,
-                             void (*print_func)(char *, int),
+                             void (*print_func)(const char *, int, int),
                              const int output_unit);
 
 #endif

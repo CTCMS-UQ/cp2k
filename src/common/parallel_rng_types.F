@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -512,7 +512,7 @@ CONTAINS
       LOGICAL, INTENT(IN), OPTIONAL                      :: antithetic, extended_precision
       TYPE(rng_stream_type)                              :: rng_stream
 
-      IF (LEN_TRIM(name) .GT. rng_name_length) &
+      IF (LEN_TRIM(name) > rng_name_length) &
          CPABORT("given random number generator name is too long")
 
       rng_stream%name = TRIM(name)
@@ -1197,6 +1197,6 @@ CONTAINS
          arr(idxa) = arr(idxb)
          arr(idxb) = tmp
       END DO
-   END SUBROUTINE
+   END SUBROUTINE shuffle
 
 END MODULE parallel_rng_types

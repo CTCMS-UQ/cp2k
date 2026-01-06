@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -64,7 +64,7 @@ CONTAINS
                                        " [Brehm2020], and [Brehm2021]"// &
                                        " (via LibVori see <https://brehm-research.de/voronoi>).", &
                                        print_level=debug_print_level + 1, filename="", &
-                                       citations=(/Rycroft2009, Thomas2015, Brehm2018, Brehm2020, Brehm2021/))
+                                       citations=[Rycroft2009, Thomas2015, Brehm2018, Brehm2020, Brehm2021])
 
       NULLIFY (keyword)
       CALL keyword_create(keyword, __LOCATION__, name="APPEND", &
@@ -115,7 +115,7 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, name="REFINEMENT_FACTOR", &
                           description="Sets the refinement factor for the Voronoi integration.", &
-                          usage="REFINEMENT 2", n_var=1, default_i_val=1, type_of_var=integer_t)
+                          usage="REFINEMENT_FACTOR 2", n_var=1, default_i_val=1, type_of_var=integer_t)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
 
@@ -126,7 +126,7 @@ CONTAINS
                           enum_c_vals=s2a("UNITY", "VDW", "COVALENT", "USER"), &
                           enum_desc=s2a("Use unity radii (non-radical Voronoi tessellation)", "Use VdW atom radii", &
                                         "Use covalent atom radii", "Use user-specified atom radii"), &
-                          enum_i_vals=(/voro_radii_unity, voro_radii_vdw, voro_radii_cov, voro_radii_user/))
+                          enum_i_vals=[voro_radii_unity, voro_radii_vdw, voro_radii_cov, voro_radii_user])
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
 

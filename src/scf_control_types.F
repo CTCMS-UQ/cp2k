@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -318,7 +318,7 @@ CONTAINS
 
       INTEGER                                            :: cholesky_flag, handle, ialgo
       INTEGER, DIMENSION(:), POINTER                     :: added_mos
-      LOGICAL                                            :: do_mixing
+      LOGICAL                                            :: do_mixing, explicit
       REAL(KIND=dp), DIMENSION(:), POINTER               :: roks_parameter
       TYPE(section_vals_type), POINTER                   :: mixing_section, outer_scf_section, &
                                                             scf_section, smear_section
@@ -341,11 +341,20 @@ CONTAINS
          scf_control%use_diag = .TRUE.
       END IF
       CALL section_vals_val_get(scf_section, "OT%ALGORITHM", i_val=ialgo)
-      scf_control%do_outer_scf_reortho = ialgo .EQ. ot_algo_taylor_or_diag
+      scf_control%do_outer_scf_reortho = ialgo == ot_algo_taylor_or_diag
       CALL section_vals_val_get(scf_section, "SCF_GUESS", i_val=scf_control%density_guess)
-      CALL section_vals_val_get(scf_section, "EPS_DIIS", r_val=scf_control%eps_diis)
       CALL section_vals_val_get(scf_section, "eps_eigval", r_val=scf_control%eps_eigval)
       CALL section_vals_val_get(scf_section, "cholesky", i_val=cholesky_flag)
+      IF (scf_control%use_ot) THEN
+         ! eps_diis default is 0 for OT
+         scf_control%eps_diis = 0.0_dp
+         CALL section_vals_val_get(scf_section, "EPS_DIIS", explicit=explicit)
+         IF (explicit) THEN
+            CALL section_vals_val_get(scf_section, "EPS_DIIS", r_val=scf_control%eps_diis)
+         END IF
+      ELSE
+         CALL section_vals_val_get(scf_section, "EPS_DIIS", r_val=scf_control%eps_diis)
+      END IF
       IF (cholesky_flag > 0) THEN
          scf_control%use_cholesky = .TRUE.
       END IF
@@ -621,9 +630,8 @@ CONTAINS
                   WRITE (UNIT=output_unit, FMT="(T25,A,T71,ES10.2)") &
                      "Electronic temperature [a.u.]:", scf_control%smear%electronic_temperature, &
                      "Accuracy threshold:", scf_control%smear%eps_fermi_dirac
-                  IF (scf_control%smear%fixed_mag_mom > 0.0_dp) WRITE (UNIT=output_unit, FMT="(T25,A,F10.5)") &
-                     "Spin channel alpha and spin channel beta are smeared independently, keeping"// &
-                     " fixed difference in number of electrons equal to ", scf_control%smear%fixed_mag_mom
+                  IF (scf_control%smear%fixed_mag_mom > 0.0_dp) WRITE (UNIT=output_unit, FMT="(T25,A,T61,F20.1)") &
+                     "Fixed magnetic moment set to:", scf_control%smear%fixed_mag_mom
                CASE (smear_energy_window)
                   WRITE (UNIT=output_unit, FMT="(T25,A,T71,F10.6)") &
                      "Smear window [a.u.]:       ", scf_control%smear%window_size

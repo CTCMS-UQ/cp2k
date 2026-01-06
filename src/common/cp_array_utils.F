@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -146,7 +146,7 @@ CONTAINS
          IF (PRESENT(el_format)) THEN
             DO i = 1, SIZE(array) - 1
                WRITE (unit=unit_nr, fmt=el_format, advance="no") array(i)
-               IF (MOD(i, 5) .EQ. 0) THEN  ! only a few elements per line
+               IF (MOD(i, 5) == 0) THEN  ! only a few elements per line
                   WRITE (unit=unit_nr, fmt="(',')")
                ELSE
                   WRITE (unit=unit_nr, fmt="(',')", advance="no")
@@ -157,7 +157,7 @@ CONTAINS
          ELSE
             DO i = 1, SIZE(array) - 1
                WRITE (unit=unit_nr, fmt=defaultFormat, advance="no") array(i)
-               IF (MOD(i, 5) .EQ. 0) THEN  ! only a few elements per line
+               IF (MOD(i, 5) == 0) THEN  ! only a few elements per line
                   WRITE (unit=unit_nr, fmt="(',')")
                ELSE
                   WRITE (unit=unit_nr, fmt="(',')", advance="no")
@@ -190,7 +190,7 @@ CONTAINS
          INTEGER :: iostat, i
          CHARACTER(len=*), PARAMETER :: defaultFormat = ${defaultFormatType1}$
          CHARACTER(len=200) :: fmtstr
-         CHARACTER(len=10) :: nRiga
+         CHARACTER(len=25) :: nRiga
 
          nRiga = cp_to_string(SIZE(array, 2))
          DO i = 1, SIZE(array, 1)

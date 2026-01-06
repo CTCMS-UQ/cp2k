@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -44,8 +44,8 @@ MODULE submatrix_dissection
    USE cp_dbcsr_api,                    ONLY: &
         dbcsr_distribution_get, dbcsr_distribution_type, dbcsr_finalize, dbcsr_get_block_p, &
         dbcsr_get_info, dbcsr_get_stored_coordinates, dbcsr_iterator_blocks_left, &
-        dbcsr_iterator_next_block, dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, &
-        dbcsr_put_block, dbcsr_type
+        dbcsr_iterator_next_block, dbcsr_iterator_readonly_start, dbcsr_iterator_stop, &
+        dbcsr_iterator_type, dbcsr_put_block, dbcsr_type
    USE kinds,                           ONLY: dp
    USE message_passing,                 ONLY: mp_comm_type
    USE submatrix_types,                 ONLY: buffer_type,&
@@ -114,14 +114,14 @@ CONTAINS
       first = 1
       DO i = 1, nonzero_rows%elements
          blkid = nonzero_rows%get(i)
-         IF (blkid .EQ. (sm_id - 1)*this%cols_per_sm + 1) THEN
+         IF (blkid == (sm_id - 1)*this%cols_per_sm + 1) THEN
             ! We just found the nonzero row that corresponds to the first inducing column of our submatrix
             ! Now add up block sizes to determine the last one as well
             last = first - 1
             DO j = i, nonzero_rows%elements
                blkid = nonzero_rows%get(j)
                last = last + this%col_blk_size(blkid)
-               IF (blkid .EQ. (sm_id)*this%cols_per_sm) EXIT
+               IF (blkid == (sm_id)*this%cols_per_sm) EXIT
             END DO
             EXIT
          END IF
@@ -144,7 +144,7 @@ CONTAINS
       CLASS(submatrix_dissection_type), INTENT(INOUT)  :: this
       TYPE(dbcsr_type), INTENT(IN)                     :: matrix_p
 
-      INTEGER                                          :: cur_row, cur_col, cur_blk, i, j, k, l, m, l_limit_left, l_limit_right, &
+      INTEGER                                          :: cur_row, cur_col, i, j, k, l, m, l_limit_left, l_limit_right, &
                                                           bufsize, bufsize_next
       INTEGER, DIMENSION(:), ALLOCATABLE               :: blocks_per_rank, coo_dsplcmnts, num_blockids_send, num_blockids_recv
       TYPE(dbcsr_iterator_type)                        :: iter
@@ -158,14 +158,14 @@ CONTAINS
       TYPE(intBuffer_type), DIMENSION(:), ALLOCATABLE  :: blocks_for_rank
 
       ! Additional structures for threaded parts
-      INTEGER                                          :: numthreads, mytid, group_handle
+      INTEGER                                          :: numthreads, mytid
       ! Indexing starts at 0 to match thread ids
       TYPE(setarray_type), DIMENSION(:), ALLOCATABLE   :: nonzero_rows_t
       TYPE(setarray_type), DIMENSION(:), ALLOCATABLE   :: result_blocks_from_rank_t, result_blocks_for_rank_t, &
                                                           blocks_from_rank_t
 
       LOGICAL                                          :: valid
-      REAL(KIND=dp), DIMENSION(:), POINTER             :: blockp
+      REAL(KIND=dp), DIMENSION(:, :), POINTER           :: blockp
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'submatrix_dissection_init'
       INTEGER :: handle
@@ -175,17 +175,15 @@ CONTAINS
 
       this%dbcsr_mat = matrix_p
       CALL dbcsr_get_info(matrix=this%dbcsr_mat, nblkcols_total=this%nblkcols, nblkrows_total=this%nblkrows, &
-                         row_blk_size=this%row_blk_size, col_blk_size=this%col_blk_size, group=group_handle, distribution=this%dist)
+                          row_blk_size=this%row_blk_size, col_blk_size=this%col_blk_size, group=this%group, distribution=this%dist)
       CALL dbcsr_distribution_get(dist=this%dist, mynode=this%myrank, numnodes=this%numnodes)
 
-      CALL this%group%set_handle(group_handle)
-
-      IF (this%nblkcols .NE. this%nblkrows) THEN
+      IF (this%nblkcols /= this%nblkrows) THEN
          CPABORT("Number of block rows and cols need to be identical")
       END IF
 
       DO i = 1, this%nblkcols
-         IF (this%col_blk_size(i) .NE. this%row_blk_size(i)) THEN
+         IF (this%col_blk_size(i) /= this%row_blk_size(i)) THEN
             CPABORT("Block row sizes and col sizes need to be identical")
          END IF
       END DO
@@ -201,9 +199,9 @@ CONTAINS
 
       ! Determine number of locally stored blocks
       this%local_blocks = 0
-      CALL dbcsr_iterator_start(iter, this%dbcsr_mat, read_only=.TRUE.)
+      CALL dbcsr_iterator_readonly_start(iter, this%dbcsr_mat)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
-         CALL dbcsr_iterator_next_block(iter, cur_row, cur_col, cur_blk)
+         CALL dbcsr_iterator_next_block(iter, cur_row, cur_col)
          this%local_blocks = this%local_blocks + 1
       END DO
       CALL dbcsr_iterator_stop(iter)
@@ -216,9 +214,9 @@ CONTAINS
                 this%result_blocks_for_rank_buf_offsets(0:this%numnodes - 1))
 
       i = 1
-      CALL dbcsr_iterator_start(iter, this%dbcsr_mat, read_only=.TRUE.)
+      CALL dbcsr_iterator_readonly_start(iter, this%dbcsr_mat)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
-         CALL dbcsr_iterator_next_block(iter, cur_row, cur_col, cur_blk)
+         CALL dbcsr_iterator_next_block(iter, cur_row, cur_col)
          this%coo_cols_local(i) = cur_col
          this%coo_rows_local(i) = cur_row
          i = i + 1
@@ -251,8 +249,8 @@ CONTAINS
       this%coo_col_offsets(this%nblkcols + 1) = this%nblks + 1
       j = 1
       DO i = 1, this%nblkcols
-         DO WHILE ((j .LE. this%nblks))
-            IF (this%coo_cols(j) .GE. i) EXIT
+         DO WHILE ((j <= this%nblks))
+            IF (this%coo_cols(j) >= i) EXIT
             j = j + 1
          END DO
          this%coo_col_offsets(i) = j
@@ -262,8 +260,8 @@ CONTAINS
       this%coo_col_offsets_local(this%nblkcols + 1) = this%local_blocks + 1
       j = 1
       DO i = 1, this%nblkcols
-         DO WHILE ((j .LE. this%local_blocks))
-            IF (this%coo_cols_local(j) .GE. i) EXIT
+         DO WHILE ((j <= this%local_blocks))
+            IF (this%coo_cols_local(j) >= i) EXIT
             j = j + 1
          END DO
          this%coo_col_offsets_local(i) = j
@@ -304,9 +302,9 @@ CONTAINS
          flops_current = flops_current + 2.0D0*this%submatrix_sizes(i)*this%submatrix_sizes(i)*this%submatrix_sizes(i)
          flops_remaining = flops_total - flops_current
          flops_threshold = (this%numnodes - j - 1)*flops_per_rank
-         IF ((j .LT. (this%numnodes - 1)) &
-             .AND. ((flops_remaining .LE. flops_threshold &
-                     .OR. (this%number_of_submatrices - i) .LT. (this%numnodes - j)))) THEN
+         IF ((j < (this%numnodes - 1)) &
+             .AND. ((flops_remaining <= flops_threshold &
+                     .OR. (this%number_of_submatrices - i) < (this%numnodes - j)))) THEN
             j = j + 1
             flops_total = flops_total - flops_current
             flops_current = 0.0D0
@@ -345,17 +343,17 @@ CONTAINS
                ! This block will be required to assemble the final block matrix as it is within an inducing column for submatrix i.
                ! Figure out who stores it and insert it into the result_blocks_* sets.
                CALL dbcsr_get_stored_coordinates(matrix=this%dbcsr_mat, row=this%coo_rows(k), column=j, processor=m)
-               IF (m .EQ. this%myrank) THEN
+               IF (m == this%myrank) THEN
                   CALL result_blocks_from_rank_t(mytid)%sets(this%submatrix_owners(i))%insert(k)
                END IF
-               IF (this%submatrix_owners(i) .EQ. this%myrank) THEN
+               IF (this%submatrix_owners(i) == this%myrank) THEN
                   CALL nonzero_rows_t(mytid)%sets(1)%insert(this%coo_rows(k))
                   CALL result_blocks_for_rank_t(mytid)%sets(m)%insert(k)
                END IF
             END DO
          END DO
 
-         IF (this%submatrix_owners(i) .NE. this%myrank) CYCLE
+         IF (this%submatrix_owners(i) /= this%myrank) CYCLE
 
          ! In the following, we determine all blocks required to build the submatrix. We interpret nonzero_rows_t(mytid)(j) as
          ! column and nonzero_rows_t(mytid)(k) as row.
@@ -366,13 +364,13 @@ CONTAINS
             DO k = 1, nonzero_rows_t(mytid)%sets(1)%elements
                cur_row = nonzero_rows_t(mytid)%sets(1)%get(k)
                l = l_limit_left
-               DO WHILE (l .LE. l_limit_right)
-                  IF (this%coo_rows(l) .GE. cur_row) EXIT
+               DO WHILE (l <= l_limit_right)
+                  IF (this%coo_rows(l) >= cur_row) EXIT
                   l = l + 1
                END DO
                l_limit_left = l
-               IF (l .LE. l_limit_right) THEN
-                  IF (this%coo_rows(l) .EQ. cur_row) THEN
+               IF (l <= l_limit_right) THEN
+                  IF (this%coo_rows(l) == cur_row) THEN
                      ! We found a valid block. Figure out what to do with it.
                      CALL dbcsr_get_stored_coordinates(matrix=this%dbcsr_mat, row=this%coo_rows(l), &
                                                        column=this%coo_cols(l), processor=m)
@@ -420,7 +418,7 @@ CONTAINS
       END DO
       DEALLOCATE (num_blockids_send, num_blockids_recv)
 
-      IF (this%numnodes .GT. 1) THEN
+      IF (this%numnodes > 1) THEN
          DO i = 1, this%numnodes
             k = MODULO(this%myrank - i, this%numnodes) ! rank to receive from
             CALL this%group%irecv(msgout=blocks_for_rank(k)%data, source=k, request=blocks_for_rank(k)%mpi_request)
@@ -441,7 +439,7 @@ CONTAINS
 
       ! Make get calls on this%result_blocks_for_rank(...) threadsafe in other routines by updating the internal sorted list
       DO m = 0, this%numnodes - 1
-         IF ((.NOT. this%result_blocks_for_rank(m)%sorted_up_to_date) .AND. (this%result_blocks_for_rank(m)%elements .GT. 0)) THEN
+         IF ((.NOT. this%result_blocks_for_rank(m)%sorted_up_to_date) .AND. (this%result_blocks_for_rank(m)%elements > 0)) THEN
             CALL this%result_blocks_for_rank(m)%update_sorted
          END IF
       END DO
@@ -472,7 +470,7 @@ CONTAINS
                CPABORT("Block included in our COO and placed on our rank could not be fetched!")
             END IF
             bufsize_next = bufsize + SIZE(blockp)
-            sendbufs(i)%data(bufsize + 1:bufsize_next) = blockp
+            sendbufs(i)%data(bufsize + 1:bufsize_next) = RESHAPE(blockp, [SIZE(blockp)])
             bufsize = bufsize_next
          END DO
       END DO
@@ -500,7 +498,7 @@ CONTAINS
       END DO
       DEALLOCATE (blocks_for_rank, blocks_from_rank)
 
-      IF (this%numnodes .GT. 1) THEN
+      IF (this%numnodes > 1) THEN
          ! Communicate. We attempt to balance communication load in the network here by starting our sends with our right neighbor
          ! and first trying to receive from our left neighbor.
          DO i = 1, this%numnodes
@@ -598,7 +596,7 @@ CONTAINS
          CPABORT("Submatrix dissection not initialized")
       END IF
 
-      IF (this%myrank .NE. this%submatrix_owners(sm_id)) THEN
+      IF (this%myrank /= this%submatrix_owners(sm_id)) THEN
          CPABORT("This rank is not supposed to construct this submatrix")
       END IF
 
@@ -627,14 +625,14 @@ CONTAINS
             offset_y2 = offset_y1 + this%col_blk_size(nonzero_rows%get(i))
             ! Copy block nonzero_rows(i),nonzero_rows(j) to sm(i,j) (if the block actually exists)
             k = k_limit_left
-            DO WHILE (k .LE. k_limit_right)
-               IF (this%coo_rows(k) .GE. nonzero_rows%get(i)) EXIT
+            DO WHILE (k <= k_limit_right)
+               IF (this%coo_rows(k) >= nonzero_rows%get(i)) EXIT
                k = k + 1
             END DO
             k_limit_left = k
-            IF (this%coo_rows(k) .EQ. nonzero_rows%get(i)) THEN ! it does exist and k is our block id
+            IF (this%coo_rows(k) == nonzero_rows%get(i)) THEN ! it does exist and k is our block id
                sm(offset_y1 + 1:offset_y2, offset_x1 + 1:offset_x2) = RESHAPE(this%coo_dptr(k)%target, &
-                                                                              (/offset_y2 - offset_y1, offset_x2 - offset_x1/))
+                                                                              [offset_y2 - offset_y1, offset_x2 - offset_x1])
             END IF
             offset_y1 = offset_y2
          END DO
@@ -664,14 +662,14 @@ CONTAINS
 
       count = 0
       DO i = 1, this%number_of_submatrices
-         IF (this%submatrix_owners(i) .EQ. rank) count = count + 1
+         IF (this%submatrix_owners(i) == rank) count = count + 1
       END DO
 
       ALLOCATE (sm_ids(count))
 
       count = 0
       DO i = 1, this%number_of_submatrices
-         IF (this%submatrix_owners(i) .EQ. rank) THEN
+         IF (this%submatrix_owners(i) == rank) THEN
             count = count + 1
             sm_ids(count) = i
          END IF
@@ -699,7 +697,7 @@ CONTAINS
          CPABORT("Submatrix dissection is not initizalized")
       END IF
 
-      IF (this%myrank .NE. this%submatrix_owners(sm_id)) THEN
+      IF (this%myrank /= this%submatrix_owners(sm_id)) THEN
          CPABORT("This rank is not supposed to operate on this submatrix")
       END IF
 
@@ -716,13 +714,13 @@ CONTAINS
 
       sm_col_offset = 0
       DO i = 1, nonzero_rows%elements
-         IF (nonzero_rows%get(i) .EQ. (sm_id - 1)*this%cols_per_sm + 1) THEN
+         IF (nonzero_rows%get(i) == (sm_id - 1)*this%cols_per_sm + 1) THEN
             ! We just found the nonzero row that corresponds to the first inducing column of our submatrix
             sm_col_offset = i
             EXIT
          END IF
       END DO
-      IF (sm_col_offset .EQ. 0) THEN
+      IF (sm_col_offset == 0) THEN
          CPABORT("Could not determine relevant result columns of submatrix")
       END IF
 
@@ -730,7 +728,7 @@ CONTAINS
       DO j = 1, nonzero_rows%elements
          offset_x2 = offset_x1 + this%col_blk_size(nonzero_rows%get(j))
          ! We only want to copy the blocks from the result columns
-         IF ((j .GE. sm_col_offset) .AND. (j .LT. sm_col_offset + this%cols_per_sm)) THEN
+         IF ((j >= sm_col_offset) .AND. (j < sm_col_offset + this%cols_per_sm)) THEN
             offset_y1 = 0
             k_limit_left = this%coo_col_offsets(nonzero_rows%get(j))
             k_limit_right = this%coo_col_offsets(nonzero_rows%get(j) + 1) - 1
@@ -739,26 +737,26 @@ CONTAINS
                ! Check if sm(i,j), i.e., (nonzero_rows(i),nonzero_rows(j)) exists in the original matrix and if so, copy it into the
                ! correct send buffer.
                k = k_limit_left
-               DO WHILE (k .LE. k_limit_right)
-                  IF (this%coo_rows(k) .GE. nonzero_rows%get(i)) EXIT
+               DO WHILE (k <= k_limit_right)
+                  IF (this%coo_rows(k) >= nonzero_rows%get(i)) EXIT
                   k = k + 1
                END DO
                k_limit_left = k
-               IF (this%coo_rows(k) .EQ. nonzero_rows%get(i)) THEN ! it does exist and k is our block id
+               IF (this%coo_rows(k) == nonzero_rows%get(i)) THEN ! it does exist and k is our block id
                   CALL dbcsr_get_stored_coordinates(matrix=this%dbcsr_mat, row=this%coo_rows(k), column=this%coo_cols(k), &
                                                     processor=m)
-                  DO WHILE (buf_offset_idxs(m) .LE. this%result_blocks_for_rank(m)%elements)
-                     IF (this%result_blocks_for_rank(m)%get(buf_offset_idxs(m)) .GE. k) EXIT
+                  DO WHILE (buf_offset_idxs(m) <= this%result_blocks_for_rank(m)%elements)
+                     IF (this%result_blocks_for_rank(m)%get(buf_offset_idxs(m)) >= k) EXIT
                      buf_offset_idxs(m) = buf_offset_idxs(m) + 1
                   END DO
-                  IF (this%result_blocks_for_rank(m)%get(buf_offset_idxs(m)) .NE. k) THEN
+                  IF (this%result_blocks_for_rank(m)%get(buf_offset_idxs(m)) /= k) THEN
                      CPABORT("Could not determine buffer offset for block")
                   END IF
                   bufsize = this%result_blocks_for_rank_buf_offsets(m)%data(buf_offset_idxs(m))
                   bufsize_next = bufsize + this%col_blk_size(this%coo_cols(k))*this%col_blk_size(this%coo_rows(k))
                   this%result_sendbufs(m)%data(bufsize + 1:bufsize_next) = RESHAPE( &
                                                                            sm(offset_y1 + 1:offset_y2, offset_x1 + 1:offset_x2), &
-                                                                           (/bufsize_next - bufsize/))
+                                                                           [bufsize_next - bufsize])
                END IF
                offset_y1 = offset_y2
             END DO
@@ -786,7 +784,8 @@ CONTAINS
       TYPE(dbcsr_type), INTENT(INOUT)                                 :: resultmat
 
       INTEGER                                                         :: i, j, k, cur_row, cur_col, cur_sm, cur_buf, last_buf, &
-                                                                         bufsize, bufsize_next
+                                                                         bufsize, bufsize_next, row_size, col_size
+      REAL(kind=dp), DIMENSION(:), POINTER                            :: vector
       TYPE(buffer_type), DIMENSION(:), ALLOCATABLE                    :: result_recvbufs
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'submatrix_communicate_results'
@@ -806,7 +805,7 @@ CONTAINS
 
       ! Communicate. We attempt to balance communication load in the network here by starting our sends with our right neighbor
       ! and first trying to receive from our left neighbor.
-      IF (this%numnodes .GT. 1) THEN
+      IF (this%numnodes > 1) THEN
          DO i = 1, this%numnodes
             k = MODULO(this%myrank - i, this%numnodes) ! rank to receive from
             CALL this%group%irecv(msgout=result_recvbufs(k)%data, source=k, request=result_recvbufs(k)%mpi_request)
@@ -828,10 +827,13 @@ CONTAINS
          cur_row = this%coo_rows_local(i)
          cur_sm = (cur_col - 1)/this%cols_per_sm + 1
          cur_buf = this%submatrix_owners(cur_sm)
-         IF (cur_buf .GT. last_buf) bufsize = 0
-         bufsize_next = bufsize + this%col_blk_size(cur_row)*this%col_blk_size(cur_col)
+         IF (cur_buf > last_buf) bufsize = 0
+         row_size = this%row_blk_size(cur_row)
+         col_size = this%col_blk_size(cur_col)
+         bufsize_next = bufsize + row_size*col_size
+         vector => result_recvbufs(cur_buf)%data(bufsize + 1:bufsize_next)
          CALL dbcsr_put_block(matrix=resultmat, row=cur_row, col=cur_col, &
-                              block=result_recvbufs(cur_buf)%data(bufsize + 1:bufsize_next))
+                              block=RESHAPE(vector, [row_size, col_size]))
          bufsize = bufsize_next
          last_buf = cur_buf
       END DO
@@ -860,7 +862,7 @@ CONTAINS
 
       INTEGER                                            :: i, j, pivot_a, pivot_b, tmp
 
-      IF (right - left .LT. 1) RETURN
+      IF (right - left < 1) RETURN
 
       i = left
       j = right - 1
@@ -868,13 +870,13 @@ CONTAINS
       pivot_b = arr_b(right)
 
       DO
-         DO WHILE ((arr_a(i) .LT. pivot_a) .OR. ((arr_a(i) .EQ. pivot_a) .AND. (arr_b(i) .LT. pivot_b)))
+         DO WHILE ((arr_a(i) < pivot_a) .OR. ((arr_a(i) == pivot_a) .AND. (arr_b(i) < pivot_b)))
             i = i + 1
          END DO
-         DO WHILE ((j .GT. i) .AND. ((arr_a(j) .GT. pivot_a) .OR. ((arr_a(j) .EQ. pivot_a) .AND. (arr_b(j) .GE. pivot_b))))
+         DO WHILE ((j > i) .AND. ((arr_a(j) > pivot_a) .OR. ((arr_a(j) == pivot_a) .AND. (arr_b(j) >= pivot_b))))
             j = j - 1
          END DO
-         IF (i .LT. j) THEN
+         IF (i < j) THEN
             tmp = arr_a(i)
             arr_a(i) = arr_a(j)
             arr_a(j) = tmp
@@ -886,7 +888,7 @@ CONTAINS
          END IF
       END DO
 
-      IF ((arr_a(i) .GT. pivot_a) .OR. (arr_a(i) .EQ. pivot_a .AND. arr_b(i) .GT. pivot_b)) THEN
+      IF ((arr_a(i) > pivot_a) .OR. (arr_a(i) == pivot_a .AND. arr_b(i) > pivot_b)) THEN
          tmp = arr_a(i)
          arr_a(i) = arr_a(right)
          arr_a(right) = tmp
@@ -895,8 +897,8 @@ CONTAINS
          arr_b(right) = tmp
       END IF
 
-      IF (i - 1 .GT. left) CALL qsort_two(arr_a, arr_b, left, i - 1)
-      IF (i + 1 .LT. right) CALL qsort_two(arr_a, arr_b, i + 1, right)
+      IF (i - 1 > left) CALL qsort_two(arr_a, arr_b, left, i - 1)
+      IF (i + 1 < right) CALL qsort_two(arr_a, arr_b, i + 1, right)
 
    END SUBROUTINE qsort_two
 

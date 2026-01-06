@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -289,7 +289,7 @@ CONTAINS
          L(i, i) = 1.0_dp
          D(i) = SST(i, i)
          DO j = 1, i - 1
-            L(i, j) = SST(i, j); 
+            L(i, j) = SST(i, j);
             DO k = 1, j - 1
                L(i, j) = L(i, j) - L(i, k)*L(j, k)*D(k)
             END DO

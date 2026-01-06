@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -92,7 +92,7 @@ MODULE force_env_types
                                  use_ipi = 510
 
    CHARACTER(LEN=10), DIMENSION(501:510), PARAMETER, PUBLIC :: &
-      use_prog_name = (/ &
+      use_prog_name = [ &
       "FIST  ", &
       "QS    ", &
       "QMMM  ", &
@@ -102,7 +102,7 @@ MODULE force_env_types
       "EMBED ", &
       "SIRIUS", &
       "NNP   ", &
-      "IPI   "/)
+      "IPI   "]
 
    PUBLIC :: force_env_type, &
              force_env_p_type

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -145,7 +145,7 @@ CONTAINS
          DO lx = 0, l
             DO ly = 0, l - lx
                lz = l - lx - ly
-               indco(1:3, coset(lx, ly, lz)) = (/lx, ly, lz/)
+               indco(1:3, coset(lx, ly, lz)) = [lx, ly, lz]
             END DO
          END DO
       END DO
@@ -180,7 +180,7 @@ CONTAINS
       DO l = 0, maxl
          DO m = -l, l
             iso = iso + 1
-            indso(1:2, iso) = (/l, m/)
+            indso(1:2, iso) = [l, m]
             indso_inv(l, m) = iso
          END DO
       END DO

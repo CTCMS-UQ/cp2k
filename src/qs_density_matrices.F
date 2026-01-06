@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -16,9 +16,9 @@ MODULE qs_density_matrices
    USE cp_dbcsr_api,                    ONLY: dbcsr_copy,&
                                               dbcsr_multiply,&
                                               dbcsr_release,&
-                                              dbcsr_scale_by_vector,&
                                               dbcsr_set,&
                                               dbcsr_type
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_scale_by_vector
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
                                               cp_dbcsr_plus_fm_fm_t,&
@@ -27,7 +27,7 @@ MODULE qs_density_matrices
                                               cp_fm_scale_and_add,&
                                               cp_fm_symm,&
                                               cp_fm_transpose,&
-                                              cp_fm_upper_to_full
+                                              cp_fm_uplo_to_full
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                               cp_fm_struct_release,&
                                               cp_fm_struct_type
@@ -233,7 +233,7 @@ CONTAINS
       CALL cp_fm_struct_create(fm_struct_tmp, nrow_global=ncol_global, ncol_global=ncol_global, &
                                para_env=mo_set%mo_coeff%matrix_struct%para_env, &
                                context=mo_set%mo_coeff%matrix_struct%context)
-      CALL cp_fm_create(h_block, fm_struct_tmp, name="h block")
+      CALL cp_fm_create(h_block, fm_struct_tmp, name="h block", set_zero=.TRUE.)
       IF (do_symm) CALL cp_fm_create(h_block_t, fm_struct_tmp, name="h block t")
       CALL cp_fm_struct_release(fm_struct_tmp)
 
@@ -332,7 +332,7 @@ CONTAINS
       CALL cp_fm_struct_release(fm_struct)
       CALL copy_dbcsr_to_fm(matrix_ks, ks)
       CALL copy_dbcsr_to_fm(matrix_p, p)
-      CALL cp_fm_upper_to_full(p, work)
+      CALL cp_fm_uplo_to_full(p, work)
       CALL cp_fm_symm("L", "U", nao, nao, 1.0_dp, ks, p, 0.0_dp, work)
       CALL parallel_gemm("T", "N", nao, nao, nao, 1.0_dp, p, work, 0.0_dp, ks)
       CALL dbcsr_set(matrix_w, 0.0_dp)
@@ -371,24 +371,9 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-!     CALL cp_fm_get_info(matrix=mo_set%mo_coeff, ncol_global=ncol, nrow_global=nrow)
-!     CALL cp_fm_create(scrv, mo_set%mo_coeff%matrix_struct, "scr vectors")
-!     CALL cp_fm_struct_create(fm_struct_tmp, nrow_global=ncol, ncol_global=ncol, &
-!                              para_env=mo_set%mo_coeff%matrix_struct%para_env, &
-!                              context=mo_set%mo_coeff%matrix_struct%context)
-!     CALL cp_fm_create(ksmat, fm_struct_tmp, name="KS")
-!     CALL cp_fm_struct_release(fm_struct_tmp)
-!     CALL cp_dbcsr_sm_fm_multiply(ks_matrix, mo_set%mo_coeff, scrv, ncol)
-!     CALL parallel_gemm("T", "N", ncol, ncol, nrow, 1.0_dp, mo_set%mo_coeff, scrv, 0.0_dp, ksmat)
-!     CALL parallel_gemm("N", "N", nrow, ncol, ncol, 1.0_dp, mo_set%mo_coeff, ksmat, 0.0_dp, scrv)
-!     CALL dbcsr_set(w_matrix, 0.0_dp)
-!     CALL cp_dbcsr_plus_fm_fm_t(w_matrix, matrix_v=scrv, matrix_g=psi1, &
-!                                ncol=mo_set%homo, symmetry_mode=1)
-!     CALL cp_fm_release(scrv)
-!     CALL cp_fm_release(ksmat)
       CALL cp_fm_get_info(matrix=mo_set%mo_coeff, ncol_global=ncol, nrow_global=nrow)
       nocc = mo_set%homo
-      CALL cp_fm_create(scrv, mo_set%mo_coeff%matrix_struct, "scr vectors")
+      CALL cp_fm_create(scrv, mo_set%mo_coeff%matrix_struct, "scr vectors", set_zero=.TRUE.)
       CALL cp_fm_struct_create(fm_struct_tmp, nrow_global=nocc, ncol_global=nocc, &
                                para_env=mo_set%mo_coeff%matrix_struct%para_env, &
                                context=mo_set%mo_coeff%matrix_struct%context)
@@ -436,7 +421,7 @@ CONTAINS
 
       falpha = focc
 
-      CALL cp_fm_create(hcvec, c0vec%matrix_struct, "hcvec")
+      CALL cp_fm_create(hcvec, c0vec%matrix_struct, name="hcvec", set_zero=.TRUE.)
       CALL cp_fm_get_info(hcvec, matrix_struct=fm_struct, nrow_global=nao, ncol_global=norb)
       CPASSERT(nocc <= norb .AND. nocc > 0)
       norb = nocc
@@ -460,7 +445,7 @@ CONTAINS
 
 ! **************************************************************************************************
 !> \brief Calculate the excited state W matrix from the MO eigenvectors, KS matrix
-!> \param mos_occ ...
+!> \param mos_active ...
 !> \param xvec ...
 !> \param ks_matrix ...
 !> \param w_matrix ...
@@ -468,9 +453,9 @@ CONTAINS
 !>               adapted from calculate_wz_matrix
 !> \author JGH
 ! **************************************************************************************************
-   SUBROUTINE calculate_wx_matrix(mos_occ, xvec, ks_matrix, w_matrix)
+   SUBROUTINE calculate_wx_matrix(mos_active, xvec, ks_matrix, w_matrix)
 
-      TYPE(cp_fm_type), INTENT(IN)                       :: mos_occ, xvec
+      TYPE(cp_fm_type), INTENT(IN)                       :: mos_active, xvec
       TYPE(dbcsr_type), POINTER                          :: ks_matrix, w_matrix
 
       CHARACTER(len=*), PARAMETER :: routineN = 'calculate_wx_matrix'
@@ -481,15 +466,15 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CALL cp_fm_get_info(matrix=mos_occ, ncol_global=ncol, nrow_global=nrow)
-      CALL cp_fm_create(scrv, mos_occ%matrix_struct, "scr vectors")
+      CALL cp_fm_get_info(matrix=mos_active, ncol_global=ncol, nrow_global=nrow)
+      CALL cp_fm_create(scrv, mos_active%matrix_struct, name="scr vectors", set_zero=.TRUE.)
       CALL cp_fm_struct_create(fm_struct_tmp, nrow_global=ncol, ncol_global=ncol, &
-                               para_env=mos_occ%matrix_struct%para_env, &
-                               context=mos_occ%matrix_struct%context)
+                               para_env=mos_active%matrix_struct%para_env, &
+                               context=mos_active%matrix_struct%context)
       CALL cp_fm_create(ksmat, fm_struct_tmp, name="KS")
       CALL cp_fm_struct_release(fm_struct_tmp)
-      CALL cp_dbcsr_sm_fm_multiply(ks_matrix, mos_occ, scrv, ncol)
-      CALL parallel_gemm("T", "N", ncol, ncol, nrow, 1.0_dp, mos_occ, scrv, 0.0_dp, ksmat)
+      CALL cp_dbcsr_sm_fm_multiply(ks_matrix, mos_active, scrv, ncol)
+      CALL parallel_gemm("T", "N", ncol, ncol, nrow, 1.0_dp, mos_active, scrv, 0.0_dp, ksmat)
       CALL parallel_gemm("N", "N", nrow, ncol, ncol, 1.0_dp, xvec, ksmat, 0.0_dp, scrv)
       CALL cp_dbcsr_plus_fm_fm_t(w_matrix, matrix_v=scrv, matrix_g=xvec, ncol=ncol, symmetry_mode=1)
       CALL cp_fm_release(scrv)
@@ -501,7 +486,7 @@ CONTAINS
 
 ! **************************************************************************************************
 !> \brief Calculate the excited state W matrix from the MO eigenvectors, KS matrix
-!> \param mos_occ ...
+!> \param mos_active ...
 !> \param xvec ...
 !> \param s_matrix ...
 !> \param ks_matrix ...
@@ -511,9 +496,9 @@ CONTAINS
 !>               adapted from calculate_wz_matrix
 !> \author JGH
 ! **************************************************************************************************
-   SUBROUTINE calculate_xwx_matrix(mos_occ, xvec, s_matrix, ks_matrix, w_matrix, eval)
+   SUBROUTINE calculate_xwx_matrix(mos_active, xvec, s_matrix, ks_matrix, w_matrix, eval)
 
-      TYPE(cp_fm_type), INTENT(IN)                       :: mos_occ, xvec
+      TYPE(cp_fm_type), INTENT(IN)                       :: mos_active, xvec
       TYPE(dbcsr_type), POINTER                          :: s_matrix, ks_matrix, w_matrix
       REAL(KIND=dp), INTENT(IN)                          :: eval
 
@@ -525,11 +510,11 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CALL cp_fm_get_info(matrix=mos_occ, ncol_global=ncol, nrow_global=nrow)
-      CALL cp_fm_create(scrv, mos_occ%matrix_struct, "scr vectors")
+      CALL cp_fm_get_info(matrix=mos_active, ncol_global=ncol, nrow_global=nrow)
+      CALL cp_fm_create(scrv, mos_active%matrix_struct, name="scr vectors", set_zero=.TRUE.)
       CALL cp_fm_struct_create(fm_struct_tmp, nrow_global=ncol, ncol_global=ncol, &
-                               para_env=mos_occ%matrix_struct%para_env, &
-                               context=mos_occ%matrix_struct%context)
+                               para_env=mos_active%matrix_struct%para_env, &
+                               context=mos_active%matrix_struct%context)
       CALL cp_fm_create(xsxmat, fm_struct_tmp, name="XSX")
       CALL cp_fm_struct_release(fm_struct_tmp)
 
@@ -537,8 +522,8 @@ CONTAINS
       CALL cp_dbcsr_sm_fm_multiply(s_matrix, xvec, scrv, ncol, eval, -1.0_dp)
       CALL parallel_gemm("T", "N", ncol, ncol, nrow, 1.0_dp, xvec, scrv, 0.0_dp, xsxmat)
 
-      CALL parallel_gemm("N", "N", nrow, ncol, ncol, 1.0_dp, mos_occ, xsxmat, 0.0_dp, scrv)
-      CALL cp_dbcsr_plus_fm_fm_t(w_matrix, matrix_v=scrv, matrix_g=mos_occ, ncol=ncol, symmetry_mode=1)
+      CALL parallel_gemm("N", "N", nrow, ncol, ncol, 1.0_dp, mos_active, xsxmat, 0.0_dp, scrv)
+      CALL cp_dbcsr_plus_fm_fm_t(w_matrix, matrix_v=scrv, matrix_g=mos_active, ncol=ncol, symmetry_mode=1)
 
       CALL cp_fm_release(scrv)
       CALL cp_fm_release(xsxmat)

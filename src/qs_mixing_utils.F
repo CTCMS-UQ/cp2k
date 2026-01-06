@@ -1,13 +1,12 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
 
 ! **************************************************************************************************
 MODULE qs_mixing_utils
-
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: dbcsr_create,&
                                               dbcsr_p_type,&
@@ -18,6 +17,7 @@ MODULE qs_mixing_utils
    USE cp_dbcsr_operations,             ONLY: dbcsr_allocate_matrix_set
    USE distribution_1d_types,           ONLY: distribution_1d_type
    USE kinds,                           ONLY: dp
+   USE mathconstants,                   ONLY: z_zero
    USE message_passing,                 ONLY: mp_para_env_type
    USE pw_types,                        ONLY: pw_c1d_gs_type
    USE qs_density_mixing_types,         ONLY: broyden_mixing_nr,&
@@ -149,7 +149,7 @@ CONTAINS
                DO ic = 1, nimg
                   ALLOCATE (p_mix_new(i, ic)%matrix)
                   CALL dbcsr_create(matrix=p_mix_new(i, ic)%matrix, template=refmatrix, &
-                                    name="SCF DENSITY", matrix_type=dbcsr_type_symmetric, nze=0)
+                                    name="SCF DENSITY", matrix_type=dbcsr_type_symmetric)
                   CALL cp_dbcsr_alloc_block_from_nbl(p_mix_new(i, ic)%matrix, sab_orb)
                   CALL dbcsr_set(p_mix_new(i, ic)%matrix, 0.0_dp)
                END DO
@@ -166,7 +166,7 @@ CONTAINS
                   DO ic = 1, nimg
                      ALLOCATE (p_delta(i, ic)%matrix)
                      CALL dbcsr_create(matrix=p_delta(i, ic)%matrix, template=refmatrix, &
-                                       name="SCF DENSITY", matrix_type=dbcsr_type_symmetric, nze=0)
+                                       name="SCF DENSITY", matrix_type=dbcsr_type_symmetric)
                      CALL cp_dbcsr_alloc_block_from_nbl(p_delta(i, ic)%matrix, sab_orb)
                      CALL dbcsr_set(p_delta(i, ic)%matrix, 0.0_dp)
                   END DO
@@ -551,10 +551,10 @@ CONTAINS
                ALLOCATE (mixing_store%last_res(ispin)%cc(ng))
             END IF
             DO ib = 1, nbuffer
-               mixing_store%drho_buffer(ib, ispin)%cc = CMPLX(0.0_dp, 0.0_dp, kind=dp)
+               mixing_store%drho_buffer(ib, ispin)%cc = z_zero
             END DO
-            mixing_store%last_res(ispin)%cc = CMPLX(0.0_dp, 0.0_dp, kind=dp)
-            mixing_store%rhoin_old(ispin)%cc = CMPLX(0.0_dp, 0.0_dp, kind=dp)
+            mixing_store%last_res(ispin)%cc = z_zero
+            mixing_store%rhoin_old(ispin)%cc = z_zero
          END DO
          IF (mixing_store%gmix_p) THEN
             IF (PRESENT(rho_atom)) THEN

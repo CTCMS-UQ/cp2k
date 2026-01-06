@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -19,10 +19,13 @@ MODULE qs_active_space_types
    USE cp_dbcsr_operations,             ONLY: dbcsr_deallocate_matrix_set
    USE cp_fm_types,                     ONLY: cp_fm_release,&
                                               cp_fm_type
-   USE input_constants,                 ONLY: eri_method_gpw_ht
+   USE input_section_types,             ONLY: section_vals_type
    USE kinds,                           ONLY: default_path_length,&
                                               dp
-   USE message_passing,                 ONLY: mp_comm_type
+   USE message_passing,                 ONLY: mp_comm_null,&
+                                              mp_comm_type,&
+                                              mp_para_env_release,&
+                                              mp_para_env_type
    USE qs_mo_types,                     ONLY: deallocate_mo_set,&
                                               mo_set_type
 #include "./base/base_uses.f90"
@@ -53,16 +56,20 @@ MODULE qs_active_space_types
 
    TYPE eri_type
       INTEGER                       :: method = 0
-      INTEGER                       :: OPERATOR = 0
-      REAL(KIND=dp)                 :: operator_parameter = 0.0_dp
+      INTEGER                       :: operator = 0
+      LOGICAL                       :: enlarge_cell = .FALSE.
+      REAL(KIND=dp)                 :: omega = 0.0_dp
       INTEGER, DIMENSION(3)         :: periodicity = 0
+      REAL(KIND=dp), DIMENSION(3)   :: eri_cell = 0
+      REAL(KIND=dp), DIMENSION(3)   :: eri_cell_angles = 0
       REAL(KIND=dp)                 :: cutoff_radius = 0.0_dp
       REAL(KIND=dp)                 :: eps_integral = 0.0_dp
       TYPE(eri_gpw_type)            :: eri_gpw = eri_gpw_type()
       TYPE(dbcsr_csr_p_type), &
          DIMENSION(:), POINTER      :: eri => NULL()
       INTEGER                       :: norb = 0
-
+      TYPE(mp_para_env_type), POINTER :: para_env_sub => NULL()
+      TYPE(mp_comm_type) :: comm_exchange = mp_comm_null
    CONTAINS
       PROCEDURE :: eri_foreach => eri_type_eri_foreach
    END TYPE eri_type
@@ -91,6 +98,7 @@ MODULE qs_active_space_types
       REAL(KIND=dp)                                :: energy_ref = 0.0_dp
       REAL(KIND=dp)                                :: energy_inactive = 0.0_dp
       REAL(KIND=dp)                                :: energy_active = 0.0_dp
+      REAL(KIND=dp)                                :: alpha = 0.0_dp
       LOGICAL                                      :: do_scf_embedding = .FALSE.
       LOGICAL                                      :: qcschema = .FALSE.
       LOGICAL                                      :: fcidump = .FALSE.
@@ -103,7 +111,9 @@ MODULE qs_active_space_types
       TYPE(cp_fm_type), DIMENSION(:), POINTER      :: vxc_sub => NULL()
       TYPE(cp_fm_type), DIMENSION(:), POINTER      :: h_sub => NULL()
       TYPE(cp_fm_type), DIMENSION(:), POINTER      :: fock_sub => NULL()
+      TYPE(cp_fm_type), DIMENSION(:), POINTER      :: sab_sub => NULL()
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER    :: pmat_inactive => NULL()
+      TYPE(section_vals_type), POINTER             :: xc_section => NULL()
    END TYPE active_space_type
 
    ABSTRACT INTERFACE
@@ -189,6 +199,7 @@ CONTAINS
          CALL cp_fm_release(active_space_env%vxc_sub)
          CALL cp_fm_release(active_space_env%h_sub)
          CALL cp_fm_release(active_space_env%fock_sub)
+         CALL cp_fm_release(active_space_env%sab_sub)
 
          IF (ASSOCIATED(active_space_env%pmat_inactive)) &
             CALL dbcsr_deallocate_matrix_set(active_space_env%pmat_inactive)
@@ -213,6 +224,8 @@ CONTAINS
             CALL dbcsr_csr_destroy(eri_env%eri(i)%csr_mat)
             DEALLOCATE (eri_env%eri(i)%csr_mat)
          END DO
+         CALL mp_para_env_release(eri_env%para_env_sub)
+         CALL eri_env%comm_exchange%free()
          DEALLOCATE (eri_env%eri)
 
       END IF
@@ -326,12 +339,17 @@ CONTAINS
       CLASS(eri_type_eri_element_func)         :: fobj
       INTEGER, DIMENSION(:, :), INTENT(IN)     :: active_orbitals
       INTEGER, OPTIONAL                        :: spin1, spin2
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = "eri_type_eri_foreach"
+
       INTEGER                                  :: i1, i12, i12l, i2, i3, i34, i34l, i4, m1, m2, m3, m4, &
-                                                  irange(2), irptr, nspin, nindex, nmo, proc, nonzero_elements_local
+                                            irange(2), irptr, nspin, nindex, nmo, proc, nonzero_elements_local, handle, dummy_int(1)
       INTEGER, ALLOCATABLE, DIMENSION(:)       :: colind, offsets, nonzero_elements_global
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: erival
-      REAL(KIND=dp)                            :: erint
+      REAL(KIND=dp)                            :: erint, dummy_real(1)
       TYPE(mp_comm_type) :: mp_group
+
+      CALL timeset(routineN, handle)
 
       IF (.NOT. PRESENT(spin1)) THEN
          spin1 = nspin
@@ -340,41 +358,44 @@ CONTAINS
          spin2 = nspin
       END IF
 
+      dummy_int = 0
+      dummy_real = 0.0_dp
+
       ASSOCIATE (eri => this%eri(nspin)%csr_mat, norb => this%norb)
          nindex = (norb*(norb + 1))/2
          CALL mp_group%set_handle(eri%mp_group%get_handle())
          nmo = SIZE(active_orbitals, 1)
          ! Irrelevant in case of half-transformed integrals
-         irange = get_irange_csr(nindex, mp_group)
+         irange = get_irange_csr(nindex, this%comm_exchange)
          ALLOCATE (erival(nindex), colind(nindex))
-
-         IF (this%method == eri_method_gpw_ht) THEN
-            ALLOCATE (offsets(0:mp_group%num_pe - 1), &
-                      nonzero_elements_global(0:mp_group%num_pe - 1))
-         END IF
+         ALLOCATE (offsets(0:mp_group%num_pe - 1), &
+                   nonzero_elements_global(0:mp_group%num_pe - 1))
 
          DO m1 = 1, nmo
             i1 = active_orbitals(m1, spin1)
             DO m2 = m1, nmo
                i2 = active_orbitals(m2, spin1)
                i12 = csr_idx_to_combined(i1, i2, norb)
+               i12l = i12 - irange(1) + 1
 
-               IF (this%method == eri_method_gpw_ht) THEN
-                  ! In case of half-transformed integrals, every process might carry integrals of a row
-                  ! The number of integrals varies between processes and rows (related to the randomized
-                  ! distribution of matrix blocks)
+               ! In case of half-transformed integrals, every process might carry integrals of a row
+               ! The number of integrals varies between processes and rows (related to the randomized
+               ! distribution of matrix blocks)
 
-                  ! 1) Collect the amount of local data from each process
-                  nonzero_elements_local = eri%nzerow_local(i12)
-                  CALL mp_group%allgather(nonzero_elements_local, nonzero_elements_global)
+               ! 1) Collect the amount of local data from each process
+               nonzero_elements_local = 0
+               IF (i12 >= irange(1) .AND. i12 <= irange(2)) nonzero_elements_local = eri%nzerow_local(i12l)
+               CALL mp_group%allgather(nonzero_elements_local, nonzero_elements_global)
 
-                  ! 2) Prepare arrays for communication (calculate the offsets and the total number of elements)
-                  offsets(0) = 0
-                  DO proc = 1, mp_group%num_pe - 1
-                     offsets(proc) = offsets(proc - 1) + nonzero_elements_global(proc - 1)
-                  END DO
-                  nindex = offsets(mp_group%num_pe - 1) + nonzero_elements_global(mp_group%num_pe - 1)
-                  irptr = eri%rowptr_local(i12)
+               ! 2) Prepare arrays for communication (calculate the offsets and the total number of elements)
+               offsets(0) = 0
+               DO proc = 1, mp_group%num_pe - 1
+                  offsets(proc) = offsets(proc - 1) + nonzero_elements_global(proc - 1)
+               END DO
+               nindex = offsets(mp_group%num_pe - 1) + nonzero_elements_global(mp_group%num_pe - 1)
+               irptr = 1
+               IF (i12 >= irange(1) .AND. i12 <= irange(2)) THEN
+                  irptr = eri%rowptr_local(i12l)
 
                   ! Exchange actual data
                   CALL mp_group%allgatherv(eri%colind_local(irptr:irptr + nonzero_elements_local - 1), &
@@ -382,24 +403,8 @@ CONTAINS
                   CALL mp_group%allgatherv(eri%nzval_local%r_dp(irptr:irptr + nonzero_elements_local - 1), &
                                            erival(1:nindex), nonzero_elements_global, offsets)
                ELSE
-                  ! Here, the rows are distributed among the processes such that each process
-                  ! carries all integral of a set of rows
-                  IF (i12 >= irange(1) .AND. i12 <= irange(2)) THEN
-                     i12l = i12 - irange(1) + 1
-                     irptr = eri%rowptr_local(i12l)
-                     nindex = eri%nzerow_local(i12l)
-                     colind(1:nindex) = eri%colind_local(irptr:irptr + nindex - 1)
-                     erival(1:nindex) = eri%nzval_local%r_dp(irptr:irptr + nindex - 1)
-                  ELSE
-                     erival = 0.0_dp
-                     colind = 0
-                     nindex = 0
-                  END IF
-
-                  ! Thus, a simple summation is sufficient
-                  CALL mp_group%sum(nindex)
-                  CALL mp_group%sum(colind(1:nindex))
-                  CALL mp_group%sum(erival(1:nindex))
+                  CALL mp_group%allgatherv(dummy_int(1:1), colind(1:nindex), nonzero_elements_global, offsets)
+                  CALL mp_group%allgatherv(dummy_real(1:1), erival(1:nindex), nonzero_elements_global, offsets)
                END IF
 
                DO i34l = 1, nindex
@@ -426,6 +431,8 @@ CONTAINS
             END DO
          END DO
       END ASSOCIATE
+
+      CALL timestop(handle)
    END SUBROUTINE eri_type_eri_foreach
 
 END MODULE qs_active_space_types

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -140,8 +140,8 @@ CONTAINS
                        "extrapolate based on 2 points and the slope (super fast, but might get stuck at saddle points)", &
                        "perform 1D golden section search of the minimum (very expensive)", &
                        "always take steps of fixed INITIAL_STEP_SIZE"), &
-         enum_i_vals=(/linesearch_method_adapt, linesearch_method_3pnt, linesearch_method_2pnt, &
-                       linesearch_method_gold, linesearch_method_none/))
+         enum_i_vals=[linesearch_method_adapt, linesearch_method_3pnt, linesearch_method_2pnt, &
+                      linesearch_method_gold, linesearch_method_none])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

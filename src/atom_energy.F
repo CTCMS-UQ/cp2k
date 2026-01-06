@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -40,7 +40,10 @@ MODULE atom_energy
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                               cp_print_key_unit_nr
-   USE input_constants,                 ONLY: do_analytic
+   USE input_constants,                 ONLY: &
+        do_analytic, xc_funct_b3lyp, xc_funct_beefvdw, xc_funct_blyp, xc_funct_bp, &
+        xc_funct_hcth120, xc_funct_no_shortcut, xc_funct_olyp, xc_funct_pade, xc_funct_pbe, &
+        xc_funct_pbe0, xc_funct_tpss, xc_none
    USE input_section_types,             ONLY: section_vals_get,&
                                               section_vals_get_subs_vals,&
                                               section_vals_type,&
@@ -48,8 +51,8 @@ MODULE atom_energy
    USE kinds,                           ONLY: default_string_length,&
                                               dp
    USE mathconstants,                   ONLY: dfac,&
+                                              fourpi,&
                                               gamma1,&
-                                              pi,&
                                               rootpi
    USE periodic_table,                  ONLY: nelem,&
                                               ptable
@@ -83,16 +86,16 @@ CONTAINS
       CHARACTER(len=*), PARAMETER                        :: routineN = 'atom_energy_opt'
 
       CHARACTER(LEN=2)                                   :: elem
-      CHARACTER(LEN=default_string_length)               :: filename
+      CHARACTER(LEN=default_string_length)               :: filename, xcfstr
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: tmpstringlist
       INTEGER :: do_eric, do_erie, handle, i, im, in, iw, k, maxl, mb, method, mo, n_meth, n_rep, &
-         nder, nr_gh, num_gau, num_gto, num_pol, reltyp, zcore, zval, zz
+         nder, nr_gh, num_gau, num_gto, num_pol, reltyp, shortcut, zcore, zval, zz
       INTEGER, DIMENSION(0:lmat)                         :: maxn
       INTEGER, DIMENSION(:), POINTER                     :: cn
       LOGICAL                                            :: dm, do_gh, do_zmp, doread, eri_c, eri_e, &
-                                                            had_ae, had_pp, lcomp, lcond, pp_calc, &
-                                                            read_vxc
+                                                            explicit, graph, had_ae, had_pp, &
+                                                            lcomp, lcond, pp_calc, read_vxc
       REAL(KIND=dp)                                      :: crad, delta, lambda
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: ext_density, ext_vxc
       REAL(KIND=dp), DIMENSION(0:lmat, 10)               :: pocc
@@ -105,8 +108,8 @@ CONTAINS
       TYPE(atom_state), POINTER                          :: state
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER :: admm_section, basis_section, external_vxc_section, &
-         method_section, opt_section, potential_section, powell_section, sgp_section, xc_section, &
-         zmp_restart_section, zmp_section
+         method_section, opt_section, potential_section, powell_section, sgp_section, xc_func, &
+         xc_section, zmp_restart_section, zmp_section
 
       CALL timeset(routineN, handle)
 
@@ -199,8 +202,45 @@ CONTAINS
             atom_info(in, im)%atom%optimization = optimization
 
             atom_info(in, im)%atom%z = zval
+
             xc_section => section_vals_get_subs_vals(method_section, "XC", i_rep_section=im)
             atom_info(in, im)%atom%xc_section => xc_section
+
+            ! Retrieve the XC functional string for upf output
+            ! This does not work within the routine atom_write_upf below for unknown reasons
+            xc_func => section_vals_get_subs_vals(xc_section, "XC_FUNCTIONAL")
+            CALL section_vals_get(xc_func, explicit=explicit)
+            IF (explicit) THEN
+               CALL section_vals_val_get(xc_func, "_SECTION_PARAMETERS_", i_val=shortcut)
+               SELECT CASE (shortcut)
+               CASE (xc_funct_no_shortcut, xc_none)
+                  xcfstr = "NONE"
+               CASE (xc_funct_pbe0)
+                  xcfstr = "PBE0"
+               CASE (xc_funct_beefvdw)
+                  xcfstr = "BEEFVDW"
+               CASE (xc_funct_b3lyp)
+                  xcfstr = "B3LYP"
+               CASE (xc_funct_blyp)
+                  xcfstr = "BLYP"
+               CASE (xc_funct_bp)
+                  xcfstr = "BP"
+               CASE (xc_funct_pade)
+                  xcfstr = "PADE"
+               CASE (xc_funct_pbe)
+                  xcfstr = "PBE"
+               CASE (xc_funct_tpss)
+                  xcfstr = "TPSS"
+               CASE (xc_funct_olyp)
+                  xcfstr = "OLYP"
+               CASE (xc_funct_hcth120)
+                  xcfstr = "HCTH120"
+               CASE DEFAULT
+                  xcfstr = "DFT"
+               END SELECT
+            ELSE
+               xcfstr = "DFT"
+            END IF
 
             ! ZMP Reading input sections if they are found initialize everything
             do_zmp = .FALSE.
@@ -357,10 +397,19 @@ CONTAINS
 
                ! Print out the orbitals if requested
                iw = cp_print_key_unit_nr(logger, atom_section, "PRINT%ORBITALS", extension=".log")
+               CALL section_vals_val_get(atom_section, "PRINT%ORBITALS%XMGRACE", l_val=graph)
                IF (iw > 0) THEN
-                  CALL atom_print_orbitals(atom_info(in, im)%atom, iw)
+                  CALL atom_print_orbitals(atom_info(in, im)%atom, iw, xmgrace=graph)
                END IF
                CALL cp_print_key_finished_output(iw, logger, atom_section, "PRINT%ORBITALS")
+
+               ! generate a UPF file
+               iw = cp_print_key_unit_nr(logger, atom_section, "PRINT%UPF_FILE", extension=".upf", &
+                                         file_position="REWIND")
+               IF (iw > 0) THEN
+                  CALL atom_write_upf(atom_info(in, im)%atom, iw, xcfstr)
+               END IF
+               CALL cp_print_key_finished_output(iw, logger, atom_section, "PRINT%UPF_FILE")
 
                ! perform a fit of the total electronic density
                iw = cp_print_key_unit_nr(logger, atom_section, "PRINT%FIT_DENSITY", extension=".log")
@@ -390,13 +439,6 @@ CONTAINS
                END IF
                CALL cp_print_key_finished_output(iw, logger, atom_section, "PRINT%RESPONSE_BASIS")
 
-               ! generate a UPF file
-               iw = cp_print_key_unit_nr(logger, atom_section, "PRINT%UPF_FILE", extension=".upf", &
-                                         file_position="REWIND")
-               IF (iw > 0) THEN
-                  CALL atom_write_upf(atom_info(in, im)%atom, iw)
-               END IF
-               CALL cp_print_key_finished_output(iw, logger, atom_section, "PRINT%UPF_FILE")
             END IF
 
          END DO
@@ -533,6 +575,8 @@ CONTAINS
          wfn(:, :, :, ider) = atom%orbitals%wfn
          state%occupation(lhomo, nhomo) = fhomo
       END DO
+      ! reset
+      CALL calculate_atom(atom, iw=0, noguess=.TRUE.)
 
       DO l = 0, state%maxl_occ
          ! occupied states
@@ -560,10 +604,10 @@ CONTAINS
          m = atom%basis%nbas(l)
          DO i = 1, n
             DO j = 1, i - 1
-               o = DOT_PRODUCT(rbasis(1:m, j, l), RESHAPE(MATMUL(ovlp(1:m, 1:m, l), rbasis(1:m, i:i, l)), (/m/)))
+               o = DOT_PRODUCT(rbasis(1:m, j, l), RESHAPE(MATMUL(ovlp(1:m, 1:m, l), rbasis(1:m, i:i, l)), [m]))
                rbasis(1:m, i, l) = rbasis(1:m, i, l) - o*rbasis(1:m, j, l)
             END DO
-            o = DOT_PRODUCT(rbasis(1:m, i, l), RESHAPE(MATMUL(ovlp(1:m, 1:m, l), rbasis(1:m, i:i, l)), (/m/)))
+            o = DOT_PRODUCT(rbasis(1:m, i, l), RESHAPE(MATMUL(ovlp(1:m, 1:m, l), rbasis(1:m, i:i, l)), [m]))
             rbasis(1:m, i, l) = rbasis(1:m, i, l)/SQRT(o)
          END DO
 
@@ -602,19 +646,22 @@ CONTAINS
 !> \brief Write pseudo-potential in Quantum Espresso UPF format.
 !> \param atom  information about the atomic kind
 !> \param iw    output file unit
+!> \param xcfstr ...
 !> \par History
 !>    * 09.2012 created [Juerg Hutter]
 ! **************************************************************************************************
-   SUBROUTINE atom_write_upf(atom, iw)
+   SUBROUTINE atom_write_upf(atom, iw, xcfstr)
 
       TYPE(atom_type), POINTER                           :: atom
       INTEGER, INTENT(IN)                                :: iw
+      CHARACTER(LEN=*), INTENT(IN)                       :: xcfstr
 
       CHARACTER(LEN=default_string_length)               :: string
-      INTEGER                                            :: i, ibeta, j, k, l, lmax, nbeta, nr, &
-                                                            nwfc, nwfn
-      LOGICAL                                            :: up
-      REAL(KIND=dp)                                      :: pf, rl, rmax
+      INTEGER                                            :: i, ibeta, ii, j, k, kk, l, lmax, n0, &
+                                                            nbeta, nr, nwfc, nwfn
+      LOGICAL                                            :: soc, up
+      REAL(KIND=dp)                                      :: occa, occb, pf, rhoatom, rl, rlp, rmax, &
+                                                            vnlm, vnlp
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: beta, corden, dens, ef, locpot, rp
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: dij
       TYPE(atom_gthpot_type), POINTER                    :: pot
@@ -623,6 +670,7 @@ CONTAINS
       IF (atom%potential%ppot_type /= gth_pseudo) RETURN
       pot => atom%potential%gth_pot
       CPASSERT(.NOT. pot%lsdpot)
+      soc = pot%soc
 
       WRITE (iw, '(A)') '<UPF version="2.0.1">'
 
@@ -644,7 +692,11 @@ CONTAINS
       WRITE (iw, '(T8,A)') 'is_ultrasoft="F"'
       WRITE (iw, '(T8,A)') 'is_paw="F"'
       WRITE (iw, '(T8,A)') 'is_coulomb="F"'
-      WRITE (iw, '(T8,A)') 'has_so="F"'
+      IF (soc) THEN
+         WRITE (iw, '(T8,A)') 'has_so="T"'
+      ELSE
+         WRITE (iw, '(T8,A)') 'has_so="F"'
+      END IF
       WRITE (iw, '(T8,A)') 'has_wfc="F"'
       WRITE (iw, '(T8,A)') 'has_gipaw="F"'
       WRITE (iw, '(T8,A)') 'paw_as_gipaw="F"'
@@ -653,7 +705,7 @@ CONTAINS
       ELSE
          WRITE (iw, '(T8,A)') 'core_correction="F"'
       END IF
-      WRITE (iw, '(T8,A)') 'functional="DFT"'
+      WRITE (iw, '(T8,A)') 'functional="'//TRIM(ADJUSTL(xcfstr))//'"'
       CALL compose(string, "z_valence", rval=pot%zion)
       WRITE (iw, '(T8,A)') TRIM(string)
       CALL compose(string, "total_psenergy", rval=2._dp*atom%energy%etot)
@@ -674,7 +726,11 @@ CONTAINS
       nwfc = SUM(atom%state%maxn_occ)
       CALL compose(string, "number_of_wfc", ival=nwfc)
       WRITE (iw, '(T8,A)') TRIM(string)
-      nbeta = SUM(pot%nl)
+      IF (soc) THEN
+         nbeta = pot%nl(0) + 2*SUM(pot%nl(1:))
+      ELSE
+         nbeta = SUM(pot%nl)
+      END IF
       CALL compose(string, "number_of_proj", ival=nbeta)
       WRITE (iw, '(T8,A)') TRIM(string)//'/>'
 
@@ -759,6 +815,8 @@ CONTAINS
             j = l + 2*i - 1
             pf = SQRT(2._dp)/(pf*SQRT(gamma1(j)))
             beta(:) = pf*rp**(l + 2*i - 2)*ef
+            beta(:) = beta*rp
+            !
             ibeta = ibeta + 1
             CALL compose(string, "<PP_BETA", counter=ibeta)
             WRITE (iw, '(T8,A)') TRIM(string)
@@ -768,7 +826,6 @@ CONTAINS
             CALL compose(string, "size", ival=nr)
             WRITE (iw, '(T12,A)') TRIM(string)
             WRITE (iw, '(T12,A)') 'columns="4">'
-            beta(:) = beta*rp
             IF (up) THEN
                WRITE (iw, '(T12,4ES25.12E3)') (2._dp*beta(j), j=1, nr)
             ELSE
@@ -776,18 +833,60 @@ CONTAINS
             END IF
             CALL compose(string, "</PP_BETA", counter=ibeta, isfinal=.TRUE.)
             WRITE (iw, '(T8,A)') TRIM(string)
+            IF (soc .AND. l /= 0) THEN
+               ibeta = ibeta + 1
+               CALL compose(string, "<PP_BETA", counter=ibeta)
+               WRITE (iw, '(T8,A)') TRIM(string)
+               CALL compose(string, "angular_momentum", ival=l)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               WRITE (iw, '(T12,A)') 'type="real"'
+               CALL compose(string, "size", ival=nr)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               WRITE (iw, '(T12,A)') 'columns="4">'
+               IF (up) THEN
+                  WRITE (iw, '(T12,4ES25.12E3)') (2._dp*beta(j), j=1, nr)
+               ELSE
+                  WRITE (iw, '(T12,4ES25.12E3)') (2._dp*beta(j), j=nr, 1, -1)
+               END IF
+               CALL compose(string, "</PP_BETA", counter=ibeta, isfinal=.TRUE.)
+               WRITE (iw, '(T8,A)') TRIM(string)
+            END IF
          END DO
       END DO
       DEALLOCATE (rp, ef, beta)
       ! nonlocal PP matrix elements
       ALLOCATE (dij(nbeta, nbeta))
       dij = 0._dp
-      DO l = 0, lmat
-         IF (pot%nl(l) == 0) CYCLE
-         ibeta = SUM(pot%nl(0:l - 1)) + 1
-         i = ibeta + pot%nl(l) - 1
-         dij(ibeta:i, ibeta:i) = pot%hnl(1:pot%nl(l), 1:pot%nl(l), l)
-      END DO
+      IF (soc) THEN
+         ! from reverse engineering we guess: hnl, knl, hnl, knl, ...
+         n0 = pot%nl(0)
+         DO l = 0, lmat
+            IF (pot%nl(l) == 0) CYCLE
+            IF (l == 0) THEN
+               ! no SO term for l=0
+               dij(1:n0, 1:n0) = pot%hnl(1:n0, 1:n0, 0)
+            ELSE
+               ibeta = n0 + 2*SUM(pot%nl(1:l - 1))
+               DO i = 1, pot%nl(l)
+                  ii = 2*(i - 1) + 1
+                  DO k = 1, pot%nl(l)
+                     kk = 2*(k - 1) + 1
+                     vnlp = pot%hnl(i, k, l) + 0.5_dp*l*pot%knl(i, k, l)
+                     vnlm = pot%hnl(i, k, l) - 0.5_dp*(l + 1)*pot%knl(i, k, l)
+                     dij(ibeta + ii, ibeta + kk) = vnlm
+                     dij(ibeta + ii + 1, ibeta + kk + 1) = vnlp
+                  END DO
+               END DO
+            END IF
+         END DO
+      ELSE
+         DO l = 0, lmat
+            IF (pot%nl(l) == 0) CYCLE
+            ibeta = SUM(pot%nl(0:l - 1)) + 1
+            i = ibeta + pot%nl(l) - 1
+            dij(ibeta:i, ibeta:i) = pot%hnl(1:pot%nl(l), 1:pot%nl(l), l)
+         END DO
+      END IF
       WRITE (iw, '(T8,A)') '<PP_DIJ type="real"'
       WRITE (iw, '(T12,A)') 'columns="4">'
       WRITE (iw, '(T12,4ES25.12E3)') ((0.5_dp*dij(i, j), j=1, nbeta), i=1, nbeta)
@@ -802,12 +901,18 @@ CONTAINS
       DO l = 0, lmat
          DO i = 1, 10
             IF (ABS(atom%state%occupation(l, i)) == 0._dp) CYCLE
+            occa = atom%state%occupation(l, i)
+            occb = 0.0_dp
+            IF (soc .AND. l /= 0) THEN
+               occb = FLOOR(occa/2)
+               occa = occa - occb
+            END IF
             nwfn = nwfn + 1
             CALL compose(string, "<PP_CHI", counter=nwfn)
             WRITE (iw, '(T8,A)') TRIM(string)
             CALL compose(string, "l", ival=l)
             WRITE (iw, '(T12,A)') TRIM(string)
-            CALL compose(string, "occupation", rval=atom%state%occupation(l, i))
+            CALL compose(string, "occupation", rval=occa)
             WRITE (iw, '(T12,A)') TRIM(string)
             CALL compose(string, "pseudo_energy", rval=2._dp*atom%orbitals%ener(i, l))
             WRITE (iw, '(T12,A)') TRIM(string)
@@ -818,12 +923,36 @@ CONTAINS
             END DO
             beta(:) = beta*atom%basis%grid%rad
             IF (up) THEN
-               WRITE (iw, '(T12,4ES25.12E3)') (beta(j)*atom%basis%grid%rad(j), j=1, nr)
+               WRITE (iw, '(T12,4ES25.12E3)') (beta(j), j=1, nr)
             ELSE
-               WRITE (iw, '(T12,4ES25.12E3)') (beta(j)*atom%basis%grid%rad(j), j=nr, 1, -1)
+               WRITE (iw, '(T12,4ES25.12E3)') (beta(j), j=nr, 1, -1)
             END IF
             CALL compose(string, "</PP_CHI", counter=nwfn, isfinal=.TRUE.)
             WRITE (iw, '(T8,A)') TRIM(string)
+            IF (soc .AND. l /= 0) THEN
+               nwfn = nwfn + 1
+               CALL compose(string, "<PP_CHI", counter=nwfn)
+               WRITE (iw, '(T8,A)') TRIM(string)
+               CALL compose(string, "l", ival=l)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               CALL compose(string, "occupation", rval=occb)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               CALL compose(string, "pseudo_energy", rval=2._dp*atom%orbitals%ener(i, l))
+               WRITE (iw, '(T12,A)') TRIM(string)
+               WRITE (iw, '(T12,A)') 'columns="4">'
+               beta = 0._dp
+               DO k = 1, atom%basis%nbas(l)
+                  beta(:) = beta(:) + atom%orbitals%wfn(k, i, l)*atom%basis%bf(:, k, l)
+               END DO
+               beta(:) = beta*atom%basis%grid%rad
+               IF (up) THEN
+                  WRITE (iw, '(T12,4ES25.12E3)') (beta(j), j=1, nr)
+               ELSE
+                  WRITE (iw, '(T12,4ES25.12E3)') (beta(j), j=nr, 1, -1)
+               END IF
+               CALL compose(string, "</PP_CHI", counter=nwfn, isfinal=.TRUE.)
+               WRITE (iw, '(T8,A)') TRIM(string)
+            END IF
          END DO
       END DO
       WRITE (iw, '(T4,A)') '</PP_PSWFC>'
@@ -838,12 +967,111 @@ CONTAINS
       CALL atom_density(dens, atom%orbitals%pmat, atom%basis, atom%state%maxl_occ, &
                         "RHO", atom%basis%grid%rad)
       IF (up) THEN
-         WRITE (iw, '(T8,4ES25.12E3)') (4._dp*pi*dens(j)*atom%basis%grid%rad2(j), j=1, nr)
+         WRITE (iw, '(T8,4ES25.12E3)') (fourpi*dens(j)*atom%basis%grid%rad2(j), j=1, nr)
       ELSE
-         WRITE (iw, '(T8,4ES25.12E3)') (4._dp*pi*dens(j)*atom%basis%grid%rad2(j), j=nr, 1, -1)
+         WRITE (iw, '(T8,4ES25.12E3)') (fourpi*dens(j)*atom%basis%grid%rad2(j), j=nr, 1, -1)
       END IF
       WRITE (iw, '(T4,A)') '</PP_RHOATOM>'
+
+      ! Check atomic electron count
+      rhoatom = SUM(fourpi*atom%basis%grid%wr(:)*dens(:))
+      IF (ABS(pot%zion - rhoatom) > 0.01_dp) THEN
+         CALL cp_warn(__LOCATION__, "Valence charge and electron count differ by more than 0.01")
+      END IF
+
       DEALLOCATE (dens)
+      ! PP SOC information
+      IF (soc) THEN
+         WRITE (iw, '(T4,A)') '<PP_SPIN_ORB>'
+!        <PP_RELWFC.1 index="1" els="6S" nn="1" lchi="0" jchi="5.000000000000e-1" oc="1.000000000000e0"/>
+         nwfn = 0
+         DO l = 0, lmat
+            DO i = 1, 10
+               IF (ABS(atom%state%occupation(l, i)) == 0._dp) CYCLE
+               occa = atom%state%occupation(l, i)
+               occb = 0.0_dp
+               IF (l /= 0) THEN
+                  occb = FLOOR(occa/2)
+                  occa = occa - occb
+               END IF
+               nwfn = nwfn + 1
+               CALL compose(string, "<PP_RELWFC", counter=nwfn)
+               WRITE (iw, '(T8,A)') TRIM(string)
+               CALL compose(string, "index", ival=nwfn)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               !!CALL compose(string, "els", cval=xxxx)
+               !!WRITE (iw, '(T12,A)') TRIM(string)
+               CALL compose(string, "nn", ival=nwfn)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               CALL compose(string, "lchi", ival=l)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               IF (l == 0) THEN
+                  rlp = 0.5_dp
+               ELSE
+                  rlp = l - 0.5_dp
+               END IF
+               CALL compose(string, "jchi", rval=rlp)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               CALL compose(string, "oc", rval=occa)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               WRITE (iw, '(T12,A)') '/>'
+               IF (l /= 0) THEN
+                  nwfn = nwfn + 1
+                  CALL compose(string, "<PP_RELWFC", counter=nwfn)
+                  WRITE (iw, '(T8,A)') TRIM(string)
+                  CALL compose(string, "index", ival=nwfn)
+                  WRITE (iw, '(T12,A)') TRIM(string)
+                  !!CALL compose(string, "els", cval=xxxx)
+                  !!WRITE (iw, '(T12,A)') TRIM(string)
+                  CALL compose(string, "nn", ival=nwfn)
+                  WRITE (iw, '(T12,A)') TRIM(string)
+                  CALL compose(string, "lchi", ival=l)
+                  WRITE (iw, '(T12,A)') TRIM(string)
+                  rlp = l + 0.5_dp
+                  CALL compose(string, "jchi", rval=rlp)
+                  WRITE (iw, '(T12,A)') TRIM(string)
+                  CALL compose(string, "oc", rval=occa)
+                  WRITE (iw, '(T12,A)') TRIM(string)
+                  WRITE (iw, '(T12,A)') '/>'
+               END IF
+            END DO
+         END DO
+         ibeta = 0
+         DO l = 0, lmat
+            IF (pot%nl(l) == 0) CYCLE
+            DO i = 1, pot%nl(l)
+               ibeta = ibeta + 1
+               CALL compose(string, "<PP_RELBETA", counter=ibeta)
+               WRITE (iw, '(T8,A)') TRIM(string)
+               CALL compose(string, "index", ival=ibeta)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               CALL compose(string, "lll", ival=l)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               IF (l == 0) THEN
+                  rlp = 0.5_dp
+               ELSE
+                  rlp = l - 0.5_dp
+               END IF
+               CALL compose(string, "jjj", rval=rlp)
+               WRITE (iw, '(T12,A)') TRIM(string)
+               WRITE (iw, '(T12,A)') '/>'
+               IF (l > 0) THEN
+                  ibeta = ibeta + 1
+                  CALL compose(string, "<PP_RELBETA", counter=ibeta)
+                  WRITE (iw, '(T8,A)') TRIM(string)
+                  CALL compose(string, "index", ival=ibeta)
+                  WRITE (iw, '(T12,A)') TRIM(string)
+                  CALL compose(string, "lll", ival=l)
+                  WRITE (iw, '(T12,A)') TRIM(string)
+                  rlp = l + 0.5_dp
+                  CALL compose(string, "jjj", rval=rlp)
+                  WRITE (iw, '(T12,A)') TRIM(string)
+                  WRITE (iw, '(T12,A)') '/>'
+               END IF
+            END DO
+         END DO
+         WRITE (iw, '(T4,A)') '</PP_SPIN_ORB>'
+      END IF
 
       WRITE (iw, '(A)') '</UPF>'
 

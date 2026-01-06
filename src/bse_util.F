@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -25,7 +25,7 @@ MODULE bse_util
                                               dbcsr_allocate_matrix_set,&
                                               dbcsr_deallocate_matrix_set
    USE cp_fm_basic_linalg,              ONLY: cp_fm_trace,&
-                                              cp_fm_upper_to_full
+                                              cp_fm_uplo_to_full
    USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_decompose,&
                                               cp_fm_cholesky_invert
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
@@ -154,13 +154,15 @@ CONTAINS
       ! calculate Trace(Log(Matrix)) as Log(DET(Matrix)) via cholesky decomposition
       CALL cp_fm_cholesky_decompose(matrix=fm_mat_Q_static_bse_gemm, n=dimen_RI, info_out=info_chol)
 
-      CPASSERT(info_chol == 0)
+      IF (info_chol /= 0) THEN
+         CALL cp_abort(__LOCATION__, 'Cholesky decomposition failed for static polarization in BSE')
+      END IF
 
       ! calculate [1+Q(i0)]^-1
       CALL cp_fm_cholesky_invert(fm_mat_Q_static_bse_gemm)
 
       ! symmetrize the result
-      CALL cp_fm_upper_to_full(fm_mat_Q_static_bse_gemm, fm_work)
+      CALL cp_fm_uplo_to_full(fm_mat_Q_static_bse_gemm, fm_work)
 
       CALL parallel_gemm(transa="N", transb="N", m=dimen_RI, n=homo**2, k=dimen_RI, alpha=1.0_dp, &
                          matrix_a=fm_mat_Q_static_bse_gemm, matrix_b=fm_mat_S_ij_bse, beta=0.0_dp, &
@@ -176,7 +178,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE mult_B_with_W
 
 ! **************************************************************************************************
 !> \brief Adds and reorders full matrices with a combined index structure, e.g. adding W_ij,ab
@@ -545,13 +547,13 @@ CONTAINS
          ! due to their reversed indexing
          IF (correct_nrow) THEN
             idx_col_first = idx_col_first - nrow_offset + 1
-            IF (idx_col_first .LE. 0) CYCLE
+            IF (idx_col_first <= 0) CYCLE
          ELSE
             IF (idx_col_first > nrow_out) EXIT
          END IF
          IF (correct_ncol) THEN
             idx_col_sec = idx_col_sec - ncol_offset + 1
-            IF (idx_col_sec .LE. 0) CYCLE
+            IF (idx_col_sec <= 0) CYCLE
          ELSE
             IF (idx_col_sec > ncol_out) CYCLE
          END IF
@@ -641,13 +643,13 @@ CONTAINS
          ! due to their reversed indexing
          IF (correct_nrow) THEN
             idx_col_first = idx_col_first - nrow_offset + 1
-            IF (idx_col_first .LE. 0) CYCLE
+            IF (idx_col_first <= 0) CYCLE
          ELSE
             IF (idx_col_first > nrow_out) EXIT
          END IF
          IF (correct_ncol) THEN
             idx_col_sec = idx_col_sec - ncol_offset + 1
-            IF (idx_col_sec .LE. 0) CYCLE
+            IF (idx_col_sec <= 0) CYCLE
          ELSE
             IF (idx_col_sec > ncol_out) CYCLE
          END IF
@@ -838,7 +840,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE comp_eigvec_coeff_BSE
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1028,7 +1030,7 @@ CONTAINS
          END IF
          DO ii = 1, nrow_local
             eigvec_idx = row_indices(ii)
-            eigvec_entry = fm_eigvec%local_data(ii, jj)/SQRT(2.0_dp)
+            eigvec_entry = fm_eigvec%local_data(ii, jj)
             IF (ABS(eigvec_entry) > mp2_env%bse%eps_x) THEN
                num_entries_to_comm(para_env%mepos) = num_entries_to_comm(para_env%mepos) + 1
             END IF
@@ -1057,7 +1059,7 @@ CONTAINS
          END IF
          DO ii = 1, nrow_local
             eigvec_idx = row_indices(ii)
-            eigvec_entry = fm_eigvec%local_data(ii, jj)/SQRT(2.0_dp)
+            eigvec_entry = fm_eigvec%local_data(ii, jj)
             IF (ABS(eigvec_entry) > mp2_env%bse%eps_x) THEN
                buffer_entries(para_env%mepos)%indx(kk, 1) = (eigvec_idx - 1)/virtual + 1
                buffer_entries(para_env%mepos)%indx(kk, 2) = MOD(eigvec_idx - 1, virtual) + 1
@@ -1106,7 +1108,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE filter_eigvec_contrib
 
 ! **************************************************************************************************
 !> \brief Reads cutoffs for BSE from mp2_env and compares to energies in Eigenval to extract
@@ -1139,14 +1141,14 @@ CONTAINS
       ! Determine index in homo and virtual for truncation
       ! Uses indices of outermost orbitals within energy range (-mp2_env%bse%bse_cutoff_occ,mp2_env%bse%bse_cutoff_empty)
       IF (mp2_env%bse%bse_cutoff_occ > 0 .OR. mp2_env%bse%bse_cutoff_empty > 0) THEN
-         IF (-mp2_env%bse%bse_cutoff_occ .LT. Eigenval(1) - Eigenval(homo) &
+         IF (-mp2_env%bse%bse_cutoff_occ < Eigenval(1) - Eigenval(homo) &
              .OR. mp2_env%bse%bse_cutoff_occ < 0) THEN
             homo_red = homo
             homo_incl = 1
          ELSE
             homo_incl = 1
             DO i_homo = 1, homo
-               IF (Eigenval(i_homo) - Eigenval(homo) .GT. -mp2_env%bse%bse_cutoff_occ) THEN
+               IF (Eigenval(i_homo) - Eigenval(homo) > -mp2_env%bse%bse_cutoff_occ) THEN
                   homo_incl = i_homo
                   EXIT
                END IF
@@ -1154,14 +1156,14 @@ CONTAINS
             homo_red = homo - homo_incl + 1
          END IF
 
-         IF (mp2_env%bse%bse_cutoff_empty .GT. Eigenval(homo + virtual) - Eigenval(homo + 1) &
+         IF (mp2_env%bse%bse_cutoff_empty > Eigenval(homo + virtual) - Eigenval(homo + 1) &
              .OR. mp2_env%bse%bse_cutoff_empty < 0) THEN
             virt_red = virtual
             virt_incl = virtual
          ELSE
             virt_incl = homo + 1
             DO j_virt = 1, virtual
-               IF (Eigenval(homo + j_virt) - Eigenval(homo + 1) .GT. mp2_env%bse%bse_cutoff_empty) THEN
+               IF (Eigenval(homo + j_virt) - Eigenval(homo + 1) > mp2_env%bse%bse_cutoff_empty) THEN
                   virt_incl = j_virt - 1
                   EXIT
                END IF
@@ -1177,7 +1179,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE determine_cutoff_indices
 
 ! **************************************************************************************************
 !> \brief Determines indices within the given energy cutoffs and truncates Eigenvalues and matrices
@@ -1278,9 +1280,9 @@ CONTAINS
       CALL cp_fm_struct_create(fm_struct_ij, para_env, context, dimen_RI, homo_red*homo_red)
       CALL cp_fm_struct_create(fm_struct_ab, para_env, context, dimen_RI, virt_red*virt_red)
 
-      CALL cp_fm_create(fm_mat_S_trunc, fm_struct_ia, "fm_S_trunc")
-      CALL cp_fm_create(fm_mat_S_ij_trunc, fm_struct_ij, "fm_S_ij_trunc")
-      CALL cp_fm_create(fm_mat_S_ab_trunc, fm_struct_ab, "fm_S_ab_trunc")
+      CALL cp_fm_create(fm_mat_S_trunc, fm_struct_ia, name="fm_S_trunc", set_zero=.TRUE.)
+      CALL cp_fm_create(fm_mat_S_ij_trunc, fm_struct_ij, name="fm_S_ij_trunc", set_zero=.TRUE.)
+      CALL cp_fm_create(fm_mat_S_ab_trunc, fm_struct_ab, name="fm_S_ab_trunc", set_zero=.TRUE.)
 
       !Copy parts of original matrices to truncated ones
       IF (mp2_env%bse%bse_cutoff_occ > 0 .OR. mp2_env%bse%bse_cutoff_empty > 0) THEN
@@ -1368,11 +1370,11 @@ CONTAINS
       ! (ia,11) to (a1,i1) for transposition
       ! (ia,11) to (i1,a1) for default
       IF (do_transpose) THEN
-         reordering = (/2, 3, 1, 4/)
+         reordering = [2, 3, 1, 4]
          my_n_row = virtual
          my_m_col = homo
       ELSE
-         reordering = (/1, 3, 2, 4/)
+         reordering = [1, 3, 2, 4]
          my_n_row = homo
          my_m_col = virtual
       END IF
@@ -1542,7 +1544,7 @@ CONTAINS
           mp2_env%bse%num_print_exc > homo*virtual) THEN
          mp2_env%bse%num_print_exc = homo*virtual
          IF (unit_nr > 0) THEN
-            CALL cp_warn(__LOCATION__, &
+            CALL cp_hint(__LOCATION__, &
                          "Keyword NUM_PRINT_EXC is either negative or too large. "// &
                          "Printing all computed excitations.")
          END IF
@@ -1558,7 +1560,7 @@ CONTAINS
          IF (mp2_env%bse%explicit_nto_list) THEN
             IF (mp2_env%bse%num_print_exc_ntos > 0) THEN
                IF (unit_nr > 0) THEN
-                  CALL cp_warn(__LOCATION__, &
+                  CALL cp_hint(__LOCATION__, &
                                "Keywords NUM_PRINT_EXC_NTOS and STATE_LIST are both given in input. "// &
                                "Overriding NUM_PRINT_EXC_NTOS.")
                END IF
@@ -1574,7 +1576,7 @@ CONTAINS
             END DO
             IF (num_state_list_exceptions > 0) THEN
                IF (unit_nr > 0) THEN
-                  CALL cp_warn(__LOCATION__, &
+                  CALL cp_hint(__LOCATION__, &
                                "STATE_LIST contains indices outside the range of included excitation levels. "// &
                                "Ignoring these states.")
                END IF
@@ -1619,7 +1621,7 @@ CONTAINS
       IF (mp2_env%bse%num_print_exc_descr < 0 .OR. &
           mp2_env%bse%num_print_exc_descr > mp2_env%bse%num_print_exc) THEN
          IF (unit_nr > 0) THEN
-            CALL cp_warn(__LOCATION__, &
+            CALL cp_hint(__LOCATION__, &
                          "Keyword NUM_PRINT_EXC_DESCR is either negative or too large. "// &
                          "Printing exciton descriptors up to NUM_PRINT_EXC.")
          END IF
@@ -1724,10 +1726,10 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'get_multipoles_mo'
 
       INTEGER                                            :: handle, idir, n_multipole, n_occ, &
-                                                            n_virt, nao
+                                                            n_virt, nao, nmo_mp2
       REAL(KIND=dp), DIMENSION(:), POINTER               :: ref_point
       TYPE(cp_fm_struct_type), POINTER :: fm_struct_mp_ab_trunc, fm_struct_mp_ai_trunc, &
-         fm_struct_mp_ij_trunc, fm_struct_multipoles_ao, fm_struct_nao_nao
+         fm_struct_mp_ij_trunc, fm_struct_multipoles_ao, fm_struct_nao_nmo, fm_struct_nmo_nmo
       TYPE(cp_fm_type)                                   :: fm_work
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: fm_multipole_per_dir
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_multipole, matrix_s
@@ -1771,9 +1773,11 @@ CONTAINS
       ! Now we transform them to MO
       ! n_occ is the number of occupied MOs, nao the number of all AOs
       ! Writing homo to n_occ instead if nmo,
-      ! takes care of ADDED_MOS, which would overwrite nmo, if invoked
+      ! takes care of ADDED_MOS, which would overwrite nmo of qs_env-mos, if invoked
       CALL get_mo_set(mo_set=mos(1), homo=n_occ, nao=nao)
-      n_virt = nao - n_occ
+      ! Takes into account removed nullspace values from SVD
+      nmo_mp2 = mo_coeff(1)%matrix_struct%ncol_global
+      n_virt = nmo_mp2 - n_occ
 
       ! At the end, we need four different layouts of matrices in this multiplication, e.g. for a dipole:
       ! D_pq = full multipole matrix for occupied and unoccupied
@@ -1785,9 +1789,12 @@ CONTAINS
       ! fm_work =                 <\mu|\vec{r}|\nu>        C_{\nu q}              EQ.II
 
       ! Struct for the full multipole matrix
-      CALL cp_fm_struct_create(fm_struct_nao_nao, &
+      CALL cp_fm_struct_create(fm_struct_nao_nmo, &
                                fm_struct_multipoles_ao%para_env, fm_struct_multipoles_ao%context, &
-                               nao, nao)
+                               nao, nmo_mp2)
+      CALL cp_fm_struct_create(fm_struct_nmo_nmo, &
+                               fm_struct_multipoles_ao%para_env, fm_struct_multipoles_ao%context, &
+                               nmo_mp2, nmo_mp2)
 
       ! At the very end, we copy the multipoles corresponding to truncated BSE indices in i and a
       CALL cp_fm_struct_create(fm_struct_mp_ai_trunc, para_env_BSE, &
@@ -1810,19 +1817,20 @@ CONTAINS
 
       ! Need another temporary matrix to store intermediate result from right multiplication
       ! D = C_{mu a}        <\mu|\vec{r}|\nu>        C_{\nu i}
-      CALL cp_fm_create(fm_work, matrix_struct=fm_struct_nao_nao, name="multipole_work")
+      CALL cp_fm_create(fm_work, matrix_struct=fm_struct_nao_nmo, name="multipole_work")
       CALL cp_fm_set_all(fm_work, 0.0_dp)
 
       DO idir = 1, n_multipole
          ! Create the full multipole matrix per direction
-         CALL cp_fm_create(fm_multipole_per_dir(idir), matrix_struct=fm_struct_nao_nao, name="multipoles_mo")
+         CALL cp_fm_create(fm_multipole_per_dir(idir), matrix_struct=fm_struct_nmo_nmo, name="multipoles_mo")
          CALL cp_fm_set_all(fm_multipole_per_dir(idir), 0.0_dp)
          ! Fill final (MO) multipole matrix
          CALL cp_dbcsr_sm_fm_multiply(matrix_multipole(idir)%matrix, mo_coeff(1), &
-                                      fm_work, ncol=nao)
+                                      fm_work, ncol=nmo_mp2)
          ! Now obtain the multipoles by the final multiplication;
          ! We do that inside the loop to obtain multipoles per axis for print
-         CALL parallel_gemm('T', 'N', nao, nao, nao, 1.0_dp, mo_coeff(1), fm_work, 0.0_dp, fm_multipole_per_dir(idir))
+         CALL parallel_gemm('T', 'N', nmo_mp2, nmo_mp2, nao, 1.0_dp, mo_coeff(1), fm_work, 0.0_dp, fm_multipole_per_dir(idir))
+
          ! Truncate full matrix to the BSE indices
          ! D_ai
          CALL cp_fm_to_fm_submat_general(fm_multipole_per_dir(idir), &
@@ -1861,7 +1869,8 @@ CONTAINS
       CALL cp_fm_struct_release(fm_struct_mp_ai_trunc)
       CALL cp_fm_struct_release(fm_struct_mp_ij_trunc)
       CALL cp_fm_struct_release(fm_struct_mp_ab_trunc)
-      CALL cp_fm_struct_release(fm_struct_nao_nao)
+      CALL cp_fm_struct_release(fm_struct_nao_nmo)
+      CALL cp_fm_struct_release(fm_struct_nmo_nmo)
       DO idir = 1, n_multipole
          CALL cp_fm_release(fm_multipole_per_dir(idir))
       END DO
@@ -1914,4 +1923,4 @@ CONTAINS
 
    END SUBROUTINE trace_exciton_descr
 
-END MODULE
+END MODULE bse_util

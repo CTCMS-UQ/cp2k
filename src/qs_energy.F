@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -159,8 +159,10 @@ CONTAINS
          END IF
 
          IF (.NOT. loverlap_deltat) THEN
+            ! Calculate energy, response vector and some contributions to the force
             CALL qs_energies_properties(qs_env, calc_forces)
 
+            ! Update total energy of the selected excited state
             CALL excited_state_energy(qs_env, calculate_forces=.FALSE.)
          END IF
 

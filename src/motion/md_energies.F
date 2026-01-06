@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -790,7 +790,7 @@ CONTAINS
                END IF
             END IF
             WRITE (iw, '(T2,A)') 'MD| '//REPEAT('*', 75)
-            IF (max_memory .NE. 0) THEN
+            IF (max_memory /= 0) THEN
                WRITE (iw, '(T2,A,T73,I8)') &
                   'MD| Estimated peak process memory after this step [MiB]', &
                   (max_memory + (1024*1024) - 1)/(1024*1024)

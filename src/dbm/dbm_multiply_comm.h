@@ -1,16 +1,15 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
-
 #ifndef DBM_MULTIPLY_COMM_H
 #define DBM_MULTIPLY_COMM_H
 
 #include "dbm_distribution.h"
+#include "dbm_internal.h"
 #include "dbm_matrix.h"
-#include "dbm_multiply_internal.h"
 
 #include <stdbool.h>
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -142,7 +142,7 @@ CONTAINS
       IF (SIZE(seed_vals) == 1) THEN
          subsys%seed(:, :) = REAL(seed_vals(1), KIND=dp)
       ELSE IF (SIZE(seed_vals) == 6) THEN
-         subsys%seed(1:3, 1:2) = RESHAPE(REAL(seed_vals(:), KIND=dp), (/3, 2/))
+         subsys%seed(1:3, 1:2) = RESHAPE(REAL(seed_vals(:), KIND=dp), [3, 2])
       ELSE
          CPABORT("Supply exactly 1 or 6 arguments for SEED in &SUBSYS only!")
       END IF

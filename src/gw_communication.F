@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -15,7 +15,8 @@ MODULE gw_communication
         dbcsr_copy, dbcsr_create, dbcsr_filter, dbcsr_finalize, dbcsr_get_info, &
         dbcsr_get_stored_coordinates, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
         dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_p_type, &
-        dbcsr_release, dbcsr_reserve_all_blocks, dbcsr_reserve_blocks, dbcsr_set, dbcsr_type
+        dbcsr_release, dbcsr_reserve_blocks, dbcsr_set, dbcsr_type
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_reserve_all_blocks
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr
    USE cp_fm_types,                     ONLY: cp_fm_get_info,&
@@ -49,7 +50,7 @@ MODULE gw_communication
       INTEGER, DIMENSION(:, :), POINTER  :: indx => NULL()
       INTEGER :: proc = -1
       INTEGER :: msg_req = -1
-   END TYPE
+   END TYPE buffer_type
 
 CONTAINS
 
@@ -264,7 +265,7 @@ CONTAINS
             block_size = row_size*col_size
 
             buffer_send(imep)%msg(msg_offset + 1:msg_offset + block_size) = &
-               RESHAPE(data_block(1:row_size, 1:col_size), (/block_size/))
+               RESHAPE(data_block(1:row_size, 1:col_size), [block_size])
 
             entry_counter(imep) = entry_counter(imep) + block_size
 
@@ -382,7 +383,7 @@ CONTAINS
 
                   data_block(1:row_size, 1:col_size) = &
                      RESHAPE(buffer_rec(imep)%msg(offset + 1:offset + row_size*col_size), &
-                             (/row_size, col_size/))
+                             [row_size, col_size])
 
                END IF
 
@@ -628,7 +629,7 @@ CONTAINS
          offset = entry_counter(imep)
 
          buffer_send(imep)%msg(offset + 1:offset + block_size) = &
-            RESHAPE(data_block(1:row_size, 1:col_size), (/block_size/))
+            RESHAPE(data_block(1:row_size, 1:col_size), [block_size])
 
          i_block = block_counter(imep) + 1
 
@@ -711,7 +712,7 @@ CONTAINS
                   o = offset
 
                   data_block(1:r, 1:c) = data_block(1:r, 1:c) + &
-                                         RESHAPE(buffer_rec(imep)%msg(o + 1:o + r*c), (/r, c/))
+                                         RESHAPE(buffer_rec(imep)%msg(o + 1:o + r*c), [r, c])
 
                END IF
 

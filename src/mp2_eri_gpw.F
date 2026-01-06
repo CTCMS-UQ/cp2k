@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -307,7 +307,7 @@ CONTAINS
                      CALL integrate_pgf_product( &
                         la_max=la_max(iset), zeta=zeta(ipgf, iset), la_min=la_min(iset), &
                         lb_max=0, zetb=0.0_dp, lb_min=0, &
-                        ra=ra, rab=(/0.0_dp, 0.0_dp, 0.0_dp/), &
+                        ra=ra, rab=[0.0_dp, 0.0_dp, 0.0_dp], &
                         rsgrid=rs_v(igrid_level), &
                         hab=I_tmp2, &
                         o1=na1 - 1, &
@@ -343,7 +343,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE mp2_eri_2c_integrate_gpw
 
 ! **************************************************************************************************
 !> \brief Integrates the potential of a RI function obtaining the forces and stress tensor
@@ -667,7 +667,7 @@ CONTAINS
 
                   CALL integrate_pgf_product(la_max=la_max(iset), zeta=zeta(ipgf, iset)/2.0_dp, la_min=la_min(iset), &
                                              lb_max=0, zetb=zeta(ipgf, iset)/2.0_dp, lb_min=0, &
-                                             ra=ra, rab=(/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                             ra=ra, rab=[0.0_dp, 0.0_dp, 0.0_dp], &
                                              rsgrid=rs_v(igrid_level), &
                                              hab=I_tmp2, &
                                              pab=pab, &
@@ -901,7 +901,7 @@ CONTAINS
 
                   CALL integrate_pgf_product(la_max=la_max(iset), zeta=zeta(ipgf, iset)/2.0_dp, la_min=la_min(iset), &
                                              lb_max=0, zetb=zeta(ipgf, iset)/2.0_dp, lb_min=0, &
-                                             ra=ra, rab=(/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                             ra=ra, rab=[0.0_dp, 0.0_dp, 0.0_dp], &
                                              rsgrid=rs_v(igrid_level), &
                                              hab=I_tmp2, &
                                              pab=pab, &
@@ -937,7 +937,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE integrate_potential
 
 ! **************************************************************************************************
 !> \brief Prepares GPW calculation for RI-MP2/RI-RPA
@@ -1016,8 +1016,8 @@ CONTAINS
       NULLIFY (task_list_sub)
       skip_load_balance_distributed = dft_control%qs_control%skip_load_balance_distributed
       CALL allocate_task_list(task_list_sub)
-      CALL generate_qs_task_list(ks_env, task_list_sub, &
-                                 reorder_rs_grid_ranks=.TRUE., soft_valid=.FALSE., &
+      CALL generate_qs_task_list(ks_env, task_list_sub, basis_type="ORB", &
+                                 reorder_rs_grid_ranks=.TRUE., &
                                  skip_load_balance_distributed=skip_load_balance_distributed, &
                                  pw_env_external=pw_env_sub, sab_orb_external=sab_orb_sub)
 

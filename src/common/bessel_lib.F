@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -17,7 +17,7 @@ MODULE bessel_lib
 
    USE kinds,                           ONLY: dp
    USE mathconstants,                   ONLY: fac,&
-                                              pi
+                                              pio2
 #include "../base/base_uses.f90"
 
    IMPLICIT NONE
@@ -173,8 +173,8 @@ CONTAINS
       REAL(KIND=dp)                                      :: arg, fact, xsq
       REAL(KIND=dp), DIMENSION(4)                        :: trig
 
-      IF (x > SQRT(REAL(l, KIND=dp) + 0.5_dp)) THEN
-         arg = x - 0.5_dp*REAL(l, KIND=dp)*pi
+      IF ((x*x - 0.5_dp) > l) THEN
+         arg = x - pio2*REAL(l, KIND=dp)
          trig(1) = SIN(arg)/x
          trig(2) = COS(arg)/x
          trig(3) = -trig(1)

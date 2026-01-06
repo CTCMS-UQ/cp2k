@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -513,7 +513,7 @@ PROGRAM xyz2dcd
       END IF ! dump_frame
 
       ! Exit loop and stop processing, if the last (requested) frame was encountered
-      IF (nframe >= last_frame) EXIT
+      IF (nframe >= last_frame) EXIT frame_loop
 
    END DO frame_loop
 

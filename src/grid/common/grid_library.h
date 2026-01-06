@@ -1,6 +1,6 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
@@ -55,8 +55,9 @@ grid_library_config grid_library_get_config(void);
  * \brief Prints statistics gathered by the grid library.
  * \author Ole Schuett
  ******************************************************************************/
-void grid_library_print_stats(void (*mpi_sum_func)(long *, int), int mpi_comm,
-                              void (*print_func)(char *, int), int output_unit);
+void grid_library_print_stats(const int fortran_comm,
+                              void (*print_func)(const char *, int, int),
+                              int output_unit);
 
 /*******************************************************************************
  * \brief Various kernels provided by the grid library.

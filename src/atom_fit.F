@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -38,7 +38,6 @@ MODULE atom_fit
    USE input_section_types,             ONLY: section_vals_type,&
                                               section_vals_val_get
    USE kinds,                           ONLY: dp
-   USE lapack,                          ONLY: lapack_sgesv
    USE mathconstants,                   ONLY: fac,&
                                               fourpi,&
                                               pi
@@ -631,7 +630,7 @@ CONTAINS
                IF (atom%state%multiplicity == -1) THEN
                   ! no spin polarization
                   atom%weight = wem(i, j)
-                  ncore = get_maxn_occ(atom%state%core)
+                  ncore = get_maxn_occ(atom%state%core) - get_maxn_occ(atom_refs(i, j)%atom%state%core)
                   DO l = 0, lmat
                      np = atom%state%maxn_calc(l)
                      DO k = 1, np
@@ -806,7 +805,7 @@ CONTAINS
          CALL pseudo_fit(atom_info, wfn_guess, ppot, ostate%f, wtot, pval, dener, w_ener, t_ener, .TRUE.)
          IF (nre == 1) THEN
             WRITE (iunit, '(/," POWELL| Initial errors of target values")')
-            afun = ostate%f*wtot
+            afun = ostate%f*wtot + 1.0E-8_dp
             DO i = 1, SIZE(atom_info, 1)
                DO j = 1, SIZE(atom_info, 2)
                   atom => atom_info(i, j)%atom
@@ -955,7 +954,7 @@ CONTAINS
                WRITE (iunit, '(" POWELL| Reached",i4,"% of maximal function calls",T61,F20.10)') &
                   INT(REAL(ostate%nf, dp)/REAL(ostate%maxfun, dp)*100._dp), fopt
                CALL put_pseudo_param(ostate%xopt, ppot%gth_pot, noopt_nlcc)
-               CALL atom_write_pseudo_param(ppot%gth_pot)
+               CALL atom_write_pseudo_param(ppot%gth_pot, fopt=fopt)
             END IF
 
             IF (fopt < 1.e-12_dp) EXIT
@@ -973,7 +972,7 @@ CONTAINS
          ostate%state = 8
          CALL powell_optimize(ostate%nvar, x, ostate)
          CALL put_pseudo_param(x, ppot%gth_pot, noopt_nlcc)
-         CALL atom_write_pseudo_param(ppot%gth_pot)
+         CALL atom_write_pseudo_param(ppot%gth_pot, fopt=fopt)
          ! dx < SQRT(ostate%rhoend)
          IF ((dx*dx) < ostate%rhoend) EXIT
          ostate%rhobeg = step_size_scaling*ostate%rhobeg
@@ -986,7 +985,7 @@ CONTAINS
 
          CALL put_pseudo_param(x, ppot%gth_pot, noopt_nlcc)
          CALL pseudo_fit(atom_info, wfn_guess, ppot, ostate%f, wtot, pval, dener, w_ener, t_ener, .FALSE.)
-         afun = wtot*ostate%f
+         afun = wtot*ostate%f + 1.0E-8_dp
 
          WRITE (iunit, '(/," POWELL| Final errors of target values")')
          DO i = 1, SIZE(atom_info, 1)
@@ -1356,7 +1355,7 @@ CONTAINS
       smat(n + 1, n + 1) = 0._dp
 
       ALLOCATE (ipiv(n + 1))
-      CALL lapack_sgesv(n + 1, 1, smat, n + 1, ipiv, tval, n + 1, info)
+      CALL dgesv(n + 1, 1, smat, n + 1, ipiv, tval, n + 1, info)
       DEALLOCATE (ipiv)
       CPASSERT(info == 0)
       co(1:n) = tval(1:n, 1)

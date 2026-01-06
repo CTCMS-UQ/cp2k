@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -161,7 +161,7 @@ CONTAINS
                            first_atom=first, last_atom=last)
          IF (iw > 0) WRITE (iw, *) "boundaries of molecules (first, last) ::", first, last
          DO j = 1, natom
-            IF (.NOT. ANY(id_work(1:counter) .EQ. atom_list(j)%id_name)) THEN
+            IF (.NOT. ANY(id_work(1:counter) == atom_list(j)%id_name)) THEN
                counter = counter + 1
                id_work(counter) = atom_list(j)%id_name
                mass(counter) = atom_info%atm_mass(first + j - 1)
@@ -290,7 +290,7 @@ CONTAINS
          IF (iw > 0) THEN
             WRITE (iw, '(A,I6,A)') "      Atomic kind ", i, " contains particles"
             DO J = 1, SIZE(iatomlist)
-               IF (MOD(J, 5) .EQ. 0) THEN ! split long lines
+               IF (MOD(J, 5) == 0) THEN ! split long lines
                   WRITE (iw, '(I12)') iatomlist(J)
                ELSE
                   WRITE (iw, '(I12)', ADVANCE="NO") iatomlist(J)

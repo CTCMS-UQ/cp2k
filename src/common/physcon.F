@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -77,7 +77,7 @@ MODULE physcon
    PUBLIC :: a_bohr, a_fine, a_mass, angstrom, atm, bar, bohr, boltzmann, c_light_au, &
              debye, e_charge, e_gfactor, e_mass, evolt, femtoseconds, h_bar, &
              hertz, joule, kcalmol, kelvin, kjmol, massunit, mu_perm, n_avogadro, newton, &
-             p_mass, pascal, picoseconds, seconds, vibfac, wavenumbers
+             p_mass, pascal, picoseconds, seconds, vibfac, wavenumbers, c_light
 
    PUBLIC :: write_physcon
 

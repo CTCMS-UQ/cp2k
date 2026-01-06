@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -15,12 +15,12 @@ MODULE qs_ot_minimizer
 
    USE cp_dbcsr_api,                    ONLY: dbcsr_add,&
                                               dbcsr_copy,&
-                                              dbcsr_dot,&
                                               dbcsr_get_info,&
-                                              dbcsr_init_random,&
                                               dbcsr_p_type,&
                                               dbcsr_scale,&
                                               dbcsr_set
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_dot,&
+                                              dbcsr_init_random
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_unit_nr,&
                                               cp_logger_type
@@ -179,7 +179,7 @@ CONTAINS
       IF (.NOT. qs_ot_env(1)%energy_only) THEN
 
          ! we have not yet started with the line search
-         IF (qs_ot_env(1)%line_search_count .EQ. 0) THEN
+         IF (qs_ot_env(1)%line_search_count == 0) THEN
             res = .TRUE.
             RETURN
          END IF
@@ -211,6 +211,8 @@ CONTAINS
          CALL do_line_search_3pnt(qs_ot_env)
       CASE ("2PNT")
          CALL do_line_search_2pnt(qs_ot_env)
+      CASE ("ADPT")
+         CALL do_line_search_adapt(qs_ot_env)
       CASE ("NONE")
          CALL do_line_search_none(qs_ot_env)
       CASE DEFAULT
@@ -301,13 +303,13 @@ CONTAINS
       qs_ot_env(1)%line_search_might_be_done = .FALSE.
       qs_ot_env(1)%energy_only = .TRUE.
 
-      IF (count + 1 .GT. SIZE(qs_ot_env(1)%OT_pos)) THEN
+      IF (count + 1 > SIZE(qs_ot_env(1)%OT_pos)) THEN
          ! should not happen, we pass with a warning first
          ! you can increase the size of OT_pos and the like in qs_ot_env
          CPABORT("MAX ITER EXCEEDED : FATAL")
       END IF
 
-      IF (qs_ot_env(1)%line_search_count .EQ. 1) THEN
+      IF (qs_ot_env(1)%line_search_count == 1) THEN
          qs_ot_env(1)%line_search_left = 1
          qs_ot_env(1)%line_search_right = 0
          qs_ot_env(1)%line_search_mid = 1
@@ -319,8 +321,8 @@ CONTAINS
          ! it's essentially a book keeping game.
          ! keep left on the left, keep (bring) right on the right
          ! and mid in between these two
-         IF (qs_ot_env(1)%line_search_right .EQ. 0) THEN ! we do not yet have the right bracket
-            IF (qs_ot_env(1)%ot_energy(count - 1) .LT. qs_ot_env(1)%ot_energy(count)) THEN
+         IF (qs_ot_env(1)%line_search_right == 0) THEN ! we do not yet have the right bracket
+            IF (qs_ot_env(1)%ot_energy(count - 1) < qs_ot_env(1)%ot_energy(count)) THEN
                qs_ot_env(1)%line_search_right = count
                qs_ot_env(1)%ot_pos(count + 1) = qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_mid) + &
                                                 (qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_right) - &
@@ -332,15 +334,15 @@ CONTAINS
             END IF
          ELSE
             ! first determine where we are and construct the new triplet
-            IF (qs_ot_env(1)%ot_pos(count) .LT. qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_mid)) THEN
-               IF (qs_ot_env(1)%ot_energy(count) .LT. qs_ot_env(1)%ot_energy(qs_ot_env(1)%line_search_mid)) THEN
+            IF (qs_ot_env(1)%ot_pos(count) < qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_mid)) THEN
+               IF (qs_ot_env(1)%ot_energy(count) < qs_ot_env(1)%ot_energy(qs_ot_env(1)%line_search_mid)) THEN
                   qs_ot_env(1)%line_search_right = qs_ot_env(1)%line_search_mid
                   qs_ot_env(1)%line_search_mid = count
                ELSE
                   qs_ot_env(1)%line_search_left = count
                END IF
             ELSE
-               IF (qs_ot_env(1)%ot_energy(count) .LT. qs_ot_env(1)%ot_energy(qs_ot_env(1)%line_search_mid)) THEN
+               IF (qs_ot_env(1)%ot_energy(count) < qs_ot_env(1)%ot_energy(qs_ot_env(1)%line_search_mid)) THEN
                   qs_ot_env(1)%line_search_left = qs_ot_env(1)%line_search_mid
                   qs_ot_env(1)%line_search_mid = count
                ELSE
@@ -349,7 +351,7 @@ CONTAINS
             END IF
             ! now find the new point in the largest section
             IF ((qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_right) &
-                 - qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_mid)) .GT. &
+                 - qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_mid)) > &
                 (qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_mid) &
                  - qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_left))) THEN
                qs_ot_env(1)%ot_pos(count + 1) = &
@@ -364,10 +366,10 @@ CONTAINS
             END IF
             ! check for termination
             IF (((qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_right) &
-                  - qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_mid)) .LT. &
+                  - qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_mid)) < &
                  qs_ot_env(1)%ds_min*qs_ot_env(1)%settings%gold_target) .AND. &
                 ((qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_mid) &
-                  - qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_left)) .LT. &
+                  - qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_left)) < &
                  qs_ot_env(1)%ds_min*qs_ot_env(1)%settings%gold_target)) THEN
                qs_ot_env(1)%energy_only = .FALSE.
                qs_ot_env(1)%line_search_might_be_done = .TRUE.
@@ -411,7 +413,7 @@ CONTAINS
          qs_ot_env(1)%ot_pos(count) = 0.0_dp
          qs_ot_env(1)%ot_pos(count + 1) = qs_ot_env(1)%ds_min*0.8_dp
       CASE (2)
-         IF (qs_ot_env(1)%OT_energy(count) .GT. qs_ot_env(1)%OT_energy(count - 1)) THEN
+         IF (qs_ot_env(1)%OT_energy(count) > qs_ot_env(1)%OT_energy(count - 1)) THEN
             qs_ot_env(1)%OT_pos(count + 1) = qs_ot_env(1)%ds_min*0.5_dp
          ELSE
             qs_ot_env(1)%OT_pos(count + 1) = qs_ot_env(1)%ds_min*1.4_dp
@@ -425,7 +427,7 @@ CONTAINS
          fc = qs_ot_env(1)%OT_energy(3)
          nom = (xb - xa)**2*(fb - fc) - (xb - xc)**2*(fb - fa)
          denom = (xb - xa)*(fb - fc) - (xb - xc)*(fb - fa)
-         IF (ABS(denom) .LE. 1.0E-18_dp*MAX(ABS(fb - fc), ABS(fb - fa))) THEN
+         IF (ABS(denom) <= 1.0E-18_dp*MAX(ABS(fb - fc), ABS(fb - fa))) THEN
             pos = xb
          ELSE
             pos = xb - 0.5_dp*nom/denom ! position of the stationary point
@@ -433,7 +435,7 @@ CONTAINS
          val = (pos - xa)*(pos - xb)*fc/((xc - xa)*(xc - xb)) + &
                (pos - xb)*(pos - xc)*fa/((xa - xb)*(xa - xc)) + &
                (pos - xc)*(pos - xa)*fb/((xb - xc)*(xb - xa))
-         IF (val .LT. fa .AND. val .LE. fb .AND. val .LE. fc) THEN ! OK, we go to a minimum
+         IF (val < fa .AND. val <= fb .AND. val <= fc) THEN ! OK, we go to a minimum
             ! we take a guard against too large steps
             qs_ot_env(1)%OT_pos(count + 1) = MAX(MAXVAL(qs_ot_env(1)%OT_pos(1:3))*0.01_dp, &
                                                  MIN(pos, MAXVAL(qs_ot_env(1)%OT_pos(1:3))*4.0_dp))
@@ -487,12 +489,12 @@ CONTAINS
          b = qs_ot_env(1)%ot_grad(1)
          x1 = qs_ot_env(1)%ot_pos(2)
          a = (qs_ot_env(1)%ot_energy(2) - b*x1 - c)/(x1**2)
-         IF (a .LE. 0.0_dp) a = 1.0E-15_dp
+         IF (a <= 0.0_dp) a = 1.0E-15_dp
          pos = -b/(2.0_dp*a)
          val = a*pos**2 + b*pos + c
          qs_ot_env(1)%energy_only = .FALSE.
          qs_ot_env(1)%line_search_might_be_done = .TRUE.
-         IF (val .LT. qs_ot_env(1)%ot_energy(1) .AND. val .LE. qs_ot_env(1)%ot_energy(2)) THEN
+         IF (val < qs_ot_env(1)%ot_energy(1) .AND. val <= qs_ot_env(1)%ot_energy(2)) THEN
             ! we go to a minimum, but ...
             ! we take a guard against too large steps
             qs_ot_env(1)%OT_pos(count + 1) = MAX(MAXVAL(qs_ot_env(1)%OT_pos(1:2))*0.01_dp, &
@@ -511,6 +513,124 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE do_line_search_2pnt
+
+! **************************************************************************************************
+!> \brief ...
+!> \param qs_ot_env ...
+! **************************************************************************************************
+   SUBROUTINE do_line_search_adapt(qs_ot_env)
+
+      TYPE(qs_ot_type), DIMENSION(:), POINTER            :: qs_ot_env
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'do_line_search_adapt'
+      REAL(KIND=dp), PARAMETER                           :: grow_factor = 2.0_dp, &
+                                                            shrink_factor = 0.5_dp
+
+      INTEGER                                            :: count, handle, il, im, ir
+      REAL(KIND=dp)                                      :: a, b, c, denom, ds, el, em, er, &
+                                                            step_size, xl, xm, xr
+
+      CALL timeset(routineN, handle)
+
+      qs_ot_env(1)%line_search_count = qs_ot_env(1)%line_search_count + 1
+      count = qs_ot_env(1)%line_search_count
+      qs_ot_env(1)%line_search_might_be_done = .FALSE.
+      qs_ot_env(1)%energy_only = .TRUE.
+
+      IF (count + 1 > SIZE(qs_ot_env(1)%OT_pos)) THEN
+         ! should not happen, we pass with a warning first
+         ! you can increase the size of OT_pos and the like in qs_ot_env
+         CPABORT("MAX ITER EXCEEDED : FATAL")
+      END IF
+
+      ! Perform an adaptive linesearch
+      IF (qs_ot_env(1)%line_search_count == 1) THEN
+         qs_ot_env(1)%line_search_left = 1
+         qs_ot_env(1)%line_search_right = 0
+         qs_ot_env(1)%line_search_mid = 1
+         qs_ot_env(1)%ot_Pos(1) = 0.0_dp
+         qs_ot_env(1)%ot_energy(1) = qs_ot_env(1)%etotal
+         qs_ot_env(1)%ot_Pos(2) = qs_ot_env(1)%ds_min*grow_factor
+      ELSE
+         qs_ot_env(1)%ot_energy(count) = qs_ot_env(1)%etotal
+         ! it's essentially a book keeping game.
+         ! keep left on the left, keep (bring) right on the right
+         ! and mid in between these two
+         IF (qs_ot_env(1)%line_search_right == 0) THEN ! we do not yet have the right bracket
+            IF (qs_ot_env(1)%ot_energy(count - 1) < qs_ot_env(1)%ot_energy(count)) THEN
+               qs_ot_env(1)%line_search_right = count
+               qs_ot_env(1)%ot_Pos(count + 1) = qs_ot_env(1)%ot_Pos(qs_ot_env(1)%line_search_mid) + &
+                                                (qs_ot_env(1)%ot_Pos(qs_ot_env(1)%line_search_right) - &
+                                                 qs_ot_env(1)%ot_Pos(qs_ot_env(1)%line_search_mid))*shrink_factor
+            ELSE
+               ! expand further
+               qs_ot_env(1)%line_search_left = qs_ot_env(1)%line_search_mid
+               qs_ot_env(1)%line_search_mid = count
+               qs_ot_env(1)%ot_Pos(count + 1) = qs_ot_env(1)%ot_Pos(count)*grow_factor
+            END IF
+         ELSE
+            ! first determine where we are and construct the new triplet
+            IF (qs_ot_env(1)%ot_pos(count) < qs_ot_env(1)%ot_pos(qs_ot_env(1)%line_search_mid)) THEN
+               IF (qs_ot_env(1)%ot_energy(count) < qs_ot_env(1)%ot_energy(qs_ot_env(1)%line_search_mid)) THEN
+                  qs_ot_env(1)%line_search_right = qs_ot_env(1)%line_search_mid
+                  qs_ot_env(1)%line_search_mid = count
+               ELSE
+                  qs_ot_env(1)%line_search_left = count
+               END IF
+            ELSE
+               IF (qs_ot_env(1)%ot_energy(count) < qs_ot_env(1)%ot_energy(qs_ot_env(1)%line_search_mid)) THEN
+                  qs_ot_env(1)%line_search_left = qs_ot_env(1)%line_search_mid
+                  qs_ot_env(1)%line_search_mid = count
+               ELSE
+                  qs_ot_env(1)%line_search_right = count
+               END IF
+            END IF
+            il = qs_ot_env(1)%line_search_left
+            im = qs_ot_env(1)%line_search_mid
+            ir = qs_ot_env(1)%line_search_right
+            xl = qs_ot_env(1)%OT_pos(il)
+            xm = qs_ot_env(1)%OT_pos(im)
+            xr = qs_ot_env(1)%OT_pos(ir)
+            el = qs_ot_env(1)%ot_energy(il)
+            em = qs_ot_env(1)%ot_energy(im)
+            er = qs_ot_env(1)%ot_energy(ir)
+            IF (em < el) THEN
+               IF (er < em) THEN
+                  !extend search
+                  qs_ot_env(1)%ot_Pos(count + 1) = qs_ot_env(1)%ot_Pos(ir)*grow_factor
+               ELSE
+                  ! Cramer's rule
+                  denom = (xl - xm)*(xl - xr)*(xm - xr)
+                  a = (xr*(em - el) + xm*(el - er) + xl*(er - em))/denom
+                  b = (xr**2*(el - em) + xm**2*(er - el) + xl**2*(em - er))/denom
+                  c = (xm*xr*(xm - xr)*el + xr*xl*(xr - xl)*em + xr*xm*(xr - xm)*er)/denom
+
+                  IF (ABS(a) /= 0.0_dp) THEN
+                     step_size = -b/(2.0_dp*a)
+                  ELSE
+                     step_size = 0.0_dp
+                  END IF
+                  CPASSERT(step_size >= 0.0_dp)
+                  qs_ot_env(1)%ot_Pos(count + 1) = step_size
+                  qs_ot_env(1)%line_search_might_be_done = .TRUE.
+                  qs_ot_env(1)%energy_only = .FALSE.
+               END IF
+            ELSE
+               ! contract search
+               qs_ot_env(1)%ot_Pos(count + 1) = qs_ot_env(1)%ot_Pos(im) + &
+                                                (qs_ot_env(1)%ot_Pos(ir) - qs_ot_env(1)%ot_Pos(im))*shrink_factor
+            END IF
+
+         END IF
+      END IF
+      ds = qs_ot_env(1)%OT_pos(count + 1) - qs_ot_env(1)%OT_pos(count)
+      qs_ot_env(1)%ds_min = qs_ot_env(1)%OT_pos(count + 1)
+
+      CALL take_step(ds, qs_ot_env)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE do_line_search_adapt
 
 ! **************************************************************************************************
 !> \brief ...
@@ -561,7 +681,7 @@ CONTAINS
                CALL dbcsr_dot(qs_ot_env(ispin)%matrix_gx, qs_ot_env(ispin)%matrix_dx, tmp)
                qs_ot_env(1)%gnorm = qs_ot_env(1)%gnorm + tmp
             END DO
-            IF (qs_ot_env(1)%gnorm .LT. 0.0_dp) THEN
+            IF (qs_ot_env(1)%gnorm < 0.0_dp) THEN
                logger => cp_get_default_logger()
                WRITE (cp_logger_get_default_unit_nr(logger), *) "WARNING Preconditioner not positive definite !"
             END IF
@@ -700,7 +820,7 @@ CONTAINS
                CALL dbcsr_dot(qs_ot_env(ispin)%matrix_gx, qs_ot_env(ispin)%matrix_gx_old, tmp)
                qs_ot_env(1)%gnorm = qs_ot_env(1)%gnorm + tmp
             END DO
-            IF (qs_ot_env(1)%gnorm .LT. 0.0_dp) THEN
+            IF (qs_ot_env(1)%gnorm < 0.0_dp) THEN
                WRITE (cp_logger_get_default_unit_nr(logger), *) "WARNING Preconditioner not positive definite !"
             END IF
             DO ispin = 1, nspin
@@ -801,7 +921,7 @@ CONTAINS
          END DO
       END IF
 
-      IF (test_down .GE. 0.0_dp) THEN ! reset to SD
+      IF (test_down >= 0.0_dp) THEN ! reset to SD
          beta_pr = 0.0_dp
          IF (do_ks) THEN
             DO ispin = 1, nspin
@@ -852,7 +972,7 @@ CONTAINS
 
       diis_m = qs_ot_env(1)%settings%diis_m
 
-      IF (qs_ot_env(1)%diis_iter .LT. diis_m) THEN
+      IF (qs_ot_env(1)%diis_iter < diis_m) THEN
          diis_bound = qs_ot_env(1)%diis_iter + 1
       ELSE
          diis_bound = diis_m
@@ -885,7 +1005,7 @@ CONTAINS
                               tmp)
                qs_ot_env(1)%gnorm = qs_ot_env(1)%gnorm + tmp
             END DO
-            IF (qs_ot_env(1)%gnorm .LT. 0.0_dp) THEN
+            IF (qs_ot_env(1)%gnorm < 0.0_dp) THEN
                WRITE (cp_logger_get_default_unit_nr(logger), *) "WARNING Preconditioner not positive definite !"
             END IF
             DO ispin = 1, nspin
@@ -1025,7 +1145,7 @@ CONTAINS
       CALL DGESV(diis_bound + 1, 1, qs_ot_env(1)%lss_diis, diis_m + 1, qs_ot_env(1)%ipivot, &
                  qs_ot_env(1)%c_diis, diis_m + 1, info)
 
-      IF (info .NE. 0) THEN
+      IF (info /= 0) THEN
          do_ot_sd = .TRUE.
          WRITE (cp_logger_get_default_unit_nr(logger), *) "Singular DIIS matrix"
       ELSE
@@ -1107,7 +1227,7 @@ CONTAINS
             END IF
             overlap = (tr_xnew_gx - tr_xold_gx)
             ! OK, bad luck, take a SD step along the preconditioned gradient
-            IF (overlap .GT. 0.0_dp) THEN
+            IF (overlap > 0.0_dp) THEN
                do_ot_sd = .TRUE.
             END IF
          END IF
@@ -1181,7 +1301,7 @@ CONTAINS
       beta = qs_ot_env(1)%settings%broyden_beta
       gamma = qs_ot_env(1)%settings%broyden_gamma
       IF (adaptive_sigma) THEN
-         IF (qs_ot_env(1)%broyden_adaptive_sigma .LT. 0.0_dp) THEN
+         IF (qs_ot_env(1)%broyden_adaptive_sigma < 0.0_dp) THEN
             sigma = qs_ot_env(1)%settings%broyden_sigma
          ELSE
             sigma = qs_ot_env(1)%broyden_adaptive_sigma
@@ -1199,7 +1319,7 @@ CONTAINS
 
       diis_m = qs_ot_env(1)%settings%diis_m
 
-      IF (qs_ot_env(1)%diis_iter .LT. diis_m) THEN
+      IF (qs_ot_env(1)%diis_iter < diis_m) THEN
          diis_bound = qs_ot_env(1)%diis_iter + 1
       ELSE
          diis_bound = diis_m
@@ -1233,7 +1353,7 @@ CONTAINS
                            tmp)
             qs_ot_env(1)%gnorm = qs_ot_env(1)%gnorm + tmp
          END DO
-         IF (qs_ot_env(1)%gnorm .LT. 0.0_dp) THEN
+         IF (qs_ot_env(1)%gnorm < 0.0_dp) THEN
             WRITE (cp_logger_get_default_unit_nr(logger), *) "WARNING Preconditioner not positive definite !"
          END IF
          DO ispin = 1, nspin
@@ -1330,7 +1450,7 @@ CONTAINS
       S(k, :) = S(k, :)/tmp
       S(:, k) = S(:, k)/tmp
 
-      IF (diis_bound .GT. 1) THEN
+      IF (diis_bound > 1) THEN
          tmp = 0.0_dp
          tmp2 = 0.0_dp
          i = diis_bound
@@ -1364,7 +1484,7 @@ CONTAINS
 
       ! If we went uphill, do backtracking line search
       i = MINLOC(qs_ot_env(1)%energy_h(1:diis_bound), dim=1)
-      IF (i .NE. j) THEN
+      IF (i /= j) THEN
          sigma = sigma_dec*sigma
          qs_ot_env(1)%OT_METHOD_FULL = "OT BTRK"
          DO ispin = 1, nspin
@@ -1390,7 +1510,7 @@ CONTAINS
             tmp = 1.0_dp
             ! We want a pos def Hessian
             IF (enable_flip) THEN
-               IF (qs_ot_env(1)%c_broy(i - 1) .GT. 0) THEN
+               IF (qs_ot_env(1)%c_broy(i - 1) > 0) THEN
                   !qs_ot_env(1)%OT_METHOD_FULL="OT FLIP"
                   tmp = -1.0_dp
                END IF
@@ -1444,7 +1564,7 @@ CONTAINS
          DO ispin = 1, nspin
             ! if the direction of the step is not in direction of the gradient,
             ! change step sign
-            IF (tmp .GE. 0.0_dp) THEN
+            IF (tmp >= 0.0_dp) THEN
                qs_ot_env(1)%OT_METHOD_FULL = "OT TURN"
                IF (forget_history) THEN
                   qs_ot_env(1)%diis_iter = 0
@@ -1549,15 +1669,15 @@ CONTAINS
             H(j, i) = DOT_PRODUCT(Q(:, j), MATMUL(S, v))
             v(:) = v - H(j, i)*Q(:, j)
          END DO
-         IF (i .LT. k) THEN
+         IF (i < k) THEN
             tmp = DOT_PRODUCT(v, MATMUL(S, v))
-            IF (tmp .LE. 0.0_dp) THEN
+            IF (tmp <= 0.0_dp) THEN
                n = i
                EXIT
             END IF
             tmp = SQRT(tmp)
             ! Lucky breakdown
-            IF (ABS(tmp) .LT. 1e-9_dp) THEN
+            IF (ABS(tmp) < 1e-9_dp) THEN
                n = i
                EXIT
             END IF

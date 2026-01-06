@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -17,12 +17,8 @@
 ! **************************************************************************************************
 MODULE cp_blacs_types
 
-#if defined(__DLAF)
-   USE cp_dlaf_utils_api, ONLY: cp_dlaf_create_grid, &
-                                cp_dlaf_free_grid
-#endif
-   USE kinds, ONLY: dp
-   USE message_passing, ONLY: mp_comm_type
+   USE kinds,                           ONLY: dp
+   USE message_passing,                 ONLY: mp_comm_type
 #include "../base/base_uses.f90"
 
    IMPLICIT NONE
@@ -55,7 +51,7 @@ MODULE cp_blacs_types
       GENERIC, PUBLIC :: OPERATOR(/=) => cp_context_is_not_equal
 
       PROCEDURE, PUBLIC, PASS(this), NON_OVERRIDABLE :: interconnect => cp_blacs_interconnect
-   END TYPE
+   END TYPE cp_blacs_type
 
 !***
 CONTAINS
@@ -78,9 +74,6 @@ CONTAINS
       context_handle = comm%get_handle()
       CALL blacs_gridinit(context_handle, order, nprow, npcol)
       this%context_handle = context_handle
-#if defined(__DLAF)
-      CALL cp_dlaf_create_grid(context_handle)
-#endif
 #else
       MARK_USED(this)
       MARK_USED(comm)
@@ -99,9 +92,6 @@ CONTAINS
       CLASS(cp_blacs_type), INTENT(IN) :: this
 #if defined(__parallel)
       CALL blacs_gridexit(this%context_handle)
-#if defined(__DLAF)
-      CALL cp_dlaf_free_grid(this%context_handle)
-#endif
 #else
       MARK_USED(this)
 #endif
@@ -173,7 +163,7 @@ CONTAINS
       MARK_USED(A)
       MARK_USED(LDA)
 #endif
-   END SUBROUTINE
+   END SUBROUTINE cp_blacs_zgebs2d
 ! **************************************************************************************************
 !> \brief ...
 !> \param this ...
@@ -205,7 +195,7 @@ CONTAINS
       MARK_USED(RSRC)
       MARK_USED(CSRC)
 #endif
-   END SUBROUTINE
+   END SUBROUTINE cp_blacs_zgebr2d
 
 ! **************************************************************************************************
 !> \brief ...
@@ -233,7 +223,7 @@ CONTAINS
       MARK_USED(A)
       MARK_USED(LDA)
 #endif
-   END SUBROUTINE
+   END SUBROUTINE cp_blacs_dgebs2d
 ! **************************************************************************************************
 !> \brief ...
 !> \param this ...
@@ -265,7 +255,7 @@ CONTAINS
       MARK_USED(RSRC)
       MARK_USED(CSRC)
 #endif
-   END SUBROUTINE
+   END SUBROUTINE cp_blacs_dgebr2d
 
 ! **************************************************************************************************
 !> \brief ...
@@ -280,7 +270,7 @@ CONTAINS
       MARK_USED(this)
       cp_blacs_get_handle = -1
 #endif
-   END FUNCTION
+   END FUNCTION cp_blacs_get_handle
 
 ! **************************************************************************************************
 !> \brief ...

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -71,6 +71,10 @@ CONTAINS
 !> \param eps_geometry    accuracy in mapping atoms based on their Cartesian coordinates
 !> \par History
 !>   * 08.2017 created [Sergey Chulkov]
+!>   * 10.2025 Centering of contact coordinates is added in the end. It is necessary to keep the
+!>             right order of indices in the real space image matrices. It is made only here, because
+!>             the mapping is based on the comparison of the coordinates. [Dmitry Ryndyk]
+!> \note
 ! **************************************************************************************************
    SUBROUTINE negf_map_atomic_indices(atom_map, atom_list, subsys_device, subsys_contact, eps_geometry)
       TYPE(negf_atom_map_type), DIMENSION(:), &
@@ -124,7 +128,7 @@ CONTAINS
                   CALL real_to_scaled(coords_scaled, coords, cell_contact)
                   coords_error = coords_scaled - REAL(NINT(coords_scaled), kind=dp)
 
-                  IF (SQRT(DOT_PRODUCT(coords_error, coords_error)) < eps_geometry) THEN
+                  IF (DOT_PRODUCT(coords_error, coords_error) < (eps_geometry*eps_geometry)) THEN
                      atom_map(iatom)%iatom = kind_groups_contact(ikind_contact)%atom_list(iatom_kind)
                      atom_map(iatom)%cell = NINT(coords_scaled)
                      EXIT iterate_kind
@@ -144,8 +148,35 @@ CONTAINS
 
       CALL qs_kind_groups_release(kind_groups_contact)
 
+      CALL centering_contact_coordinates(subsys=subsys_contact)
+
       CALL timestop(handle)
    END SUBROUTINE negf_map_atomic_indices
+
+! **************************************************************************************************
+!> \brief Centering the atom coordinates of the primary unit cell of the bulk electrode.
+!> \param subsys ...
+!> \par History
+!>   * 10.2025 created [Dmitry Ryndyk]
+!> \note It is necessary to keep the right order of indices in the real space image matrices.
+! **************************************************************************************************
+   SUBROUTINE centering_contact_coordinates(subsys)
+      TYPE(qs_subsys_type), POINTER                      :: subsys
+
+      REAL(KIND=dp)                                      :: shiftX, shiftY, shiftZ
+      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
+
+      CALL qs_subsys_get(subsys, particle_set=particle_set)
+
+      shiftX = (MAXVAL(particle_set(:)%r(1)) + MINVAL(particle_set(:)%r(1)))/2.0
+      shiftY = (MAXVAL(particle_set(:)%r(2)) + MINVAL(particle_set(:)%r(2)))/2.0
+      shiftZ = (MAXVAL(particle_set(:)%r(3)) + MINVAL(particle_set(:)%r(3)))/2.0
+
+      particle_set(:)%r(1) = particle_set(:)%r(1) - shiftX
+      particle_set(:)%r(2) = particle_set(:)%r(2) - shiftY
+      particle_set(:)%r(3) = particle_set(:)%r(3) - shiftZ
+
+   END SUBROUTINE centering_contact_coordinates
 
 ! **************************************************************************************************
 !> \brief Group particles from 'particle_set' according to their atomic (QS) kind.

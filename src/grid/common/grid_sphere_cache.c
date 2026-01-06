@@ -1,6 +1,6 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
@@ -71,7 +71,7 @@ static void rebuild_cache_entry(const int max_imr, const double drmin,
 
   // Compute required storage size.
   entry->offsets = malloc(max_imr * sizeof(int));
-  assert(entry->offsets != NULL);
+  assert(entry->offsets != NULL || max_imr == 0);
   int nbounds_total = 0;
   for (int imr = 1; imr <= max_imr; imr++) {
     const double radius = imr * drmin;
@@ -82,7 +82,7 @@ static void rebuild_cache_entry(const int max_imr, const double drmin,
 
   // Allocate and fill storage.
   entry->storage = malloc(nbounds_total * sizeof(int));
-  assert(entry->storage != NULL);
+  assert(entry->storage != NULL || nbounds_total == 0);
   for (int imr = 1; imr <= max_imr; imr++) {
     const double radius = imr * drmin;
     const int offset = entry->offsets[imr - 1];
@@ -134,8 +134,10 @@ void grid_sphere_cache_lookup(const double radius, const double dh[3][3],
     const size_t entry_size = sizeof(grid_sphere_cache_entry);
     cache->entries = malloc(cache->size * entry_size);
     assert(cache->entries != NULL);
-    memcpy(cache->entries, old_entries, (cache->size - 1) * entry_size);
-    free(old_entries);
+    if (old_entries != NULL) {
+      memcpy(cache->entries, old_entries, (cache->size - 1) * entry_size);
+      free(old_entries);
+    }
     cache->prev_match = cache->size - 1;
     entry = &cache->entries[cache->size - 1];
     // Initialize new cache entry

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -250,7 +250,7 @@ CONTAINS
                                               prefactor=1.0_dp, cutoff=1.0_dp)
 
             CALL integrate_pgf_product(ni, alpha, 0, &
-                                       0, 0.0_dp, 0, ra, (/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                       0, 0.0_dp, 0, ra, [0.0_dp, 0.0_dp, 0.0_dp], &
                                        rs_v, hab, pab=pab, o1=0, o2=0, &
                                        radius=radius, &
                                        calculate_forces=.TRUE., force_a=force_a, &
@@ -447,7 +447,7 @@ CONTAINS
                                                  prefactor=1.0_dp, cutoff=1.0_dp)
 
                CALL integrate_pgf_product(ni, 1/(2*alpha**2), 0, &
-                                          0, 0.0_dp, 0, ra, (/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                          0, 0.0_dp, 0, ra, [0.0_dp, 0.0_dp, 0.0_dp], &
                                           rs_v, hab, pab=pab, o1=0, o2=0, &
                                           radius=radius, &
                                           calculate_forces=.TRUE., force_a=force_a, &
@@ -555,11 +555,12 @@ CONTAINS
          DO ikind = 1, SIZE(atomic_kind_set)
 
             CALL get_atomic_kind(atomic_kind_set(ikind), natom=natom_of_kind, atom_list=atom_list)
-            CALL get_qs_kind(qs_kind_set(ikind), paw_atom=paw_atom, &
-                             alpha_core_charge=alpha_core_charge, &
-                             ccore_charge=ccore_charge)
+            CALL get_qs_kind(qs_kind_set(ikind), paw_atom=paw_atom)
 
             IF (dft_control%qs_control%gapw .AND. paw_atom) CYCLE
+
+            CALL get_qs_kind(qs_kind_set(ikind), alpha_core_charge=alpha_core_charge, &
+                             ccore_charge=ccore_charge)
 
             pab(1, 1) = -ccore_charge
             IF (alpha_core_charge == 0.0_dp .OR. pab(1, 1) == 0.0_dp) CYCLE
@@ -603,7 +604,7 @@ CONTAINS
                                                  prefactor=1.0_dp, cutoff=1.0_dp)
 
                CALL integrate_pgf_product(0, alpha_core_charge, 0, &
-                                          0, 0.0_dp, 0, ra, (/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                          0, 0.0_dp, 0, ra, [0.0_dp, 0.0_dp, 0.0_dp], &
                                           rs_v, hab, pab=pab, o1=0, o2=0, &
                                           radius=radius, &
                                           calculate_forces=.TRUE., force_a=force_a, &
@@ -735,7 +736,7 @@ CONTAINS
                                               prefactor=1.0_dp, cutoff=1.0_dp)
 
             CALL integrate_pgf_product(0, alpha_core_charge, 0, &
-                                       0, 0.0_dp, 0, ra, (/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                       0, 0.0_dp, 0, ra, [0.0_dp, 0.0_dp, 0.0_dp], &
                                        rs_v, hab, pab=pab, o1=0, o2=0, &
                                        radius=radius, calculate_forces=.FALSE., &
                                        use_subpatch=.TRUE., subpatch_pattern=0)
@@ -914,7 +915,7 @@ CONTAINS
                            CALL integrate_pgf_product(la_max=la_max(iset), &
                                                       zeta=zeta(ipgf, iset), la_min=la_min(iset), &
                                                       lb_max=0, zetb=0.0_dp, lb_min=0, &
-                                                      ra=ra, rab=(/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                                      ra=ra, rab=[0.0_dp, 0.0_dp, 0.0_dp], &
                                                       rsgrid=rs_grid, &
                                                       hab=hab, o1=na1, o2=0, radius=radius, &
                                                       calculate_forces=calculate_forces)
@@ -922,7 +923,7 @@ CONTAINS
                            CALL integrate_pgf_product(la_max=la_max(iset), &
                                                       zeta=zeta(ipgf, iset), la_min=la_min(iset), &
                                                       lb_max=0, zetb=0.0_dp, lb_min=0, &
-                                                      ra=ra, rab=(/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                                      ra=ra, rab=[0.0_dp, 0.0_dp, 0.0_dp], &
                                                       rsgrid=rs_grid, &
                                                       hab=hab, pab=pab, o1=na1, o2=0, radius=radius, &
                                                       calculate_forces=calculate_forces, &
@@ -1121,7 +1122,7 @@ CONTAINS
                                  CALL integrate_pgf_product( &
                                     la_max(iset), zeta(ipgf, iset), la_min(iset), &
                                     la_max(jset), zeta(jpgf, jset), la_min(jset), &
-                                    ra=ra, rab=(/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                    ra=ra, rab=[0.0_dp, 0.0_dp, 0.0_dp], &
                                     rsgrid=rs_v(igrid_level), &
                                     hab=hab, pab=pab, o1=na1, o2=nb1, &
                                     radius=radius, &
@@ -1132,7 +1133,7 @@ CONTAINS
                                  CALL integrate_pgf_product( &
                                     la_max(iset), zeta(ipgf, iset), la_min(iset), &
                                     la_max(jset), zeta(jpgf, jset), la_min(jset), &
-                                    ra=ra, rab=(/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                    ra=ra, rab=[0.0_dp, 0.0_dp, 0.0_dp], &
                                     rsgrid=rs_v(igrid_level), &
                                     hab=hab, o1=na1, o2=nb1, &
                                     radius=radius, &
@@ -1312,7 +1313,7 @@ CONTAINS
                      CALL integrate_pgf_product(la_max=la_max(iset), &
                                                 zeta=zeta(ipgf, iset), la_min=la_min(iset), &
                                                 lb_max=0, zetb=0.0_dp, lb_min=0, &
-                                                ra=ra, rab=(/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                                ra=ra, rab=[0.0_dp, 0.0_dp, 0.0_dp], &
                                                 rsgrid=rs_grid, &
                                                 hab=hab, pab=pab, o1=na1, o2=0, radius=radius, &
                                                 calculate_forces=.TRUE., &
@@ -1323,7 +1324,7 @@ CONTAINS
                      CALL integrate_pgf_product(la_max=la_max(iset), &
                                                 zeta=zeta(ipgf, iset), la_min=la_min(iset), &
                                                 lb_max=0, zetb=0.0_dp, lb_min=0, &
-                                                ra=ra, rab=(/0.0_dp, 0.0_dp, 0.0_dp/), &
+                                                ra=ra, rab=[0.0_dp, 0.0_dp, 0.0_dp], &
                                                 rsgrid=rs_grid, &
                                                 hab=hab, o1=na1, o2=0, radius=radius, &
                                                 calculate_forces=.FALSE.)

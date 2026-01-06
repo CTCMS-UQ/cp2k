@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -43,7 +43,9 @@ MODULE qs_scf_post_se
                                               section_vals_val_get
    USE kinds,                           ONLY: default_string_length,&
                                               dp
-   USE mathconstants,                   ONLY: twopi
+   USE mathconstants,                   ONLY: twopi,&
+                                              z_one,&
+                                              z_zero
    USE message_passing,                 ONLY: mp_para_env_type
    USE moments_utils,                   ONLY: get_reference_point
    USE orbital_pointers,                ONLY: coset,&
@@ -299,8 +301,8 @@ CONTAINS
             dria = twopi*MATMUL(cell%h_inv, drcc)
             dzphase = charge_tot*CMPLX(-SIN(ria), COS(ria), dp)**(charge_tot - 1.0_dp)*dria
 
-            ggamma = CMPLX(1.0_dp, 0.0_dp, KIND=dp)
-            dggamma = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+            ggamma = z_one
+            dggamma = z_zero
             DO ikind = 1, SIZE(atomic_kind_set)
                CALL get_atomic_kind(atomic_kind_set(ikind), natom=nat)
                DO i = 1, nat
@@ -566,7 +568,7 @@ CONTAINS
       IF (BTEST(cp_print_key_should_output(logger%iter_info, print_key), cp_p_file)) THEN
          unit_nr = cp_print_key_unit_nr(logger, input, "DFT%PRINT%EEQ_CHARGES", &
                                         extension=".eeq", log_filename=.FALSE.)
-         CALL eeq_print(qs_env, unit_nr, print_level=1)
+         CALL eeq_print(qs_env, unit_nr, print_level=1, ext=.FALSE.)
          CALL cp_print_key_finished_output(unit_nr, logger, print_key)
       END IF
 

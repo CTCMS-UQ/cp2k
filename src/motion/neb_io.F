@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -432,7 +432,7 @@ CONTAINS
       lp = LEN_TRIM(replica_proj_name)
       CALL section_vals_val_set(root_section, "GLOBAL%PROJECT_NAME", &
                                 c_val=TRIM(replica_proj_name))
-      logger%iter_info%project_name = replica_proj_name
+      logger%iter_info%project_name = TRIM(replica_proj_name)
 
       ! We change the file on which is pointing the global logger and error
       output_file_path = replica_proj_name(1:lp)//".out"

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -106,6 +106,9 @@ MODULE atom_types
       INTEGER, DIMENSION(0:lmat)                    :: nl = 0
       REAL(dp), DIMENSION(0:lmat)                   :: rcnl = 0.0_dp
       REAL(dp), DIMENSION(4, 4, 0:lmat)             :: hnl = 0.0_dp
+      ! SOC
+      LOGICAL                                       :: soc = .FALSE.
+      REAL(dp), DIMENSION(4, 4, 0:lmat)             :: knl = 0.0_dp
       ! type extensions
       ! NLCC
       LOGICAL                                       :: nlcc = .FALSE.
@@ -377,8 +380,9 @@ CONTAINS
       INTEGER, INTENT(IN)                                :: zval
       CHARACTER(LEN=2)                                   :: btyp
 
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'init_atom_basis'
       INTEGER, PARAMETER                                 :: nua = 40, nup = 16
-      REAL(KIND=dp), DIMENSION(nua), PARAMETER :: ugbs = (/0.007299_dp, 0.013705_dp, 0.025733_dp, &
+      REAL(KIND=dp), DIMENSION(nua), PARAMETER :: ugbs = [0.007299_dp, 0.013705_dp, 0.025733_dp, &
          0.048316_dp, 0.090718_dp, 0.170333_dp, 0.319819_dp, 0.600496_dp, 1.127497_dp, 2.117000_dp,&
          3.974902_dp, 7.463317_dp, 14.013204_dp, 26.311339_dp, 49.402449_dp, 92.758561_dp, &
          174.164456_dp, 327.013024_dp, 614.003114_dp, 1152.858743_dp, 2164.619772_dp, &
@@ -386,16 +390,18 @@ CONTAINS
          94845.070265_dp, 178082.107320_dp, 334368.848683_dp, 627814.487663_dp, 1178791.123851_dp, &
          2213310.684886_dp, 4155735.557141_dp, 7802853.046713_dp, 14650719.428954_dp, &
          27508345.793637_dp, 51649961.080194_dp, 96978513.342764_dp, 182087882.613702_dp, &
-         341890134.751331_dp/)
+         341890134.751331_dp]
 
       CHARACTER(LEN=default_string_length)               :: basis_fn, basis_name
-      INTEGER                                            :: basistype, i, j, k, l, ll, m, ngp, nl, &
-                                                            nr, nu, quadtype
+      INTEGER                                            :: basistype, handle, i, j, k, l, ll, m, &
+                                                            ngp, nl, nr, nu, quadtype
       INTEGER, DIMENSION(0:lmat)                         :: starti
       INTEGER, DIMENSION(:), POINTER                     :: nqm, num_gto, num_slater, sindex
       REAL(KIND=dp)                                      :: al, amax, aval, cval, ear, pf, rk
       REAL(KIND=dp), DIMENSION(:), POINTER               :: expo
       TYPE(section_vals_type), POINTER                   :: gto_basis_section
+
+      CALL timeset(routineN, handle)
 
       !   btyp = AE : standard all-electron basis
       !   btyp = PP : standard pseudopotential basis
@@ -409,7 +415,7 @@ CONTAINS
       CALL section_vals_val_get(basis_section, "QUADRATURE", i_val=quadtype)
       CALL section_vals_val_get(basis_section, "GRID_POINTS", i_val=ngp)
       IF (ngp <= 0) &
-         CPABORT("# point radial grid < 0")
+         CPABORT("The number of radial grid points must be greater than zero.")
       CALL create_grid_atom(basis%grid, ngp, 1, 1, 0, quadtype)
       basis%grid%nr = ngp
       basis%geometrical = .FALSE.
@@ -420,8 +426,6 @@ CONTAINS
       CALL section_vals_val_get(basis_section, "BASIS_TYPE", i_val=basistype)
       CALL section_vals_val_get(basis_section, "EPS_EIGENVALUE", r_val=basis%eps_eig)
       SELECT CASE (basistype)
-      CASE DEFAULT
-         CPABORT("")
       CASE (gaussian)
          basis%basis_type = GTO_BASIS
          NULLIFY (num_gto)
@@ -430,7 +434,7 @@ CONTAINS
             ! use default basis
             IF (btyp == "AE") THEN
                nu = nua
-            ELSEIF (btyp == "PP") THEN
+            ELSE IF (btyp == "PP") THEN
                nu = nup
             ELSE
                nu = nua
@@ -454,8 +458,6 @@ CONTAINS
                IF (basis%nbas(l) > 0) THEN
                   NULLIFY (expo)
                   SELECT CASE (l)
-                  CASE DEFAULT
-                     CPABORT("Atom Basis")
                   CASE (0)
                      CALL section_vals_val_get(basis_section, "S_EXPONENTS", r_vals=expo)
                   CASE (1)
@@ -464,6 +466,8 @@ CONTAINS
                      CALL section_vals_val_get(basis_section, "D_EXPONENTS", r_vals=expo)
                   CASE (3)
                      CALL section_vals_val_get(basis_section, "F_EXPONENTS", r_vals=expo)
+                  CASE DEFAULT
+                     CPABORT("Invalid angular quantum number l found for Gaussian basis set")
                   END SELECT
                   CPASSERT(SIZE(expo) >= basis%nbas(l))
                   DO i = 1, basis%nbas(l)
@@ -502,10 +506,10 @@ CONTAINS
             IF (btyp == "AE") THEN
                ! use the Clementi extra large basis
                CALL Clementi_geobas(zval, cval, aval, basis%nbas, starti)
-            ELSEIF (btyp == "PP") THEN
+            ELSE IF (btyp == "PP") THEN
                ! use the Clementi extra large basis
                CALL Clementi_geobas(zval, cval, aval, basis%nbas, starti)
-            ELSEIF (btyp == "AA") THEN
+            ELSE IF (btyp == "AA") THEN
                CALL Clementi_geobas(zval, cval, aval, basis%nbas, starti)
                amax = cval**(basis%nbas(0) - 1)
                basis%nbas(0) = NINT((LOG(amax)/LOG(1.6_dp)))
@@ -515,7 +519,7 @@ CONTAINS
                basis%nbas(2) = basis%nbas(0) - 8
                basis%nbas(3) = basis%nbas(0) - 12
                IF (lmat > 3) basis%nbas(4:lmat) = 0
-            ELSEIF (btyp == "AP") THEN
+            ELSE IF (btyp == "AP") THEN
                CALL Clementi_geobas(zval, cval, aval, basis%nbas, starti)
                amax = 500._dp/aval
                basis%nbas = NINT((LOG(amax)/LOG(1.6_dp)))
@@ -618,7 +622,7 @@ CONTAINS
          NULLIFY (num_slater)
          CALL section_vals_val_get(basis_section, "NUM_SLATER", i_vals=num_slater)
          IF (num_slater(1) < 1) THEN
-            CPABORT("")
+            CPABORT("Invalid number (less than 1) Slater-type functions found.")
          ELSE
             basis%nbas = 0
             DO i = 1, SIZE(num_slater)
@@ -627,14 +631,12 @@ CONTAINS
             basis%nprim = basis%nbas
             m = MAXVAL(basis%nbas)
             ALLOCATE (basis%as(m, 0:lmat), basis%ns(m, 0:lmat))
-            basis%as = 0._dp
+            basis%as = 0.0_dp
             basis%ns = 0
             DO l = 0, lmat
                IF (basis%nbas(l) > 0) THEN
                   NULLIFY (expo)
                   SELECT CASE (l)
-                  CASE DEFAULT
-                     CPABORT("Atom Basis")
                   CASE (0)
                      CALL section_vals_val_get(basis_section, "S_EXPONENTS", r_vals=expo)
                   CASE (1)
@@ -643,6 +645,8 @@ CONTAINS
                      CALL section_vals_val_get(basis_section, "D_EXPONENTS", r_vals=expo)
                   CASE (3)
                      CALL section_vals_val_get(basis_section, "F_EXPONENTS", r_vals=expo)
+                  CASE DEFAULT
+                     CPABORT("Invalid angular quantum number l found for Slater basis set")
                   END SELECT
                   CPASSERT(SIZE(expo) >= basis%nbas(l))
                   DO i = 1, basis%nbas(l)
@@ -650,8 +654,6 @@ CONTAINS
                   END DO
                   NULLIFY (nqm)
                   SELECT CASE (l)
-                  CASE DEFAULT
-                     CPABORT("Atom Basis")
                   CASE (0)
                      CALL section_vals_val_get(basis_section, "S_QUANTUM_NUMBERS", i_vals=nqm)
                   CASE (1)
@@ -660,6 +662,8 @@ CONTAINS
                      CALL section_vals_val_get(basis_section, "D_QUANTUM_NUMBERS", i_vals=nqm)
                   CASE (3)
                      CALL section_vals_val_get(basis_section, "F_QUANTUM_NUMBERS", i_vals=nqm)
+                  CASE DEFAULT
+                     CPABORT("Invalid angular quantum number l found for Slater basis set")
                   END SELECT
                   CPASSERT(SIZE(nqm) >= basis%nbas(l))
                   DO i = 1, basis%nbas(l)
@@ -694,8 +698,12 @@ CONTAINS
          END DO
       CASE (numerical)
          basis%basis_type = NUM_BASIS
-         CPABORT("")
+         CPABORT("Numerical basis set type not yet implemented.")
+      CASE DEFAULT
+         CPABORT("Unknown basis set type specified. Check the code!")
       END SELECT
+
+      CALL timestop(handle)
 
    END SUBROUTINE init_atom_basis
 
@@ -706,8 +714,9 @@ CONTAINS
    SUBROUTINE init_atom_basis_default_pp(basis)
       TYPE(atom_basis_type), INTENT(INOUT)               :: basis
 
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'init_atom_basis_default_pp'
       INTEGER, PARAMETER                                 :: nua = 40, nup = 20
-      REAL(KIND=dp), DIMENSION(nua), PARAMETER :: ugbs = (/0.007299_dp, 0.013705_dp, 0.025733_dp, &
+      REAL(KIND=dp), DIMENSION(nua), PARAMETER :: ugbs = [0.007299_dp, 0.013705_dp, 0.025733_dp, &
          0.048316_dp, 0.090718_dp, 0.170333_dp, 0.319819_dp, 0.600496_dp, 1.127497_dp, 2.117000_dp,&
          3.974902_dp, 7.463317_dp, 14.013204_dp, 26.311339_dp, 49.402449_dp, 92.758561_dp, &
          174.164456_dp, 327.013024_dp, 614.003114_dp, 1152.858743_dp, 2164.619772_dp, &
@@ -715,13 +724,16 @@ CONTAINS
          94845.070265_dp, 178082.107320_dp, 334368.848683_dp, 627814.487663_dp, 1178791.123851_dp, &
          2213310.684886_dp, 4155735.557141_dp, 7802853.046713_dp, 14650719.428954_dp, &
          27508345.793637_dp, 51649961.080194_dp, 96978513.342764_dp, 182087882.613702_dp, &
-         341890134.751331_dp/)
+         341890134.751331_dp]
 
-      INTEGER                                            :: i, k, l, m, ngp, nr, nu, quadtype
+      INTEGER                                            :: handle, i, k, l, m, ngp, nr, nu, quadtype
       REAL(KIND=dp)                                      :: al, ear, rk
 
+      CALL timeset(routineN, handle)
+
       NULLIFY (basis%am, basis%cm, basis%as, basis%ns, basis%bf, basis%dbf, basis%ddbf)
-      ! allocate and initialize the atomic grid
+
+      ! Allocate and initialize the atomic grid
       NULLIFY (basis%grid)
       CALL allocate_grid_atom(basis%grid)
       quadtype = do_gapw_log
@@ -764,6 +776,8 @@ CONTAINS
             END DO
          END DO
       END DO
+
+      CALL timestop(handle)
 
    END SUBROUTINE init_atom_basis_default_pp
 
@@ -827,7 +841,7 @@ CONTAINS
       ngp = SIZE(r)
       quadtype = do_gapw_log
       IF (ngp <= 0) &
-         CPABORT("# point radial grid < 0")
+         CPABORT("The number of radial grid points must be greater than zero.")
       CALL create_grid_atom(gbasis%grid, ngp, 1, 1, 0, quadtype)
       gbasis%grid%nr = ngp
       gbasis%grid%rad(:) = r(:)
@@ -845,8 +859,6 @@ CONTAINS
       gbasis%ddbf = 0._dp
 
       SELECT CASE (gbasis%basis_type)
-      CASE DEFAULT
-         CPABORT("")
       CASE (GTO_BASIS)
          DO l = 0, lmat
             DO i = 1, gbasis%nbas(l)
@@ -897,7 +909,9 @@ CONTAINS
          END DO
       CASE (NUM_BASIS)
          gbasis%basis_type = NUM_BASIS
-         CPABORT("")
+         CPABORT("Numerical basis set type not yet implemented.")
+      CASE DEFAULT
+         CPABORT("Unknown basis set type specified. Check the code!")
       END SELECT
 
    END SUBROUTINE atom_basis_gridrep
@@ -1425,6 +1439,7 @@ CONTAINS
 !> \param ival ...
 ! **************************************************************************************************
    SUBROUTINE Clementi_geobas(zval, cval, aval, ngto, ival)
+
       INTEGER, INTENT(IN)                                :: zval
       REAL(dp), INTENT(OUT)                              :: cval, aval
       INTEGER, DIMENSION(0:lmat), INTENT(OUT)            :: ngto, ival
@@ -1435,8 +1450,6 @@ CONTAINS
       aval = 0._dp
 
       SELECT CASE (zval)
-      CASE DEFAULT
-         CPABORT("")
       CASE (1) ! this is from the general geometrical basis and extended
          cval = 2.0_dp
          aval = 0.016_dp
@@ -2170,9 +2183,12 @@ CONTAINS
          ival(1) = 0
          ival(2) = 3
          ival(3) = 6
+      CASE DEFAULT
+         CPABORT("No geometrical basis set data are available for the selected atom number.")
       END SELECT
 
    END SUBROUTINE Clementi_geobas
+
 ! **************************************************************************************************
 !> \brief ...
 !> \param element_symbol ...
@@ -2321,7 +2337,7 @@ CONTAINS
                   END IF
                ELSE
                   ! Stop program, if the end of file is reached
-                  CPABORT("")
+                  CPABORT("End of file reached and the requested basis set was not found.")
                END IF
 
             END DO search_loop
@@ -2450,11 +2466,11 @@ CONTAINS
             CALL atom_read_upf(potential%upf_pot, pseudo_fn)
             potential%upf_pot%pname = pseudo_name
          CASE (sgp_pseudo)
-            CPABORT("Not implemented")
+            CPABORT("Pseudopotential type SGP is not implemented.")
          CASE (no_pseudo)
             ! do nothing
          CASE DEFAULT
-            CPABORT("")
+            CPABORT("Invalid pseudopotential type selected. Check the code!")
          END SELECT
       ELSE
          potential%ppot_type = no_pseudo
@@ -2569,6 +2585,8 @@ CONTAINS
       potential%nl = 0
       potential%rcnl = 0._dp
       potential%hnl = 0._dp
+      potential%soc = .FALSE.
+      potential%knl = 0._dp
 
       potential%lpotextended = .FALSE.
       potential%lsdpot = .FALSE.
@@ -2632,7 +2650,7 @@ CONTAINS
                      CALL remove_word(line_att)
                   END DO
                END DO
-            ELSEIF (INDEX(line_att, "NLCC") /= 0) THEN
+            ELSE IF (INDEX(line_att, "NLCC") /= 0) THEN
                potential%nlcc = .TRUE.
                CALL remove_word(line_att)
                READ (line_att, *) potential%nexp_nlcc
@@ -2651,7 +2669,7 @@ CONTAINS
                      CALL remove_word(line_att)
                   END DO
                END DO
-            ELSEIF (INDEX(line_att, "LSD") /= 0) THEN
+            ELSE IF (INDEX(line_att, "LSD") /= 0) THEN
                potential%lsdpot = .TRUE.
                CALL remove_word(line_att)
                READ (line_att, *) potential%nexp_lsd
@@ -2675,6 +2693,7 @@ CONTAINS
          ! Read the parameters for the non-local part of the GTH pseudopotential (ppnl)
          READ (line_att, *) nlmax
          CALL remove_word(line_att)
+         IF (INDEX(line_att, "SOC") /= 0) potential%soc = .TRUE.
          IF (nlmax > 0) THEN
             ! Load the parameter for nlmax non-local projectors
             DO l = 0, nlmax - 1
@@ -2703,6 +2722,29 @@ CONTAINS
                      CALL remove_word(line_att)
                   END DO
                END DO
+               IF (potential%soc .AND. l /= 0) THEN
+                  is_ok = cp_sll_val_next(list, val)
+                  CPASSERT(is_ok)
+                  CALL val_get(val, c_val=line_att)
+                  DO i = 1, potential%nl(l)
+                     IF (i == 1) THEN
+                        READ (line_att, *) potential%knl(1, 1, l)
+                        CALL remove_word(line_att)
+                     ELSE
+                        CPASSERT(LEN_TRIM(line_att) == 0)
+                        is_ok = cp_sll_val_next(list, val)
+                        CPASSERT(is_ok)
+                        CALL val_get(val, c_val=line_att)
+                        READ (line_att, *) potential%knl(i, i, l)
+                        CALL remove_word(line_att)
+                     END IF
+                     DO j = i + 1, potential%nl(l)
+                        READ (line_att, *) potential%knl(i, j, l)
+                        potential%knl(j, i, l) = potential%knl(i, j, l)
+                        CALL remove_word(line_att)
+                     END DO
+                  END DO
+               END IF
                CPASSERT(LEN_TRIM(line_att) == 0)
             END DO
          END IF
@@ -2750,7 +2792,7 @@ CONTAINS
                         CALL parser_get_next_line(parser, 1)
                         IF (parser_test_next_token(parser) == "INT") THEN
                            EXIT
-                        ELSEIF (parser_test_next_token(parser) == "STR") THEN
+                        ELSE IF (parser_test_next_token(parser) == "STR") THEN
                            CALL parser_get_object(parser, line)
                            IF (INDEX(LINE, "LPOT") /= 0) THEN
                               ! local potential
@@ -2763,7 +2805,7 @@ CONTAINS
                                     CALL parser_get_object(parser, potential%cval_lpot(ic, ipot))
                                  END DO
                               END DO
-                           ELSEIF (INDEX(LINE, "NLCC") /= 0) THEN
+                           ELSE IF (INDEX(LINE, "NLCC") /= 0) THEN
                               ! NLCC
                               potential%nlcc = .TRUE.
                               CALL parser_get_object(parser, potential%nexp_nlcc)
@@ -2776,7 +2818,7 @@ CONTAINS
                                     potential%cval_nlcc(ic, ipot) = potential%cval_nlcc(ic, ipot)/(4.0_dp*pi)
                                  END DO
                               END DO
-                           ELSEIF (INDEX(LINE, "LSD") /= 0) THEN
+                           ELSE IF (INDEX(LINE, "LSD") /= 0) THEN
                               ! LSD potential
                               potential%lsdpot = .TRUE.
                               CALL parser_get_object(parser, potential%nexp_lsd)
@@ -2788,15 +2830,19 @@ CONTAINS
                                  END DO
                               END DO
                            ELSE
-                              CPABORT("")
+                              CPABORT("Parsing of extended potential type failed.")
                            END IF
                         ELSE
-                           CPABORT("")
+                           CPABORT("Invalid input token found.")
                         END IF
                      END DO
                      ! Read the parameters for the non-local part of the GTH pseudopotential (ppnl)
                      CALL parser_get_object(parser, nlmax)
                      IF (nlmax > 0) THEN
+                        IF (parser_test_next_token(parser) == "STR") THEN
+                           CALL parser_get_object(parser, line)
+                           IF (INDEX(LINE, "SOC") /= 0) potential%soc = .TRUE.
+                        END IF
                         ! Load the parameter for n non-local projectors
                         DO l = 0, nlmax - 1
                            CALL parser_get_object(parser, potential%rcnl(l), newline=.TRUE.)
@@ -2812,13 +2858,22 @@ CONTAINS
                                  potential%hnl(j, i, l) = potential%hnl(i, j, l)
                               END DO
                            END DO
+                           IF (potential%soc .AND. l /= 0) THEN
+                              DO i = 1, potential%nl(l)
+                                 CALL parser_get_object(parser, potential%knl(i, i, l), newline=.TRUE.)
+                                 DO j = i + 1, potential%nl(l)
+                                    CALL parser_get_object(parser, potential%knl(i, j, l))
+                                    potential%knl(j, i, l) = potential%knl(i, j, l)
+                                 END DO
+                              END DO
+                           END IF
                         END DO
                      END IF
                      EXIT search_loop
                   END IF
                ELSE
                   ! Stop program, if the end of file is reached
-                  CPABORT("")
+                  CPABORT("End of file reached unexpectedly")
                END IF
 
             END DO search_loop
@@ -2980,6 +3035,7 @@ CONTAINS
       SELECT CASE (nel)
       CASE DEFAULT
          CPABORT("Unknown Core State")
+      CASE (0)
       CASE (2)
          potential%econf(0:3) = potential%econf(0:3) - ptable(2)%e_conv(0:3)
       CASE (10)

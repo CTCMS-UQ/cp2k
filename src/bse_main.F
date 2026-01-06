@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -190,12 +190,12 @@ CONTAINS
             CALL create_A(fm_mat_S_ia_trunc, fm_mat_S_ij_trunc, fm_mat_S_ab_trunc, &
                           fm_A_BSE, Eigenval_reduced, unit_nr, &
                           homo_red, virtual_red, dimen_RI, mp2_env, &
-                          para_env)
+                          para_env, qs_env)
          ELSE
             CALL create_A(fm_mat_S_ia_trunc, fm_mat_S_bar_ij_bse, fm_mat_S_ab_trunc, &
                           fm_A_BSE, Eigenval_reduced, unit_nr, &
                           homo_red, virtual_red, dimen_RI, mp2_env, &
-                          para_env)
+                          para_env, qs_env)
          END IF
          IF (my_do_abba) THEN
             ! Matrix B constructed from 3c-B-matrices (cf. subroutine mult_B_with_W)

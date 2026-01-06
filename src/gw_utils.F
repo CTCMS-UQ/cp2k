@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -18,7 +18,8 @@ MODULE gw_utils
    USE bibliography,                    ONLY: Graml2024,&
                                               cite_reference
    USE cell_types,                      ONLY: cell_type,&
-                                              pbc
+                                              pbc,&
+                                              scaled_to_real
    USE cp_blacs_env,                    ONLY: cp_blacs_env_create,&
                                               cp_blacs_env_release,&
                                               cp_blacs_env_type
@@ -57,7 +58,6 @@ MODULE gw_utils
    USE distribution_2d_types,           ONLY: distribution_2d_type
    USE gw_communication,                ONLY: fm_to_local_array
    USE gw_integrals,                    ONLY: build_3c_integral_block
-   USE gw_kp_to_real_space_and_back,    ONLY: trafo_rs_to_ikp
    USE input_constants,                 ONLY: do_potential_truncated,&
                                               large_cell_Gamma,&
                                               ri_rpa_g0w0_crossing_newton,&
@@ -69,9 +69,11 @@ MODULE gw_utils
                                               section_vals_type,&
                                               section_vals_val_get,&
                                               section_vals_val_set
-   USE kinds,                           ONLY: default_string_length,&
+   USE kinds,                           ONLY: default_path_length,&
+                                              default_string_length,&
                                               dp,&
                                               int_8
+   USE kpoint_k_r_trafo_simple,         ONLY: rs_to_kp
    USE kpoint_methods,                  ONLY: kpoint_init_cell_index
    USE kpoint_types,                    ONLY: get_kpoint_info,&
                                               kpoint_create,&
@@ -84,7 +86,8 @@ MODULE gw_utils
    USE mathconstants,                   ONLY: gaussi,&
                                               z_one,&
                                               z_zero
-   USE mathlib,                         ONLY: gcd
+   USE mathlib,                         ONLY: diag_complex,&
+                                              gcd
    USE message_passing,                 ONLY: mp_cart_type,&
                                               mp_para_env_type
    USE minimax_exp,                     ONLY: get_exp_minimax_coeff
@@ -279,12 +282,14 @@ CONTAINS
       CALL section_vals_val_get(gw_sec, "NUM_TIME_FREQ_POINTS", i_val=bs_env%num_time_freq_points)
       CALL section_vals_val_get(gw_sec, "EPS_FILTER", r_val=bs_env%eps_filter)
       CALL section_vals_val_get(gw_sec, "REGULARIZATION_RI", r_val=bs_env%input_regularization_RI)
+      CALL section_vals_val_get(gw_sec, "REGULARIZATION_MINIMAX", r_val=bs_env%input_regularization_minimax)
       CALL section_vals_val_get(gw_sec, "CUTOFF_RADIUS_RI", r_val=bs_env%ri_metric%cutoff_radius)
       CALL section_vals_val_get(gw_sec, "MEMORY_PER_PROC", r_val=bs_env%input_memory_per_proc_GB)
       CALL section_vals_val_get(gw_sec, "APPROX_KP_EXTRAPOL", l_val=bs_env%approx_kp_extrapol)
       CALL section_vals_val_get(gw_sec, "SIZE_LATTICE_SUM", i_val=bs_env%size_lattice_sum_V)
       CALL section_vals_val_get(gw_sec, "KPOINTS_W", i_vals=bs_env%nkp_grid_chi_eps_W_input)
       CALL section_vals_val_get(gw_sec, "HEDIN_SHIFT", l_val=bs_env%do_hedin_shift)
+      CALL section_vals_val_get(gw_sec, "FREQ_MAX_FIT", r_val=bs_env%freq_max_fit)
 
       CALL timestop(handle)
 
@@ -361,7 +366,10 @@ CONTAINS
       DO ikind = 1, n_kind
          CALL get_qs_kind(qs_kind=qs_kind_set(ikind), basis_set=basis_set_a, &
                           basis_type="RI_AUX")
-         CPASSERT(ASSOCIATED(basis_set_a))
+         IF (.NOT. ASSOCIATED(basis_set_a)) THEN
+            CALL cp_abort(__LOCATION__, &
+                          "At least one RI_AUX basis set was not explicitly invoked in &KIND-section.")
+         END IF
       END DO
 
       ALLOCATE (bs_env%i_RI_start_from_atom(n_atom))
@@ -1182,8 +1190,8 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'check_for_restart_files'
 
       CHARACTER(LEN=9)                                   :: frmt
-      CHARACTER(LEN=default_string_length)               :: f_chi, f_S_n, f_S_p, f_S_x, f_W_t, &
-                                                            prefix, project_name
+      CHARACTER(len=default_path_length)                 :: project_name
+      CHARACTER(len=default_string_length)               :: f_chi, f_s_n, f_s_p, f_s_x, f_w_t, prefix
       INTEGER                                            :: handle, i_spin, i_t_or_w, ind, n_spin, &
                                                             num_time_freq_points
       LOGICAL                                            :: chi_exists, Sigma_neg_time_exists, &
@@ -1259,6 +1267,13 @@ CONTAINS
 
       END DO
 
+      ! Marek : In the RTBSE run, check also for zero frequency W
+      IF (bs_env%rtp_method == rtp_method_bse) THEN
+         WRITE (f_W_t, '(3A,I1,A)') TRIM(prefix), "W_freq_rtp", "_0", 0, ".matrix"
+         INQUIRE (file=TRIM(f_W_t), exist=W_time_exists)
+         bs_env%all_W_exist = bs_env%all_W_exist .AND. W_time_exists
+      END IF
+
       IF (bs_env%all_W_exist) THEN
          bs_env%read_chi(:) = .FALSE.
          bs_env%calc_chi(:) = .FALSE.
@@ -1270,6 +1285,20 @@ CONTAINS
          INQUIRE (file=TRIM(f_S_x), exist=Sigma_x_spin_exists)
          bs_env%Sigma_x_exists = bs_env%Sigma_x_exists .AND. Sigma_x_spin_exists
       END DO
+
+      ! If any restart files are read, check if the SCF converged in 1 step.
+      ! This is important because a re-iterated SCF can lead to spurious GW results
+      IF (ANY(bs_env%read_chi(:)) &
+          .OR. ANY(bs_env%Sigma_c_exists) &
+          .OR. bs_env%all_W_exist &
+          .OR. bs_env%Sigma_x_exists &
+          ) THEN
+
+         IF (qs_env%scf_env%iter_count /= 1) THEN
+            CALL cp_warn(__LOCATION__, "SCF needed more than 1 step, "// &
+                         "which might lead to spurious GW results when using GW restart files. ")
+         END IF
+      END IF
 
       CALL timestop(handle)
 
@@ -1302,7 +1331,7 @@ CONTAINS
          bs_env%group_size_tensor = num_pe
 
       ! group_size_tensor must divide num_pe without rest; otherwise everything will be complicated
-      IF (MODULO(num_pe, bs_env%group_size_tensor) .NE. 0) THEN
+      IF (MODULO(num_pe, bs_env%group_size_tensor) /= 0) THEN
          CALL find_good_group_size(num_pe, bs_env%group_size_tensor)
       END IF
 
@@ -1465,7 +1494,7 @@ CONTAINS
       gcd_max = -1
       DO ipe = 1, CEILING(SQRT(REAL(nproc, dp)))
          jpe = nproc/ipe
-         IF (ipe*jpe .NE. nproc) CYCLE
+         IF (ipe*jpe /= nproc) CYCLE
          IF (gcd(ipe, jpe) >= gcd_max) THEN
             nprow = ipe
             npcol = jpe
@@ -1496,21 +1525,21 @@ CONTAINS
       ! for generating numerically stable minimax Fourier integration weights
       bs_env%num_points_per_magnitude = 200
 
-      ! for periodic systems and for 20 minimax points, we use a regularized minimax mesh
-      ! (from experience: regularized minimax meshes converges faster for periodic systems
-      !  and for 20 pts)
-      IF (SUM(bs_env%periodic) .NE. 0 .OR. bs_env%num_time_freq_points == 20) THEN
-         bs_env%regularization_minimax = 1.0E-6_dp
+      IF (bs_env%input_regularization_minimax > -1.0E-12_dp) THEN
+         bs_env%regularization_minimax = bs_env%input_regularization_minimax
       ELSE
-         bs_env%regularization_minimax = 0.0_dp
+         ! for periodic systems and for 20 minimax points, we use a regularized minimax mesh
+         ! (from experience: regularized minimax meshes converges faster for periodic systems
+         !  and for 20 pts)
+         IF (SUM(bs_env%periodic) /= 0 .OR. bs_env%num_time_freq_points >= 20) THEN
+            bs_env%regularization_minimax = 1.0E-6_dp
+         ELSE
+            bs_env%regularization_minimax = 0.0_dp
+         END IF
       END IF
 
       bs_env%stabilize_exp = 70.0_dp
       bs_env%eps_atom_grid_2d_mat = 1.0E-50_dp
-
-      ! only use interval ω in [0, 1 Ha] (1 Hartree = 27.211 eV) for virt, and ω in [-1 Ha, 0]
-      ! for occ for use in analytic continuation of self-energy Σ^c_n(iω,k) -> Σ^c_n(ϵ,k)
-      bs_env%freq_max_fit = 1.0_dp
 
       ! use a 16-parameter Padé fit
       bs_env%nparam_pade = 16
@@ -1555,6 +1584,8 @@ CONTAINS
          WRITE (u, FMT="(T2,2A,F15.1,A)") "Cutoff radius for the truncated Coulomb ", &
             "operator in RI metric:", bs_env%ri_metric%cutoff_radius*angstrom, " Å"
          WRITE (u, FMT="(T2,A,ES48.1)") "Regularization parameter of RI ", bs_env%regularization_RI
+         WRITE (u, FMT="(T2,A,ES38.1)") "Regularization parameter of minimax grids", &
+            bs_env%regularization_minimax
          WRITE (u, FMT="(T2,A,I53)") "Lattice sum size for V(k):", bs_env%size_lattice_sum_V
       END IF
 
@@ -1579,22 +1610,18 @@ CONTAINS
       u = bs_env%unit_nr
 
       IF (u > 0) THEN
-         WRITE (u, *) ' '
-         WRITE (u, '(T2,2A)') '------------------------------------------------', &
-            '-------------------------------'
-         WRITE (u, '(T2,2A)') '-                                               ', &
-            '                              -'
-         WRITE (u, '(T2,2A)') '-                              GW CALCULATION   ', &
-            '                              -'
-         WRITE (u, '(T2,2A)') '-                                               ', &
-            '                              -'
-         WRITE (u, '(T2,2A)') '------------------------------------------------', &
-            '-------------------------------'
+         WRITE (u, '(T2,A)') ' '
+         WRITE (u, '(T2,A)') REPEAT('-', 79)
+         WRITE (u, '(T2,A,A78)') '-', '-'
+         WRITE (u, '(T2,A,A46,A32)') '-', 'GW CALCULATION', '-'
+         WRITE (u, '(T2,A,A78)') '-', '-'
+         WRITE (u, '(T2,A)') REPEAT('-', 79)
          WRITE (u, '(T2,A)') ' '
          WRITE (u, '(T2,A,I45)') 'Input: Number of time/freq. points', bs_env%num_time_freq_points
+         WRITE (u, "(T2,A,F44.1,A)") 'Input: ω_max for fitting Σ(iω) (eV)', bs_env%freq_max_fit*evolt
          WRITE (u, '(T2,A,ES27.1)') 'Input: Filter threshold for sparse tensor operations', &
             bs_env%eps_filter
-         WRITE (bs_env%unit_nr, FMT="(T2,A,L62)") "Apply Hedin shift", bs_env%do_hedin_shift
+         WRITE (u, "(T2,A,L55)") 'Input: Apply Hedin shift', bs_env%do_hedin_shift
       END IF
 
       CALL timestop(handle)
@@ -1694,7 +1721,8 @@ CONTAINS
             DO img = 1, dft_control%nimages
                ! safe fm_V_xc_R in fm_matrix because saving in dbcsr matrix caused trouble...
                CALL copy_dbcsr_to_fm(matrix_ks_kp(ispin, img)%matrix, bs_env%fm_work_mo(1))
-               CALL cp_fm_create(bs_env%fm_V_xc_R(img, ispin), bs_env%fm_work_mo(1)%matrix_struct)
+               CALL cp_fm_create(bs_env%fm_V_xc_R(img, ispin), bs_env%fm_work_mo(1)%matrix_struct, &
+                                 set_zero=.TRUE.)
                ! store h_ks(v_xc = 0) in fm_V_xc_R
                CALL cp_fm_scale_and_add(alpha=1.0_dp, matrix_a=bs_env%fm_V_xc_R(img, ispin), &
                                         beta=1.0_dp, matrix_b=bs_env%fm_work_mo(1))
@@ -1790,7 +1818,7 @@ CONTAINS
       ALLOCATE (points_and_weights(2*num_time_freq_points))
 
       ! frequency points
-      IF (num_time_freq_points .LE. 20) THEN
+      IF (num_time_freq_points <= 20) THEN
          CALL get_rpa_minimax_coeff(num_time_freq_points, E_range, points_and_weights, ierr, .FALSE.)
       ELSE
          CALL get_rpa_minimax_coeff_larger_grid(num_time_freq_points, E_range, points_and_weights)
@@ -1825,7 +1853,7 @@ CONTAINS
       END IF
 
       ! time points
-      IF (num_time_freq_points .LE. 20) THEN
+      IF (num_time_freq_points <= 20) THEN
          CALL get_exp_minimax_coeff(num_time_freq_points, E_range, points_and_weights)
       ELSE
          CALL get_exp_minimax_coeff_gw(num_time_freq_points, E_range, points_and_weights)
@@ -1895,26 +1923,40 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'setup_cells_3c'
 
-      INTEGER :: atom_i, atom_j, atom_k, cell_pair_count, handle, i, i_cell_x, i_cell_x_max, &
+      INTEGER :: atom_i, atom_j, atom_k, block_count, handle, i, i_cell_x, i_cell_x_max, &
          i_cell_x_min, i_size, ikind, img, j, j_cell, j_cell_max, j_cell_y, j_cell_y_max, &
          j_cell_y_min, j_size, k_cell, k_cell_max, k_cell_z, k_cell_z_max, k_cell_z_min, k_size, &
          nimage_pairs_3c, nimages_3c, nimages_3c_max, nkind, u
       INTEGER(KIND=int_8)                                :: mem_occ_per_proc
-      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: n_other_3c_images_max
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: kind_of, n_other_3c_images_max
       INTEGER, ALLOCATABLE, DIMENSION(:, :)              :: index_to_cell_3c_max, nblocks_3c_max
       INTEGER, DIMENSION(3)                              :: cell_index, n_max
-      REAL(KIND=dp) :: avail_mem_per_proc_GB, cell_dist, cell_radius_3c, eps, exp_min_ao, &
-         exp_min_RI, frobenius_norm, mem_3c_GB, mem_occ_per_proc_GB, radius_ao, radius_ao_product, &
-         radius_RI
+      REAL(KIND=dp) :: avail_mem_per_proc_GB, cell_dist, cell_radius_3c, dij, dik, djk, eps, &
+         exp_min_ao, exp_min_RI, frobenius_norm, mem_3c_GB, mem_occ_per_proc_GB, radius_ao, &
+         radius_ao_product, radius_RI
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: exp_ao_kind, exp_RI_kind, &
+                                                            radius_ao_kind, &
+                                                            radius_ao_product_kind, radius_RI_kind
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :)     :: int_3c
+      REAL(KIND=dp), DIMENSION(3)                        :: rij, rik, rjk, vec_cell_j, vec_cell_k
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: exp_ao, exp_RI
+      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
+      TYPE(cell_type), POINTER                           :: cell
+      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
 
       CALL timeset(routineN, handle)
 
-      CALL get_qs_env(qs_env, nkind=nkind)
+      CALL get_qs_env(qs_env, nkind=nkind, atomic_kind_set=atomic_kind_set, particle_set=particle_set, cell=cell)
+
+      ALLOCATE (exp_ao_kind(nkind), exp_RI_kind(nkind), radius_ao_kind(nkind), &
+                radius_ao_product_kind(nkind), radius_RI_kind(nkind))
 
       exp_min_RI = 10.0_dp
       exp_min_ao = 10.0_dp
+      exp_RI_kind = 10.0_dp
+      exp_AO_kind = 10.0_dp
+
+      eps = bs_env%eps_filter*bs_env%heuristic_filter_factor
 
       DO ikind = 1, nkind
 
@@ -1926,21 +1968,27 @@ CONTAINS
          DO i = 1, SIZE(exp_RI, 1)
             DO j = 1, SIZE(exp_RI, 2)
                IF (exp_RI(i, j) < exp_min_RI .AND. exp_RI(i, j) > 1E-3_dp) exp_min_RI = exp_RI(i, j)
+               IF (exp_RI(i, j) < exp_RI_kind(ikind) .AND. exp_RI(i, j) > 1E-3_dp) &
+                  exp_RI_kind(ikind) = exp_RI(i, j)
             END DO
          END DO
          DO i = 1, SIZE(exp_ao, 1)
             DO j = 1, SIZE(exp_ao, 2)
                IF (exp_ao(i, j) < exp_min_ao .AND. exp_ao(i, j) > 1E-3_dp) exp_min_ao = exp_ao(i, j)
+               IF (exp_ao(i, j) < exp_ao_kind(ikind) .AND. exp_ao(i, j) > 1E-3_dp) &
+                  exp_ao_kind(ikind) = exp_ao(i, j)
             END DO
          END DO
-
+         radius_ao_kind(ikind) = SQRT(-LOG(eps)/exp_ao_kind(ikind))
+         radius_ao_product_kind(ikind) = SQRT(-LOG(eps)/(2.0_dp*exp_ao_kind(ikind)))
+         radius_RI_kind(ikind) = SQRT(-LOG(eps)/exp_RI_kind(ikind))
       END DO
-
-      eps = bs_env%eps_filter*bs_env%heuristic_filter_factor
 
       radius_ao = SQRT(-LOG(eps)/exp_min_ao)
       radius_ao_product = SQRT(-LOG(eps)/(2.0_dp*exp_min_ao))
       radius_RI = SQRT(-LOG(eps)/exp_min_RI)
+
+      CALL get_atomic_kind_set(atomic_kind_set=atomic_kind_set, kind_of=kind_of)
 
       ! For a 3c integral (μR υS | P0) we have that cell R and cell S need to be within radius_3c
       cell_radius_3c = radius_ao_product + radius_RI + bs_env%ri_metric%cutoff_radius
@@ -1960,7 +2008,7 @@ CONTAINS
          DO j_cell_y = -n_max(2), n_max(2)
             DO k_cell_z = -n_max(3), n_max(3)
 
-               cell_index(1:3) = (/i_cell_x, j_cell_y, k_cell_z/)
+               cell_index(1:3) = [i_cell_x, j_cell_y, k_cell_z]
 
                CALL get_cell_dist(cell_index, bs_env%hmat, cell_dist)
 
@@ -1980,20 +2028,20 @@ CONTAINS
 
       ! get index_to_cell_3c_max for the maximum possible cell range;
       ! compute 3c integrals later in this routine and check really which cell is needed
-      ALLOCATE (index_to_cell_3c_max(nimages_3c_max, 3))
+      ALLOCATE (index_to_cell_3c_max(3, nimages_3c_max))
 
       img = 0
       DO i_cell_x = -n_max(1), n_max(1)
          DO j_cell_y = -n_max(2), n_max(2)
             DO k_cell_z = -n_max(3), n_max(3)
 
-               cell_index(1:3) = (/i_cell_x, j_cell_y, k_cell_z/)
+               cell_index(1:3) = [i_cell_x, j_cell_y, k_cell_z]
 
                CALL get_cell_dist(cell_index, bs_env%hmat, cell_dist)
 
                IF (cell_dist < cell_radius_3c) THEN
                   img = img + 1
-                  index_to_cell_3c_max(img, 1:3) = cell_index(1:3)
+                  index_to_cell_3c_max(1:3, img) = cell_index(1:3)
                END IF
 
             END DO
@@ -2004,18 +2052,32 @@ CONTAINS
       ALLOCATE (nblocks_3c_max(nimages_3c_max, nimages_3c_max))
       nblocks_3c_max(:, :) = 0
 
-      cell_pair_count = 0
+      block_count = 0
       DO j_cell = 1, nimages_3c_max
          DO k_cell = 1, nimages_3c_max
-
-            cell_pair_count = cell_pair_count + 1
-
-            ! trivial parallelization over cell pairs
-            IF (MODULO(cell_pair_count, bs_env%para_env%num_pe) .NE. bs_env%para_env%mepos) CYCLE
 
             DO atom_j = 1, bs_env%n_atom
             DO atom_k = 1, bs_env%n_atom
             DO atom_i = 1, bs_env%n_atom
+
+               block_count = block_count + 1
+               IF (MODULO(block_count, bs_env%para_env%num_pe) /= bs_env%para_env%mepos) CYCLE
+
+               CALL scaled_to_real(vec_cell_j, REAL(index_to_cell_3c_max(1:3, j_cell), kind=dp), cell)
+               CALL scaled_to_real(vec_cell_k, REAL(index_to_cell_3c_max(1:3, k_cell), kind=dp), cell)
+
+               rij = pbc(particle_set(atom_j)%r(:), cell) - pbc(particle_set(atom_i)%r(:), cell) + vec_cell_j(:)
+               rjk = pbc(particle_set(atom_k)%r(:), cell) - pbc(particle_set(atom_j)%r(:), cell) &
+                     + vec_cell_k(:) - vec_cell_j(:)
+               rik(:) = rij(:) + rjk(:)
+               dij = NORM2(rij)
+               dik = NORM2(rik)
+               djk = NORM2(rjk)
+               IF (djk > radius_ao_kind(kind_of(atom_j)) + radius_ao_kind(kind_of(atom_k))) CYCLE
+               IF (dij > radius_ao_kind(kind_of(atom_j)) + radius_RI_kind(kind_of(atom_i)) &
+                   + bs_env%ri_metric%cutoff_radius) CYCLE
+               IF (dik > radius_RI_kind(kind_of(atom_i)) + radius_ao_kind(kind_of(atom_k)) &
+                   + bs_env%ri_metric%cutoff_radius) CYCLE
 
                j_size = bs_env%i_ao_end_from_atom(atom_j) - bs_env%i_ao_start_from_atom(atom_j) + 1
                k_size = bs_env%i_ao_end_from_atom(atom_k) - bs_env%i_ao_start_from_atom(atom_k) + 1
@@ -2029,8 +2091,8 @@ CONTAINS
                                             basis_j=bs_env%basis_set_AO, &
                                             basis_k=bs_env%basis_set_AO, &
                                             basis_i=bs_env%basis_set_RI, &
-                                            cell_j=index_to_cell_3c_max(j_cell, 1:3), &
-                                            cell_k=index_to_cell_3c_max(k_cell, 1:3), &
+                                            cell_j=index_to_cell_3c_max(1:3, j_cell), &
+                                            cell_k=index_to_cell_3c_max(1:3, k_cell), &
                                             atom_k=atom_k, atom_j=atom_j, atom_i=atom_i)
 
                frobenius_norm = SQRT(SUM(int_3c(:, :, :)**2))
@@ -2071,7 +2133,7 @@ CONTAINS
       END DO
 
       bs_env%nimages_3c = nimages_3c
-      ALLOCATE (bs_env%index_to_cell_3c(nimages_3c, 3))
+      ALLOCATE (bs_env%index_to_cell_3c(3, nimages_3c))
       ALLOCATE (bs_env%cell_to_index_3c(i_cell_x_min:i_cell_x_max, &
                                         j_cell_y_min:j_cell_y_max, &
                                         k_cell_z_min:k_cell_z_max))
@@ -2084,8 +2146,8 @@ CONTAINS
       DO j_cell_max = 1, nimages_3c_max
          IF (n_other_3c_images_max(j_cell_max) == 0) CYCLE
          j_cell = j_cell + 1
-         cell_index(1:3) = index_to_cell_3c_max(j_cell_max, 1:3)
-         bs_env%index_to_cell_3c(j_cell, 1:3) = cell_index(1:3)
+         cell_index(1:3) = index_to_cell_3c_max(1:3, j_cell_max)
+         bs_env%index_to_cell_3c(1:3, j_cell) = cell_index(1:3)
          bs_env%cell_to_index_3c(cell_index(1), cell_index(2), cell_index(3)) = j_cell
 
          k_cell = 0
@@ -2160,13 +2222,13 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       DO i_dim = 1, 3
-         R_min(i_dim) = MINVAL(index_to_cell_1(:, i_dim)) + MINVAL(index_to_cell_2(:, i_dim))
-         R_max(i_dim) = MAXVAL(index_to_cell_1(:, i_dim)) + MAXVAL(index_to_cell_2(:, i_dim))
+         R_min(i_dim) = MINVAL(index_to_cell_1(i_dim, :)) + MINVAL(index_to_cell_2(i_dim, :))
+         R_max(i_dim) = MAXVAL(index_to_cell_1(i_dim, :)) + MAXVAL(index_to_cell_2(i_dim, :))
       END DO
 
       nimages_max = (R_max(1) - R_min(1) + 1)*(R_max(2) - R_min(2) + 1)*(R_max(3) - R_min(3) + 1)
 
-      ALLOCATE (index_to_cell_tmp(nimages_max, 3))
+      ALLOCATE (index_to_cell_tmp(3, nimages_max))
       index_to_cell_tmp(:, :) = -1
 
       ALLOCATE (cell_to_index(R_min(1):R_max(1), R_min(2):R_max(2), R_min(3):R_max(3)))
@@ -2178,8 +2240,8 @@ CONTAINS
 
          DO img_2 = 1, nimages_2
 
-            cell_1(1:3) = index_to_cell_1(img_1, 1:3)
-            cell_2(1:3) = index_to_cell_2(img_2, 1:3)
+            cell_1(1:3) = index_to_cell_1(1:3, img_1)
+            cell_2(1:3) = index_to_cell_2(1:3, img_2)
 
             R(1:3) = cell_1(1:3) + cell_2(1:3)
 
@@ -2188,7 +2250,7 @@ CONTAINS
 
                nimages = nimages + 1
                cell_to_index(R(1), R(2), R(3)) = nimages
-               index_to_cell_tmp(nimages, 1:3) = R(1:3)
+               index_to_cell_tmp(1:3, nimages) = R(1:3)
 
             END IF
 
@@ -2196,8 +2258,8 @@ CONTAINS
 
       END DO
 
-      ALLOCATE (index_to_cell(nimages, 3))
-      index_to_cell(:, :) = index_to_cell_tmp(1:nimages, 1:3)
+      ALLOCATE (index_to_cell(3, nimages))
+      index_to_cell(:, :) = index_to_cell_tmp(1:3, 1:nimages)
 
       CALL timestop(handle)
 
@@ -2340,7 +2402,7 @@ CONTAINS
       bs_env%nimages_scf_desymm = nimages
 
       ALLOCATE (kpoints%cell_to_index(-cixd(1):cixd(1), -cixd(2):cixd(2), -cixd(3):cixd(3)))
-      ALLOCATE (kpoints%index_to_cell(nimages, 3))
+      ALLOCATE (kpoints%index_to_cell(3, nimages))
 
       img = 0
       DO i_cell_x = -cixd(1), cixd(1)
@@ -2348,7 +2410,7 @@ CONTAINS
             DO k_cell_z = -cixd(3), cixd(3)
                img = img + 1
                kpoints%cell_to_index(i_cell_x, j_cell_y, k_cell_z) = img
-               kpoints%index_to_cell(img, 1:3) = (/i_cell_x, j_cell_y, k_cell_z/)
+               kpoints%index_to_cell(1:3, img) = [i_cell_x, j_cell_y, k_cell_z]
             END DO
          END DO
       END DO
@@ -2430,9 +2492,43 @@ CONTAINS
 
       END DO
 
+      ALLOCATE (bs_env%skip_DR_chi(n_tasks_local))
+      bs_env%skip_DR_chi(:) = .FALSE.
+      ALLOCATE (bs_env%skip_DR_Sigma(n_tasks_local))
+      bs_env%skip_DR_Sigma(:) = .FALSE.
+
+      CALL allocate_skip_3xR(bs_env%skip_DR_R12_S_Goccx3c_chi, bs_env)
+      CALL allocate_skip_3xR(bs_env%skip_DR_R12_S_Gvirx3c_chi, bs_env)
+      CALL allocate_skip_3xR(bs_env%skip_DR_R_R2_MxM_chi, bs_env)
+
+      CALL allocate_skip_3xR(bs_env%skip_DR_R1_S2_Gx3c_Sigma, bs_env)
+      CALL allocate_skip_3xR(bs_env%skip_DR_R1_R_MxM_Sigma, bs_env)
+
       CALL timestop(handle)
 
    END SUBROUTINE setup_parallelization_Delta_R
+
+! **************************************************************************************************
+!> \brief ...
+!> \param skip ...
+!> \param bs_env ...
+! **************************************************************************************************
+   SUBROUTINE allocate_skip_3xR(skip, bs_env)
+      LOGICAL, ALLOCATABLE, DIMENSION(:, :, :)           :: skip
+      TYPE(post_scf_bandstructure_type), POINTER         :: bs_env
+
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'allocate_skip_3xR'
+
+      INTEGER                                            :: handle
+
+      CALL timeset(routineN, handle)
+
+      ALLOCATE (skip(bs_env%n_tasks_Delta_R_local, bs_env%nimages_3c, bs_env%nimages_scf_desymm))
+      skip(:, :, :) = .FALSE.
+
+      CALL timestop(handle)
+
+   END SUBROUTINE allocate_skip_3xR
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2473,7 +2569,7 @@ CONTAINS
 
       n_tasks_local = 0
 
-      DO WHILE (ANY(n_tensor_ops_Delta_R(:) .NE. 0))
+      DO WHILE (ANY(n_tensor_ops_Delta_R(:) /= 0))
 
          ! get largest element of n_tensor_ops_Delta_R
          i_Delta_R_max_op = MAXLOC(n_tensor_ops_Delta_R, 1)
@@ -2529,8 +2625,8 @@ CONTAINS
 
          DO i_cell_R1 = 1, bs_env%nimages_3c
 
-            cell_R1(1:3) = bs_env%index_to_cell_3c(i_cell_R1, 1:3)
-            cell_DR(1:3) = bs_env%index_to_cell_Delta_R(i_cell_Delta_R, 1:3)
+            cell_R1(1:3) = bs_env%index_to_cell_3c(1:3, i_cell_R1)
+            cell_DR(1:3) = bs_env%index_to_cell_Delta_R(1:3, i_cell_Delta_R)
 
             ! S_1 = R_1 + ΔR (from ΔR = S_1 - R_1)
             CALL add_R(cell_R1, cell_DR, bs_env%index_to_cell_3c, cell_S1, &
@@ -2539,7 +2635,7 @@ CONTAINS
 
             DO i_cell_R2 = 1, bs_env%nimages_scf_desymm
 
-               cell_R2(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(i_cell_R2, 1:3)
+               cell_R2(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(1:3, i_cell_R2)
 
                ! R_2 - R_1
                CALL add_R(cell_R2, -cell_R1, bs_env%index_to_cell_3c, cell_R2_m_R1, &
@@ -2557,7 +2653,7 @@ CONTAINS
 
             DO i_cell_S2 = 1, bs_env%nimages_scf_desymm
 
-               cell_S2(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(i_cell_S2, 1:3)
+               cell_S2(1:3) = bs_env%kpoints_scf_desymm%index_to_cell(1:3, i_cell_S2)
                cell_m_R1(1:3) = -cell_R1(1:3)
                cell_S1_p_S2_m_R1(1:3) = cell_S1(1:3) + cell_S2(1:3) - cell_R1(1:3)
 
@@ -2571,7 +2667,7 @@ CONTAINS
 
             DO i_cell_R = 1, bs_env%nimages_scf_desymm
 
-               cell_R = bs_env%kpoints_scf_desymm%index_to_cell(i_cell_R, 1:3)
+               cell_R = bs_env%kpoints_scf_desymm%index_to_cell(1:3, i_cell_R)
 
                ! R_1 - R
                CALL add_R(cell_R1, -cell_R, bs_env%index_to_cell_3c, cell_R1_minus_R, &
@@ -2657,13 +2753,13 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      nimg = SIZE(index_to_cell, 1)
+      nimg = SIZE(index_to_cell, 2)
 
       cell_found = .FALSE.
 
       DO i_cell = 1, nimg
 
-         cell_i(1:3) = index_to_cell(i_cell, 1:3)
+         cell_i(1:3) = index_to_cell(1:3, i_cell)
 
          IF (cell_i(1) == cell(1) .AND. cell_i(2) == cell(2) .AND. cell_i(3) == cell(3)) THEN
             cell_found = .TRUE.
@@ -2836,7 +2932,7 @@ CONTAINS
       nkp_local = 0
       DO ikp = 1, nkp
          ! trivial parallelization over k-points
-         IF (MODULO(ikp, bs_env%para_env%num_pe) .NE. bs_env%para_env%mepos) CYCLE
+         IF (MODULO(ikp, bs_env%para_env%num_pe) /= bs_env%para_env%mepos) CYCLE
          nkp_local = nkp_local + 1
       END DO
 
@@ -2850,14 +2946,14 @@ CONTAINS
       DO ikp = 1, nkp
 
          ! trivial parallelization
-         IF (MODULO(ikp, bs_env%para_env%num_pe) .NE. bs_env%para_env%mepos) CYCLE
+         IF (MODULO(ikp, bs_env%para_env%num_pe) /= bs_env%para_env%mepos) CYCLE
 
          ikp_local = ikp_local + 1
 
          ! M(k) = sum_R e^ikR M^R
-         CALL trafo_rs_to_ikp(M_R, M(:, :, ikp_local), &
-                              bs_env%kpoints_scf_desymm%index_to_cell, &
-                              bs_env%kpoints_chi_eps_W%xkp(1:3, ikp))
+         CALL rs_to_kp(M_R, M(:, :, ikp_local), &
+                       bs_env%kpoints_scf_desymm%index_to_cell, &
+                       bs_env%kpoints_chi_eps_W%xkp(1:3, ikp))
 
          ! compute condition number of M_PQ(k)
          CALL power(M(:, :, ikp_local), 1.0_dp, 0.0_dp, cond_nr, min_ev_ikp, max_ev_ikp)
@@ -2985,58 +3081,25 @@ CONTAINS
       CHARACTER(len=*), PARAMETER                        :: routineN = 'power'
 
       COMPLEX(KIND=dp), ALLOCATABLE, DIMENSION(:, :)     :: eigenvectors
-      COMPLEX(KIND=dp), DIMENSION(:), POINTER            :: work
-      COMPLEX(KIND=dp), DIMENSION(:, :), POINTER         :: A
-      INTEGER                                            :: handle, i, info, liwork, lrwork, lwork, n
-      INTEGER, DIMENSION(:), POINTER                     :: iwork
+      INTEGER                                            :: handle, i, n
       REAL(KIND=dp)                                      :: pos_eval
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: eigenvalues
-      REAL(KIND=dp), DIMENSION(:), POINTER               :: rwork
 
       CALL timeset(routineN, handle)
-
-      ! code by Ole Schütt
-      IF (SIZE(matrix, 1) /= SIZE(matrix, 2)) CPABORT("expected square matrix")
 
       ! make matrix perfectly Hermitian
       matrix(:, :) = 0.5_dp*(matrix(:, :) + CONJG(TRANSPOSE(matrix(:, :))))
 
       n = SIZE(matrix, 1)
-      ALLOCATE (iwork(1), rwork(1), work(1), A(n, n), eigenvalues(n), eigenvectors(n, n))
-
-      A(:, :) = matrix ! ZHEEVD will overwrite A
-      ! work space query
-      lwork = -1
-      lrwork = -1
-      liwork = -1
-
-      CALL ZHEEVD('V', 'U', n, A(1, 1), n, eigenvalues(1), &
-                  work(1), lwork, rwork(1), lrwork, iwork(1), liwork, info)
-      lwork = INT(REAL(work(1), dp))
-      lrwork = INT(REAL(rwork(1), dp))
-      liwork = iwork(1)
-
-      DEALLOCATE (iwork, rwork, work)
-      ALLOCATE (iwork(liwork))
-      iwork(:) = 0
-      ALLOCATE (rwork(lrwork))
-      rwork(:) = 0.0_dp
-      ALLOCATE (work(lwork))
-      work(:) = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
-
-      CALL ZHEEVD('V', 'U', n, A(1, 1), n, eigenvalues(1), &
-                  work(1), lwork, rwork(1), lrwork, iwork(1), liwork, info)
-
-      eigenvectors(:, :) = A(:, :)
-
-      IF (info /= 0) CPABORT("diagonalization failed")
+      ALLOCATE (eigenvalues(n), eigenvectors(n, n))
+      CALL diag_complex(matrix, eigenvectors, eigenvalues)
 
       IF (PRESENT(cond_nr)) cond_nr = MAXVAL(ABS(eigenvalues))/MINVAL(ABS(eigenvalues))
       IF (PRESENT(min_ev)) min_ev = MINVAL(ABS(eigenvalues))
       IF (PRESENT(max_ev)) max_ev = MAXVAL(ABS(eigenvalues))
 
       DO i = 1, n
-         IF (eigenvalues(i) > eps) THEN
+         IF (eps < eigenvalues(i)) THEN
             pos_eval = (eigenvalues(i))**(0.5_dp*exponent)
          ELSE
             pos_eval = 0.0_dp
@@ -3046,7 +3109,7 @@ CONTAINS
 
       CALL ZGEMM("N", "C", n, n, n, z_one, eigenvectors, n, eigenvectors, n, z_zero, matrix, n)
 
-      DEALLOCATE (iwork, rwork, work, A, eigenvalues, eigenvectors)
+      DEALLOCATE (eigenvalues, eigenvectors)
 
       CALL timestop(handle)
 
@@ -3176,7 +3239,7 @@ CONTAINS
       bs_env%eigenval_HF(:, ikp, ispin) = eigenval_scf(:) + Sigma_x_ikp_n(:) - V_xc_ikp_n(:)
 
       ! only print eigenvalues of DOS k-points in case no bandstructure path has been given
-      print_DOS_kpoints = (bs_env%nkp_only_bs .LE. 0)
+      print_DOS_kpoints = (bs_env%nkp_only_bs <= 0)
       ! in kpoints_DOS, the last nkp_only_bs are bandstructure k-points
       is_bandstruc_kpoint = (ikp > bs_env%nkp_only_DOS)
       print_ikp = print_DOS_kpoints .OR. is_bandstruc_kpoint
@@ -3210,7 +3273,7 @@ CONTAINS
          WRITE (iunit, "(A)") " "
 
          DO i_mo = 1, n_mo
-            IF (i_mo .LE. bs_env%n_occ(ispin)) occ_vir = 'occ'
+            IF (i_mo <= bs_env%n_occ(ispin)) occ_vir = 'occ'
             IF (i_mo > bs_env%n_occ(ispin)) occ_vir = 'vir'
             WRITE (iunit, "(I5,3A,I5,4F16.3,F17.3)") i_mo, ' (', occ_vir, ') ', ikp_for_print, &
                eigenval_scf(i_mo)*evolt, &
@@ -3258,7 +3321,7 @@ CONTAINS
          ! if |𝚺^c| > 13 eV, we use a scissors shift
          IF (ABS(Sigma_c_ikp_n_qp(i_mo)) > 13.0_dp/evolt) THEN
 
-            is_occ = (i_mo .LE. homo)
+            is_occ = (i_mo <= homo)
             is_vir = (i_mo > homo)
 
             n_levels_scissor = 0
@@ -3269,7 +3332,7 @@ CONTAINS
 
                ! only compute scissor from other GW levels close in energy
                IF (is_occ .AND. j_mo > homo) CYCLE
-               IF (is_vir .AND. j_mo .LE. homo) CYCLE
+               IF (is_vir .AND. j_mo <= homo) CYCLE
                IF (ABS(i_mo - j_mo) > 10) CYCLE
                IF (i_mo == j_mo) CYCLE
 

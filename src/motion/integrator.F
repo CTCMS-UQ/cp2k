@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -607,7 +607,7 @@ CONTAINS
          END IF
 
          IF (ehrenfest_md) deallocate_vel = force_env%qs_env%rtp%converged
-         IF (i_iter .EQ. n_iter) deallocate_vel = .TRUE.
+         IF (i_iter == n_iter) deallocate_vel = .TRUE.
          ! Broadcast the new particle velocities and deallocate the full temporary
          CALL update_dealloc_tmp(tmp, particle_set, shell_particle_set, &
                                  core_particle_set, para_env, shell_adiabatic, vel=.TRUE., &
@@ -1698,7 +1698,7 @@ CONTAINS
             element_symbol, particle_set(i)%r
          CALL uppercase(element_symbol)
          element_symbol_ref0 = particle_set(i)%atomic_kind%element_symbol
-         element_kind_ref0 = particle_set(i)%atomic_kind%name
+         element_kind_ref0 = particle_set(i)%atomic_kind%name(1:2)
          CALL uppercase(element_symbol_ref0)
          CALL uppercase(element_kind_ref0)
          IF (element_symbol /= element_symbol_ref0) THEN
@@ -1720,7 +1720,7 @@ CONTAINS
       READ (UNIT=reftraj_env%info%traj_parser%input_line, FMT=*) element_symbol, particle_set(i)%r
       CALL uppercase(element_symbol)
       element_symbol_ref0 = particle_set(i)%atomic_kind%element_symbol
-      element_kind_ref0 = particle_set(i)%atomic_kind%name
+      element_kind_ref0 = particle_set(i)%atomic_kind%name(1:2)
       CALL uppercase(element_symbol_ref0)
       CALL uppercase(element_kind_ref0)
       IF (element_symbol /= element_symbol_ref0) THEN
@@ -2480,7 +2480,7 @@ CONTAINS
          !
 
          CALL diagonalise(matrix=npt(:, :)%v, mysize=3, &
-                          storageform="UPPER", eigenvalues=tmp%e_val, eigenvectors=tmp%u)
+                          uplo="U", eigenvalues=tmp%e_val, eigenvectors=tmp%u)
 
          tmp%arg_r(:) = 0.5_dp*tmp%e_val(:)*dt* &
                         0.5_dp*tmp%e_val(:)*dt

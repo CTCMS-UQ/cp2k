@@ -6,8 +6,8 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-sirius_ver="7.6.1"
-sirius_sha256="16a114dc17e28697750585820e69718a96e6929f88406d266c75cf9a7cdbdaaa"
+sirius_ver="7.7.1"
+sirius_sha256="6039c84197d9e719e826f98b840cff19bc513887b443f97c0099d3c8b908efed"
 
 source "${SCRIPT_DIR}"/common_vars.sh
 source "${SCRIPT_DIR}"/tool_kit.sh
@@ -114,13 +114,6 @@ case "$with_sirius" in
       [ -d sirius-${sirius_ver} ] && rm -rf sirius-${sirius_ver}
       tar -xzf SIRIUS-${sirius_ver}.tar.gz
       cd SIRIUS-${sirius_ver}
-
-      # GCC 13 stopped including some common headers.
-      # https://github.com/electronic-structure/SIRIUS/issues/854
-      sed -i'' -e '1s/.*/#include <cstdint>\n&/' src/*.hpp
-
-      # Patch SIRIUS 7.6.1 for Libxc 7.0.0
-      patch -p1 src/potential/xc_functional_base.hpp < ${SCRIPT_DIR}/stage8/sirius_libxc7.patch
 
       rm -Rf build
       mkdir build

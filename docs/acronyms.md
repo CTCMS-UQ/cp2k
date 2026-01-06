@@ -13,6 +13,9 @@ AM1
 AMBER
     Assisted Model Building and Energy Refinement
 
+APT
+    Atomic Polarization Tensor
+
 ASE
     Atomic Simulation Environment
 
@@ -24,6 +27,9 @@ BFGS
 
 BOMD
     Born-Oppenheimer Molecular Dynamics [→ more](methods/sampling/molecular_dynamics)
+
+BSE
+    Bethe-Salpeter Equation [→ more](methods/properties/optical/bethe-salpeter)
 
 BSSE
     Basis Set Superposition Error [→ more](methods/dft/basis_sets)
@@ -85,6 +91,9 @@ EAM
 EC
     Energy Correction
 
+EHT
+    Extended Hückel Theory
+
 EIP
     Empirical Interatomic Potential [→ more](methods/semiempiricals/index)
 
@@ -112,6 +121,12 @@ FPGA
 GAPW
     Gaussian Augmented-Plane Waves method [→ more](methods/dft/gapw)
 
+gCP
+    Geometrical CounterPoise [→ more](#Kruse2012)
+
+GCP
+    Google Cloud Platform [→ more](https://cloud.google.com)
+
 GEEP
     Gaussian Expansion of the Electrostatic Potential [→ more](methods/qm_mm/builtin)
 
@@ -136,6 +151,9 @@ GTH
 GTO
     Gaussian Type Orbitals
 
+GW
+    GW approximation [→ more](methods/properties/optical/index)
+
 HF
     Hartree Fock [→ more](methods/dft/hartree-fock/index)
 
@@ -150,6 +168,9 @@ IEEE
 
 IMOMM
     Integrated Molecular Orbital Molecular Mechanics method
+
+K-point
+    a vector in reciprocal space [→ more](methods/dft/k-points)
 
 KS
     Kohn-Sham [→ more](methods/dft/index)
@@ -352,7 +373,9 @@ XC
 xTB
     eXtended Tight Binding [→ more](methods/semiempiricals/xtb)
 
+Z-matrix
+    formalism to represent atomic coordinates [→ more](https://en.wikipedia.org/wiki/Z-matrix_(chemistry))
+
 ZMP
     Zhao-Morrison-Parr potential
-
 ```

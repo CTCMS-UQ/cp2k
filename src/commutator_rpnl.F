@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -272,7 +272,7 @@ CONTAINS
                   CALL overlap(la_max(iset), la_min(iset), npgfa(iset), rpgfa(:, iset), zeta(:, iset), &
                                lc_max, lc_min, 1, rprjc, zetc, rac, dac, sab(:, :, 1), 0, .FALSE., ai_work, ldai)
                   CALL moment(la_max(iset), npgfa(iset), zeta(:, iset), rpgfa(:, iset), la_min(iset), &
-                              lc_max, 1, zetc, rprjc, 1, rac, (/0._dp, 0._dp, 0._dp/), sab(:, :, 2:4))
+                              lc_max, 1, zetc, rprjc, 1, rac, [0._dp, 0._dp, 0._dp], sab(:, :, 2:4))
                   ! *** Transformation step projector functions (cartesian->spherical) ***
                   DO i = 1, maxder
                      CALL dgemm("N", "N", ncoa, nprjc, ncoc, 1.0_dp, sab(1, 1, i), ldsab, &
@@ -531,7 +531,7 @@ CONTAINS
             rf = ref_point
             my_ref = .TRUE.
          ELSE ! use my_ref = False in periodic case, corresponds to distributed ref point
-            IF (order .GT. 1) THEN
+            IF (order > 1) THEN
                CPWARN("Not clear how to define reference point for order > 1 in periodic cells.")
             END IF
          END IF
@@ -582,7 +582,7 @@ CONTAINS
 !$OMP          matrix_r_rxvr, matrix_rxvr_r, my_r_rxvr, my_rxvr_r, &
 !$OMP          pseudoatom, do_symmetric) &
 !$OMP PRIVATE (ikind, jkind, iatom, jatom, cell_b, rab, &
-!$OMP          iab, irow, icol, &
+!$OMP          iab, irow, icol, lock_num, &
 !$OMP          blocks_rv, blocks_rxrv, blocks_rrv, blocks_rvr, blocks_rrv_vrr, &
 !$OMP          blocks_r_rxvr, blocks_rxvr_r, blocks_r_doublecom, &
 !$OMP          found, iac, ibc, alist_ac, alist_bc, &
@@ -1619,7 +1619,7 @@ CONTAINS
 !$OMP DEFAULT (NONE) &
 !$OMP SHARED  (basis_set, matrix_mag_nl, sap_int, natom, nkind, eps_ppnl, locks, sab_all, &
 !$OMP          particle_set, my_ref, refpoint) &
-!$OMP PRIVATE (ikind, jkind, iatom, jatom, cell_b, rab, &
+!$OMP PRIVATE (ikind, jkind, iatom, jatom, cell_b, rab, lock_num, &
 !$OMP          iab, irow, icol, blocks_mag, r_ps, r_b, go, hash, &
 !$OMP          found, iac, ibc, alist_ac, alist_bc, acint, bcint, &
 !$OMP          achint, bchint, na, np, nb, kkind, kac, kbc)
@@ -1870,7 +1870,7 @@ CONTAINS
 !$OMP PRIVATE (ikind, jkind, iatom, jatom, cell_b, rab, &
 !$OMP          iab, irow, icol, blocks_rv, &
 !$OMP          found, iac, ibc, alist_ac, alist_bc, &
-!$OMP          na, np, nb, kkind, kac, kbc, i, &
+!$OMP          na, np, nb, kkind, kac, kbc, i, lock_num, &
 !$OMP          hash, natom, delta, gamma, achint, bchint, acint, bcint)
 
 !$OMP SINGLE

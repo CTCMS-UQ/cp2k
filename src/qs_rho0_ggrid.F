@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -38,6 +38,10 @@ MODULE qs_rho0_ggrid
                                               pw_pool_type
    USE pw_types,                        ONLY: pw_c1d_gs_type,&
                                               pw_r3d_rs_type
+   USE qs_cneo_ggrid,                   ONLY: integrate_vhgg_rspace,&
+                                              rhoz_cneo_s_grid_create
+   USE qs_cneo_types,                   ONLY: cneo_potential_type,&
+                                              rhoz_cneo_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
    USE qs_force_types,                  ONLY: qs_force_type
@@ -84,12 +88,21 @@ CONTAINS
 !> \param qs_env ...
 !> \param rho0 ...
 !> \param tot_rs_int ...
+!> \param my_pools ...
+!> \param my_rs_grids ...
+!> \param my_rs_descs ...
 ! **************************************************************************************************
-   SUBROUTINE put_rho0_on_grid(qs_env, rho0, tot_rs_int)
+   SUBROUTINE put_rho0_on_grid(qs_env, rho0, tot_rs_int, my_pools, my_rs_grids, my_rs_descs)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(rho0_mpole_type), POINTER                     :: rho0
       REAL(KIND=dp), INTENT(OUT)                         :: tot_rs_int
+      TYPE(pw_pool_p_type), DIMENSION(:), OPTIONAL, &
+         POINTER                                         :: my_pools
+      TYPE(realspace_grid_type), DIMENSION(:), &
+         OPTIONAL, POINTER                               :: my_rs_grids
+      TYPE(realspace_grid_desc_p_type), DIMENSION(:), &
+         OPTIONAL, POINTER                               :: my_rs_descs
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'put_rho0_on_grid'
 
@@ -146,9 +159,16 @@ CONTAINS
 
       ! *** set up the rs grid at level igrid
       NULLIFY (rs_grid, desc, pw_pool)
-      desc => descs(igrid)%rs_desc
-      rs_grid => grids(igrid)
-      pw_pool => pw_pools(igrid)%pool
+      ! IF present, overwrite qs grid for new pool
+      IF (PRESENT(my_pools)) THEN
+         desc => my_rs_descs(igrid)%rs_desc
+         rs_grid => my_rs_grids(igrid)
+         pw_pool => my_pools(igrid)%pool
+      ELSE
+         desc => descs(igrid)%rs_desc
+         rs_grid => grids(igrid)
+         pw_pool => pw_pools(igrid)%pool
+      END IF
 
       CPASSERT(ASSOCIATED(desc))
       CPASSERT(ASSOCIATED(pw_pool))
@@ -209,7 +229,7 @@ CONTAINS
 
             CALL collocate_pgf_product( &
                l0_ikind, zet0, 0, 0, 0.0_dp, 0, &
-               ra, (/0.0_dp, 0.0_dp, 0.0_dp/), 1.0_dp, pab, 0, 0, &
+               ra, [0.0_dp, 0.0_dp, 0.0_dp], 1.0_dp, pab, 0, 0, &
                rs_grid, ga_gb_function=GRID_FUNC_AB, radius=rpgf0, &
                use_subpatch=.TRUE., subpatch_pattern=0)
 
@@ -298,6 +318,10 @@ CONTAINS
 
       CALL timestop(handle)
 
+      IF (rho0_mpole%do_cneo) THEN
+         CALL rhoz_cneo_s_grid_create(pw_env, rho0_mpole)
+      END IF
+
    END SUBROUTINE rho0_s_grid_create
 
 ! **************************************************************************************************
@@ -310,9 +334,11 @@ CONTAINS
 !> \param local_rho_set_2nd ...
 !> \param atener ...
 !> \param kforce ...
+!> \param my_pools ...
+!> \param my_rs_descs ...
 ! **************************************************************************************************
    SUBROUTINE integrate_vhg0_rspace(qs_env, v_rspace, para_env, calculate_forces, local_rho_set, &
-                                    local_rho_set_2nd, atener, kforce)
+                                    local_rho_set_2nd, atener, kforce, my_pools, my_rs_descs)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(pw_r3d_rs_type), INTENT(IN)                   :: v_rspace
@@ -321,28 +347,35 @@ CONTAINS
       TYPE(local_rho_type), OPTIONAL, POINTER            :: local_rho_set, local_rho_set_2nd
       REAL(KIND=dp), DIMENSION(:), OPTIONAL              :: atener
       REAL(KIND=dp), INTENT(IN), OPTIONAL                :: kforce
+      TYPE(pw_pool_p_type), DIMENSION(:), OPTIONAL, &
+         POINTER                                         :: my_pools
+      TYPE(realspace_grid_desc_p_type), DIMENSION(:), &
+         OPTIONAL, POINTER                               :: my_rs_descs
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'integrate_vhg0_rspace'
 
       INTEGER :: auxbas_grid, bo(2), handle, i, iat, iatom, ic, icg, ico, ig1, ig2, igrid, ii, &
-         ikind, ipgf1, ipgf2, is, iset1, iset2, iso, iso1, iso2, ispin, j, l0_ikind, llmax, lmax0, &
-         lshell, lx, ly, lz, m1, m2, max_iso_not0_local, max_s_harm, maxl, maxso, mepos, n1, n2, &
-         nat, nch_ik, nch_max, ncurr, nset, nsotot, nspins, num_pe
+         ikind, ipgf1, ipgf2, is, iset1, iset2, iso, iso1, iso2, ispin, j, l0_ikind, llmax, &
+         llmax_nuc, lmax0, lshell, lx, ly, lz, m1, m2, max_iso_not0_local, max_s_harm, &
+         max_s_harm_nuc, maxl, maxl_nuc, maxso, maxso_nuc, mepos, n1, n2, nat, nch_ik, nch_max, &
+         ncurr, nset, nset_nuc, nsotot, nsotot_nuc, nspins, num_pe
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: cg_n_list
       INTEGER, ALLOCATABLE, DIMENSION(:, :, :)           :: cg_list
-      INTEGER, DIMENSION(:), POINTER                     :: atom_list, lmax, lmin, npgf
+      INTEGER, DIMENSION(:), POINTER                     :: atom_list, lmax, lmax_nuc, lmin, &
+                                                            lmin_nuc, npgf, npgf_nuc
       LOGICAL                                            :: grid_distributed, paw_atom, use_virial
       REAL(KIND=dp)                                      :: eps_rho_rspace, force_tmp(3), fscale, &
                                                             ra(3), rpgf0, zet0
       REAL(KIND=dp), DIMENSION(3, 3)                     :: my_virial_a, my_virial_b
       REAL(KIND=dp), DIMENSION(:), POINTER               :: hab_sph, norm_l, Qlm
-      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: hab, hdab_sph, intloc, pab
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: hab, hdab_sph, intloc, intloc_nuc, pab
       REAL(KIND=dp), DIMENSION(:, :, :), POINTER         :: a_hdab_sph, hdab, Qlm_gg
       REAL(KIND=dp), DIMENSION(:, :, :, :), POINTER      :: a_hdab
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
+      TYPE(cneo_potential_type), POINTER                 :: cneo_potential
       TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(gto_basis_set_type), POINTER                  :: basis_1c_set
+      TYPE(gto_basis_set_type), POINTER                  :: basis_1c_set, nuc_basis_set
       TYPE(harmonics_atom_type), POINTER                 :: harmonics
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(pw_c1d_gs_type)                               :: coeff_gaux, coeff_gspace
@@ -360,6 +393,8 @@ CONTAINS
       TYPE(rho_atom_coeff), DIMENSION(:), POINTER        :: int_local_h, int_local_s
       TYPE(rho_atom_type), DIMENSION(:), POINTER         :: rho_atom_set
       TYPE(rho_atom_type), POINTER                       :: rho_atom
+      TYPE(rhoz_cneo_type), DIMENSION(:), POINTER        :: rhoz_cneo_set
+      TYPE(rhoz_cneo_type), POINTER                      :: rhoz_cneo
       TYPE(virial_type), POINTER                         :: virial
 
       CALL timeset(routineN, handle)
@@ -374,7 +409,7 @@ CONTAINS
 !      END IF
 
       NULLIFY (atomic_kind_set, qs_kind_set, dft_control, particle_set)
-      NULLIFY (cell, force, pw_env, rho0_mpole, rho_atom_set)
+      NULLIFY (cell, force, pw_env, rho0_mpole, rho_atom_set, rhoz_cneo_set)
 
       CALL get_qs_env(qs_env=qs_env, &
                       atomic_kind_set=atomic_kind_set, &
@@ -384,6 +419,7 @@ CONTAINS
                       force=force, pw_env=pw_env, &
                       rho0_mpole=rho0_mpole, &
                       rho_atom_set=rho_atom_set, &
+                      rhoz_cneo_set=rhoz_cneo_set, &
                       particle_set=particle_set, &
                       virial=virial)
 
@@ -405,7 +441,8 @@ CONTAINS
       !END IF
 
       IF (PRESENT(local_rho_set)) &
-         CALL get_local_rho(local_rho_set, rho0_mpole=rho0_mpole, rho_atom_set=rho_atom_set)
+         CALL get_local_rho(local_rho_set, rho0_mpole=rho0_mpole, rho_atom_set=rho_atom_set, &
+                            rhoz_cneo_set=rhoz_cneo_set)
       ! Q from rho0_mpole of local_rho_set
       ! for TDDFT forces we need mixed potential / integral space
       ! potential stored on local_rho_set_2nd
@@ -424,10 +461,15 @@ CONTAINS
       ! Assign from pw_env
       auxbas_grid = pw_env%auxbas_grid
 
+      ! IF present, overwrite qs grid for new pool
       ! Get the potential on the right grid
-      NULLIFY (rs_desc, pw_pool, pw_aux)
-      rs_desc => rs_descs(igrid)%rs_desc
-      pw_pool => pw_pools(igrid)%pool
+      IF (PRESENT(my_pools)) THEN
+         rs_desc => my_rs_descs(igrid)%rs_desc
+         pw_pool => my_pools(igrid)%pool
+      ELSE
+         rs_desc => rs_descs(igrid)%rs_desc
+         pw_pool => pw_pools(igrid)%pool
+      END IF
 
       CALL pw_pool%create_pw(coeff_gspace)
       CALL pw_pool%create_pw(coeff_rspace)
@@ -487,12 +529,13 @@ CONTAINS
       END IF
 
       DO ikind = 1, SIZE(atomic_kind_set, 1)
-         NULLIFY (basis_1c_set, atom_list, harmonics)
+         NULLIFY (basis_1c_set, atom_list, harmonics, cneo_potential)
          CALL get_atomic_kind(atomic_kind_set(ikind), atom_list=atom_list, natom=nat)
          CALL get_qs_kind(qs_kind_set(ikind), &
                           basis_set=basis_1c_set, basis_type="GAPW_1C", &
                           paw_atom=paw_atom, &
-                          harmonics=harmonics)
+                          harmonics=harmonics, &
+                          cneo_potential=cneo_potential)
 
          IF (.NOT. paw_atom) CYCLE
 
@@ -516,7 +559,29 @@ CONTAINS
          max_s_harm = harmonics%max_s_harm
          llmax = harmonics%llmax
 
-         ALLOCATE (cg_list(2, nsoset(maxl)**2, max_s_harm), cg_n_list(max_s_harm))
+         NULLIFY (intloc_nuc)
+         maxl_nuc = -1
+         max_s_harm_nuc = 0
+         llmax_nuc = -1
+         IF (ASSOCIATED(cneo_potential)) THEN
+            NULLIFY (nuc_basis_set)
+            CALL get_qs_kind(qs_kind_set(ikind), &
+                             basis_set=nuc_basis_set, &
+                             basis_type="NUC")
+
+            CALL get_gto_basis_set(gto_basis_set=nuc_basis_set, &
+                                   lmax=lmax_nuc, lmin=lmin_nuc, &
+                                   maxso=maxso_nuc, maxl=maxl_nuc, &
+                                   nset=nset_nuc, npgf=npgf_nuc)
+            nsotot_nuc = maxso_nuc*nset_nuc
+            ALLOCATE (intloc_nuc(nsotot_nuc, nsotot_nuc))
+            max_s_harm_nuc = cneo_potential%harmonics%max_s_harm
+            llmax_nuc = cneo_potential%harmonics%llmax
+         END IF
+
+         ALLOCATE (cg_list(2, nsoset(MAX(maxl, maxl_nuc))**2, &
+                           MAX(max_s_harm, max_s_harm_nuc)), &
+                   cg_n_list(MAX(max_s_harm, max_s_harm_nuc)))
 
          num_pe = para_env%num_pe
          mepos = para_env%mepos
@@ -542,7 +607,7 @@ CONTAINS
 
                CALL integrate_pgf_product( &
                   l0_ikind, zet0, 0, 0, 0.0_dp, 0, &
-                  ra, (/0.0_dp, 0.0_dp, 0.0_dp/), rs_v, &
+                  ra, [0.0_dp, 0.0_dp, 0.0_dp], rs_v, &
                   hab, pab, o1=0, o2=0, &
                   radius=rpgf0, &
                   calculate_forces=calculate_forces, &
@@ -618,9 +683,49 @@ CONTAINS
                   m1 = m1 + maxso
                END DO ! iset1
 
+               IF (ASSOCIATED(cneo_potential)) THEN
+                  intloc_nuc = 0.0_dp
+                  m1 = 0
+                  DO iset1 = 1, nset_nuc
+                     n1 = nsoset(lmax_nuc(iset1))
+                     m2 = 0
+                     DO iset2 = 1, nset_nuc
+                        n2 = nsoset(lmax_nuc(iset2))
+                        CALL get_none0_cg_list(cneo_potential%harmonics%my_CG, lmin_nuc(iset1), &
+                                               lmax_nuc(iset1), lmin_nuc(iset2), lmax_nuc(iset2), &
+                                               max_s_harm_nuc, llmax_nuc, cg_list, cg_n_list, &
+                                               max_iso_not0_local)
+                        DO ipgf1 = 1, npgf_nuc(iset1)
+                           DO ipgf2 = 1, npgf_nuc(iset2)
+
+                              DO iso = 1, MIN(nsoset(l0_ikind), max_iso_not0_local)
+                                 DO icg = 1, cg_n_list(iso)
+                                    iso1 = cg_list(1, icg, iso)
+                                    iso2 = cg_list(2, icg, iso)
+
+                                    ig1 = iso1 + n1*(ipgf1 - 1) + m1
+                                    ig2 = iso2 + n2*(ipgf2 - 1) + m2
+
+                                    intloc_nuc(ig1, ig2) = intloc_nuc(ig1, ig2) - cneo_potential%zeff* &
+                                                           cneo_potential%Qlm_gg(ig1, ig2, iso)*hab_sph(iso)
+
+                                 END DO ! icg
+                              END DO ! iso
+
+                           END DO ! ipgf2
+                        END DO ! ipgf1
+                        m2 = m2 + maxso_nuc
+                     END DO ! iset2
+                     m1 = m1 + maxso_nuc
+                  END DO ! iset1
+               END IF
+
                IF (grid_distributed) THEN
                   ! Sum result over all processors
                   CALL para_env%sum(intloc)
+                  IF (ASSOCIATED(cneo_potential)) THEN
+                     CALL para_env%sum(intloc_nuc)
+                  END IF
                END IF
 
                IF (j == mepos) THEN
@@ -630,6 +735,11 @@ CONTAINS
                      int_local_h(ispin)%r_coef = int_local_h(ispin)%r_coef + intloc
                      int_local_s(ispin)%r_coef = int_local_s(ispin)%r_coef + intloc
                   END DO
+                  IF (ASSOCIATED(cneo_potential)) THEN
+                     rhoz_cneo => rhoz_cneo_set(iatom)
+                     rhoz_cneo%ga_Vlocal_gb_h = rhoz_cneo%ga_Vlocal_gb_h + intloc_nuc
+                     rhoz_cneo%ga_Vlocal_gb_s = rhoz_cneo%ga_Vlocal_gb_s + intloc_nuc
+                  END IF
                END IF
 
                IF (PRESENT(atener)) THEN
@@ -664,6 +774,7 @@ CONTAINS
          END DO
 
          DEALLOCATE (intloc)
+         IF (ASSOCIATED(intloc_nuc)) DEALLOCATE (intloc_nuc)
          DEALLOCATE (cg_list, cg_n_list)
 
       END DO ! ikind
@@ -673,6 +784,16 @@ CONTAINS
       DEALLOCATE (hab, hdab, hab_sph, hdab_sph, pab, a_hdab, a_hdab_sph)
 
       CALL timestop(handle)
+
+      IF (rho0_mpole%do_cneo) THEN
+         IF (PRESENT(kforce)) THEN
+            CALL integrate_vhgg_rspace(qs_env, v_rspace, para_env, calculate_forces, &
+                                       rhoz_cneo_set, kforce)
+         ELSE
+            CALL integrate_vhgg_rspace(qs_env, v_rspace, para_env, calculate_forces, &
+                                       rhoz_cneo_set)
+         END IF
+      END IF
 
    END SUBROUTINE integrate_vhg0_rspace
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -113,7 +113,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE derivatives_four_center(qs_env, rho_ao, rho_ao_resp, hfx_section, para_env, &
                                       irep, use_virial, adiabatic_rescale_factor, resp_only, &
-                                      external_x_data)
+                                      external_x_data, nspins)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: rho_ao
@@ -125,6 +125,7 @@ CONTAINS
       REAL(dp), INTENT(IN), OPTIONAL                     :: adiabatic_rescale_factor
       LOGICAL, INTENT(IN), OPTIONAL                      :: resp_only
       TYPE(hfx_type), DIMENSION(:, :), POINTER, OPTIONAL  :: external_x_data
+      INTEGER, INTENT(IN), OPTIONAL                      :: nspins
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'derivatives_four_center'
 
@@ -138,7 +139,7 @@ CONTAINS
       INTEGER :: kind_kind_idx, kkind, kset, l_atom, l_max, latom, latom_block, latom_end, &
                  latom_start, lkind, lset, max_am, max_pgf, max_set, my_bin_id, my_bin_size, my_thread_id, &
                  n_threads, natom, nbits, ncob, ncos_max, nints, nkimages, nkind, nneighbors, nseta, &
-                 nsetb, nsgf_max, nspins, sgfb, shm_task_counter, shm_total_bins, sphi_a_u1, sphi_a_u2, &
+                 nsetb, nsgf_max, my_nspins, sgfb, shm_task_counter, shm_total_bins, sphi_a_u1, sphi_a_u2, &
                  sphi_a_u3, sphi_b_u1, sphi_b_u2, sphi_b_u3, sphi_c_u1, sphi_c_u2, sphi_c_u3, sphi_d_u1, &
                  sphi_d_u2, sphi_d_u3, swap_id, tmp_i4, unit_id
       INTEGER(int_8) :: atom_block, counter, estimate_to_store_int, max_val_memory, &
@@ -230,7 +231,7 @@ CONTAINS
       my_resp_only = .FALSE.
       IF (PRESENT(resp_only)) my_resp_only = resp_only
 
-      is_anti_symmetric = dbcsr_get_matrix_type(rho_ao(1, 1)%matrix) .EQ. dbcsr_type_antisymmetric
+      is_anti_symmetric = dbcsr_get_matrix_type(rho_ao(1, 1)%matrix) == dbcsr_type_antisymmetric
 
       CALL get_qs_env(qs_env, &
                       admm_env=admm_env, &
@@ -239,7 +240,11 @@ CONTAINS
                       cell=cell, &
                       dft_control=dft_control)
 
-      nspins = dft_control%nspins
+      IF (PRESENT(nspins)) THEN
+         my_nspins = nspins
+      ELSE
+         my_nspins = dft_control%nspins
+      END IF
       nkimages = dft_control%nimages
       CPASSERT(nkimages == 1)
 
@@ -337,7 +342,7 @@ CONTAINS
 !$OMP                                  shm_pmax_atom,&
 !$OMP                                  use_virial,&
 !$OMP                                  do_print_load_balance_info,&
-!$OMP                                  nkimages,nspins,my_x_data)&
+!$OMP                                  nkimages,my_nspins,my_x_data)&
 !$OMP  PRIVATE(actual_x_data,atomic_kind_set,atomic_offset_ac,atomic_offset_ad,atomic_offset_bc,&
 !$OMP  atomic_offset_bd,atom_of_kind,basis_info,&
 !$OMP  basis_parameter,bin,bins_left,bintime_start,bintime_stop,bits_max_val,buffer_left,buffer_overflow,buffer_size,&
@@ -467,7 +472,7 @@ CONTAINS
             sgfb = first_sgfb(1, jset)
             ! if the primitives are assumed to be all of max_val2, max_val2*p2s_b becomes
             ! the maximum value after multiplication with sphi_b
-            max_contraction(jset, jatom) = MAXVAL((/(SUM(ABS(sphi_b(1:ncob, i))), i=sgfb, sgfb + nsgfb(jset) - 1)/))
+            max_contraction(jset, jatom) = MAXVAL([(SUM(ABS(sphi_b(1:ncob, i))), i=sgfb, sgfb + nsgfb(jset) - 1)])
             max_pgf = MAX(max_pgf, npgfb(jset))
          END DO
       END DO
@@ -514,7 +519,7 @@ CONTAINS
                                antisymmetric=is_anti_symmetric)
       END IF
 
-      IF (nspins == 2) THEN
+      IF (my_nspins == 2) THEN
          ALLOCATE (full_density_beta(shm_block_offset(ncpu + 1), 1))
          CALL get_full_density(para_env, full_density_beta(:, 1), rho_ao(2, 1)%matrix, shm_number_of_p_entries, &
                                shm_block_offset, &
@@ -555,7 +560,7 @@ CONTAINS
       ! maybe in the future
       IF (with_resp_density .AND. .NOT. my_resp_only) THEN
          full_density_alpha(:, 1) = full_density_alpha(:, 1) - full_density_resp
-         IF (nspins == 2) THEN
+         IF (my_nspins == 2) THEN
             full_density_beta(:, 1) = &
                full_density_beta(:, 1) - full_density_resp_beta
          END IF
@@ -638,7 +643,7 @@ CONTAINS
          ALLOCATE (pad_buf_resp(nsgf_max**2))
          ALLOCATE (pac_buf_resp(nsgf_max**2))
       END IF
-      IF (nspins == 2) THEN
+      IF (my_nspins == 2) THEN
          ALLOCATE (pbd_buf_beta(nsgf_max**2))
          ALLOCATE (pbc_buf_beta(nsgf_max**2))
          ALLOCATE (pad_buf_beta(nsgf_max**2))
@@ -691,7 +696,7 @@ CONTAINS
       !! is taken into account by the following criterion:
       !!
       !! IF(katom+latom<=iatom+jatom)  THEN
-      !!   IF( ((iatom+jatom).EQ.(katom+latom) ) .AND.(katom<iatom)) CYCLE
+      !!   IF( ((iatom+jatom)==(katom+latom) ) .AND.(katom<iatom)) CYCLE
       !!
       !! Furthermore, if iatom==jatom==katom==latom we cycle, because the derivatives are zero anyway.
       !!
@@ -913,12 +918,12 @@ CONTAINS
             latom_block = INT(MODULO(atom_block, nblocks)) + 1
             tmp_block = atom_block/nblocks
             katom_block = INT(MODULO(tmp_block, nblocks)) + 1
-            IF (latom_block < katom_block) CYCLE
+            IF (latom_block < katom_block) CYCLE atomic_blocks
             tmp_block = tmp_block/nblocks
             jatom_block = INT(MODULO(tmp_block, nblocks)) + 1
             tmp_block = tmp_block/nblocks
             iatom_block = INT(MODULO(tmp_block, nblocks)) + 1
-            IF (jatom_block < iatom_block) CYCLE
+            IF (jatom_block < iatom_block) CYCLE atomic_blocks
             my_current_counter = my_current_counter + 1
             IF (my_current_counter > distribution_forces%number_of_atom_quartets) EXIT atomic_blocks
 
@@ -936,7 +941,7 @@ CONTAINS
                               shm_pmax_block(latom_block, iatom_block) + &
                               shm_pmax_block(katom_block, jatom_block))
 
-            IF (2.0_dp*coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) CYCLE
+            IF (2.0_dp*coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) CYCLE atomic_blocks
 
             CALL build_pair_list(natom, list_ij, set_list_ij, iatom_start, iatom_end, &
                                  jatom_start, jatom_end, &
@@ -999,7 +1004,7 @@ CONTAINS
                   !All four centers equivalent => zero-contribution
 !VIIRAL            IF((iatom==jatom .AND. iatom==katom .AND. iatom==latom)) CYCLE
                   IF (.NOT. (katom + latom <= iatom + jatom)) CYCLE
-                  IF (((iatom + jatom) .EQ. (katom + latom)) .AND. (katom < iatom)) CYCLE
+                  IF (((iatom + jatom) == (katom + latom)) .AND. (katom < iatom)) CYCLE
 
                   i_set_list_kl_start = list_kl%elements(i_list_kl)%set_bounds(1)
                   i_set_list_kl_stop = list_kl%elements(i_list_kl)%set_bounds(2)
@@ -1035,7 +1040,7 @@ CONTAINS
                   forces_map(4, 1) = lkind
                   forces_map(4, 2) = l_atom
 
-                  IF (nspins == 1) THEN
+                  IF (my_nspins == 1) THEN
                      fac = 0.25_dp*hf_fraction
                   ELSE
                      fac = 0.5_dp*hf_fraction
@@ -1339,8 +1344,8 @@ CONTAINS
                               spherical_estimate = MAX(spherical_estimate, ABS(primitive_forces(i)))
                            END DO
 
+                           spherical_estimate_virial = 0.0_dp
                            IF (use_virial) THEN
-                              spherical_estimate_virial = 0.0_dp
                               DO i = 1, 3*nints
                                  spherical_estimate_virial = MAX(spherical_estimate_virial, ABS(primitive_forces_virial(i)))
                               END DO
@@ -1414,7 +1419,7 @@ CONTAINS
                                                         offset_ad_set, offset_ac_set, atomic_offset_bd, atomic_offset_bc, &
                                                         atomic_offset_ad, atomic_offset_ac, is_anti_symmetric)
                         END IF
-                        IF (nspins == 2) THEN
+                        IF (my_nspins == 2) THEN
                            IF (with_resp_density) THEN
                               CALL prefetch_density_matrix(nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                                            full_density_beta(:, 1), pbd_buf_beta, pbc_buf_beta, &
@@ -1453,7 +1458,7 @@ CONTAINS
                                                     pbd_buf, pbc_buf, pad_buf, pac_buf, fac, &
                                                     T2, force, forces_map, coord)
                               END IF
-                              IF (nspins == 2) THEN
+                              IF (my_nspins == 2) THEN
                                  IF (with_resp_density) THEN
                                     CALL update_forces(nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                                        pbd_buf_beta, pbc_buf_beta, pad_buf_beta, pac_buf_beta, &
@@ -1486,7 +1491,7 @@ CONTAINS
                                                        pbd_buf, pbc_buf, pad_buf, pac_buf, fac, &
                                                        T2, tmp_virial, coord, i)
                                  END IF
-                                 IF (nspins == 2) THEN
+                                 IF (my_nspins == 2) THEN
                                     IF (with_resp_density) THEN
                                        CALL update_virial(nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                                           pbd_buf_beta, pbc_buf_beta, pad_buf_beta, pac_buf_beta, &
@@ -1579,8 +1584,8 @@ CONTAINS
 !$OMP MASTER
       !! Print some memeory information if this is the first step
       IF (actual_x_data%memory_parameter%recalc_forces) THEN
-         tmp_i8(1:6) = (/shm_storage_counter_integrals, shm_neris_onthefly, shm_neris_incore, &
-                         shm_neris_total, shm_nprim_ints, shm_stor_count_max_val/)
+         tmp_i8(1:6) = [shm_storage_counter_integrals, shm_neris_onthefly, shm_neris_incore, &
+                        shm_neris_total, shm_nprim_ints, shm_stor_count_max_val]
          CALL para_env%sum(tmp_i8)
          shm_storage_counter_integrals = tmp_i8(1)
          shm_neris_onthefly = tmp_i8(2)
@@ -1684,7 +1689,7 @@ CONTAINS
       IF (with_resp_density) THEN
          DEALLOCATE (full_density_resp)
       END IF
-      IF (nspins == 2) THEN
+      IF (my_nspins == 2) THEN
          DEALLOCATE (full_density_beta)
          IF (with_resp_density) THEN
             DEALLOCATE (full_density_resp_beta)
@@ -1728,7 +1733,7 @@ CONTAINS
 
       DEALLOCATE (nimages)
 
-      IF (nspins == 2) THEN
+      IF (my_nspins == 2) THEN
          DEALLOCATE (pbd_buf_beta, pbc_buf_beta, pad_buf_beta, pac_buf_beta)
          IF (with_resp_density) THEN
             DEALLOCATE (pbd_buf_resp_beta)

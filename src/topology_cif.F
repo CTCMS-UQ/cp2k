@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -282,9 +282,9 @@ CONTAINS
             CALL parsef(3, TRIM(parser%input_line(iln2 + 1:iln3 - 1)), s2a("x", "y", "z"))
             Loop_over_unique_atoms: DO ii = 1, natom_orig
                CALL real_to_scaled(s_tmp, atom_info%r(1:3, ii), cell)
-               s(1) = evalf(1, (/s_tmp(1), s_tmp(2), s_tmp(3)/))
-               s(2) = evalf(2, (/s_tmp(1), s_tmp(2), s_tmp(3)/))
-               s(3) = evalf(3, (/s_tmp(1), s_tmp(2), s_tmp(3)/))
+               s(1) = evalf(1, [s_tmp(1), s_tmp(2), s_tmp(3)])
+               s(2) = evalf(2, [s_tmp(1), s_tmp(2), s_tmp(3)])
+               s(3) = evalf(3, [s_tmp(1), s_tmp(2), s_tmp(3)])
                CALL scaled_to_real(r1, s, cell)
                check = .TRUE.
                DO jj = 1, natom

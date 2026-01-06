@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -18,7 +18,9 @@ MODULE topology
                                               write_cell
    USE cell_types,                      ONLY: cell_retain,&
                                               cell_type
-   USE colvar_types,                    ONLY: colvar_p_type
+   USE colvar_types,                    ONLY: colvar_p_type,&
+                                              colvar_setup,&
+                                              combine_colvar_id
    USE colvar_utils,                    ONLY: post_process_colvar
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_type
@@ -95,7 +97,7 @@ MODULE topology
 
    PRIVATE
 
-! *** Public parameters ***
+   ! Public parameters
    PUBLIC :: topology_control, &
              connectivity_control
 
@@ -536,8 +538,6 @@ CONTAINS
       NULLIFY (global_section)
       global_section => section_vals_get_subs_vals(root_section, "GLOBAL")
       CALL section_vals_val_get(global_section, "SAVE_MEM", l_val=save_mem)
-
-      !-----------------------------------------------------------------------------
       !-----------------------------------------------------------------------------
       ! 1. If reading in from external file, make sure its there first
       !-----------------------------------------------------------------------------
@@ -555,7 +555,6 @@ CONTAINS
                           "> not found.")
          END IF
       END IF
-      !-----------------------------------------------------------------------------
       !-----------------------------------------------------------------------------
       ! 2. Read in the coordinates from the corresponding locations
       !-----------------------------------------------------------------------------
@@ -611,11 +610,18 @@ CONTAINS
       TYPE(colvar_p_type), DIMENSION(:), POINTER         :: colvar_p
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
 
-      INTEGER                                            :: i
+      INTEGER                                            :: i, j
 
       IF (ASSOCIATED(colvar_p)) THEN
          DO i = 1, SIZE(colvar_p)
-            CALL post_process_colvar(colvar_p(i)%colvar, particle_set)
+            IF (colvar_p(i)%colvar%type_id == combine_colvar_id) THEN
+               DO j = 1, SIZE(colvar_p(i)%colvar%combine_cvs_param%colvar_p)
+                  CALL post_process_colvar(colvar_p(i)%colvar%combine_cvs_param%colvar_p(j)%colvar, particle_set)
+               END DO
+               CALL colvar_setup(colvar_p(i)%colvar)
+            ELSE
+               CALL post_process_colvar(colvar_p(i)%colvar, particle_set)
+            END IF
          END DO
       END IF
    END SUBROUTINE topology_post_proc_colvar

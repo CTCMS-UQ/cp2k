@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -319,7 +319,6 @@ CONTAINS
 
       INTEGER                                            :: error, output_unit
       INTEGER(KIND=hid_t)                                :: attr_id, space_id, type_id
-      INTEGER(KIND=size_t)                               :: enum_size = 1
       INTEGER, TARGET                                    :: attr_data_to_int
       TYPE(c_ptr)                                        :: buffer
 
@@ -334,7 +333,7 @@ CONTAINS
       END IF
 
       ! create the datatype
-      CALL h5tcreate_f(h5t_enum_f, enum_size, type_id, error)
+      CALL h5tcreate_f(h5t_enum_f, INT(1, size_t), type_id, error)
       CALL h5tenum_insert_f(type_id, "FALSE", 0, error)
       CALL h5tenum_insert_f(type_id, "TRUE", 1, error)
 

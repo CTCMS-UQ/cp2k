@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -83,7 +83,7 @@ CONTAINS
          CALL section_vals_val_get(ext_pot_section, "DX", r_val=dx, i_rep_section=rep)
          CALL section_vals_val_get(ext_pot_section, "ERROR_LIMIT", r_val=lerr, i_rep_section=rep)
          CALL get_generic_info(ext_pot_section, "FUNCTION", coupling_function, my_par, my_val, &
-                               input_variables=(/"X", "Y", "Z"/), i_rep_sec=rep)
+                               input_variables=["X", "Y", "Z"], i_rep_sec=rep)
          CALL initf(1)
          CALL parsef(1, TRIM(coupling_function), my_par)
 

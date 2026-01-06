@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -28,8 +28,12 @@ MODULE ec_env_types
                                               qs_dispersion_type
    USE qs_force_types,                  ONLY: deallocate_qs_force,&
                                               qs_force_type
+   USE qs_local_rho_types,              ONLY: local_rho_set_release,&
+                                              local_rho_type
    USE qs_neighbor_list_types,          ONLY: neighbor_list_set_p_type,&
                                               release_neighbor_list_sets
+   USE qs_oce_types,                    ONLY: deallocate_oce_set,&
+                                              oce_matrix_type
    USE qs_p_env_types,                  ONLY: p_env_release,&
                                               qs_p_env_type
    USE qs_period_efield_types,          ONLY: efield_berry_release,&
@@ -45,6 +49,7 @@ MODULE ec_env_types
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'ec_env_types'
 
    PUBLIC :: energy_correction_type, ec_env_release
+   PUBLIC :: ec_env_matrix_release, ec_env_potential_release
 
 ! *****************************************************************************
 !> \brief Contains information on the energy correction functional for KG
@@ -84,12 +89,16 @@ MODULE ec_env_types
                                                           ehartree = 0.0_dp, vhxc = 0.0_dp
       REAL(KIND=dp)                                    :: edispersion = 0.0_dp, efield_elec = 0.0_dp, &
                                                           efield_nuclear = 0.0_dp, ex = 0.0_dp, exc_aux_fit = 0.0_dp
+      REAL(KIND=dp)                                    :: exc1 = 0.0_dp, exc1_aux_fit = 0.0_dp, ehartree_1c = 0.0_dp
       ! forces
       TYPE(qs_force_type), DIMENSION(:), POINTER       :: force => Null()
       ! full neighbor lists and corresponding task list
       TYPE(neighbor_list_set_p_type), &
-         DIMENSION(:), POINTER                         :: sab_orb => Null(), sac_ppl => Null(), sap_ppnl => Null()
+         DIMENSION(:), POINTER                         :: sab_orb => Null(), sac_ppl => Null(), &
+                                                          sac_ae => Null(), sap_ppnl => Null(), &
+                                                          sap_oce => Null()
       TYPE(task_list_type), POINTER                    :: task_list => Null()
+      TYPE(task_list_type), POINTER                    :: task_list_soft => Null()
       ! the XC function to be used for the correction, dispersion info
       TYPE(section_vals_type), POINTER                 :: xc_section => Null()
       TYPE(qs_dispersion_type), POINTER                :: dispersion_env => Null()
@@ -102,6 +111,10 @@ MODULE ec_env_types
                                                           matrix_t => Null(), &
                                                           matrix_p => Null(), &
                                                           matrix_w => Null()
+      ! GAPW
+      TYPE(local_rho_type), POINTER                    :: local_rho_set => NULL()
+      TYPE(local_rho_type), POINTER                    :: local_rho_set_admm => NULL()
+      TYPE(oce_matrix_type), POINTER                   :: oce => NULL()
       ! reduce basis
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER        :: mao_coef => Null()
       ! external energy calclulation
@@ -112,10 +125,13 @@ MODULE ec_env_types
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER        :: matrix_hz => Null(), matrix_wz => Null(), &
                                                           matrix_z => Null(), z_admm => Null()
       ! Harris (rhoout), and response density (rhoz) on grid
-      TYPE(pw_r3d_rs_type), DIMENSION(:), POINTER             :: rhoout_r => Null(), rhoz_r => Null()
+      TYPE(pw_r3d_rs_type), DIMENSION(:), POINTER      :: rhoout_r => Null(), &
+                                                          rhoz_r => Null()
       ! potentials from input density
-      TYPE(pw_r3d_rs_type)                                    :: vh_rspace = pw_r3d_rs_type()
-      TYPE(pw_r3d_rs_type), DIMENSION(:), POINTER             :: vxc_rspace => Null(), vtau_rspace => Null(), vadmm_rspace => Null()
+      TYPE(pw_r3d_rs_type)                             :: vh_rspace = pw_r3d_rs_type()
+      TYPE(pw_r3d_rs_type), DIMENSION(:), POINTER      :: vxc_rspace => Null(), &
+                                                          vtau_rspace => Null(), &
+                                                          vadmm_rspace => Null()
       ! efield
       TYPE(efield_berry_type), POINTER                 :: efield => NULL()
       ! LS matrices and types
@@ -123,8 +139,14 @@ MODULE ec_env_types
       ! Environment for Hartree-Fock exchange
       TYPE(hfx_type), DIMENSION(:, :), POINTER         :: x_data => Null()
       ! ADMM XC environments
-      TYPE(section_vals_type), POINTER         :: xc_section_primary => Null(), &
-                                                  xc_section_aux => Null()
+      TYPE(section_vals_type), POINTER                 :: xc_section_primary => Null(), &
+                                                          xc_section_aux => Null()
+      ! External
+      CHARACTER(len=40)                                :: exresp_fn = ""
+      CHARACTER(len=40)                                :: exresult_fn = ""
+      LOGICAL                                          :: do_error = .FALSE.
+      REAL(KIND=dp), DIMENSION(3, 3)                   :: rpv = 0.0_dp
+      REAL(KIND=dp), DIMENSION(:, :), POINTER          :: rf => NULL()
    END TYPE energy_correction_type
 
 CONTAINS
@@ -138,7 +160,7 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'ec_env_release'
 
-      INTEGER                                            :: handle, iab
+      INTEGER                                            :: handle
 
       CALL timeset(routineN, handle)
 
@@ -146,7 +168,9 @@ CONTAINS
          ! neighbor lists
          CALL release_neighbor_list_sets(ec_env%sab_orb)
          CALL release_neighbor_list_sets(ec_env%sac_ppl)
+         CALL release_neighbor_list_sets(ec_env%sac_ae)
          CALL release_neighbor_list_sets(ec_env%sap_ppnl)
+         CALL release_neighbor_list_sets(ec_env%sap_oce)
          ! forces
          IF (ASSOCIATED(ec_env%force)) CALL deallocate_qs_force(ec_env%force)
          ! operator matrices
@@ -156,8 +180,14 @@ CONTAINS
          IF (ASSOCIATED(ec_env%matrix_t)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_t)
          IF (ASSOCIATED(ec_env%matrix_p)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_p)
          IF (ASSOCIATED(ec_env%matrix_w)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_w)
+         ! GAPW
+         IF (ASSOCIATED(ec_env%oce)) CALL deallocate_oce_set(ec_env%oce)
+         ! task lists for collocate/integrate
          IF (ASSOCIATED(ec_env%task_list)) THEN
             CALL deallocate_task_list(ec_env%task_list)
+         END IF
+         IF (ASSOCIATED(ec_env%task_list_soft)) THEN
+            CALL deallocate_task_list(ec_env%task_list_soft)
          END IF
          ! reduced basis
          IF (ASSOCIATED(ec_env%mao_coef)) CALL dbcsr_deallocate_matrix_set(ec_env%mao_coef)
@@ -166,39 +196,15 @@ CONTAINS
             CALL qs_dispersion_release(ec_env%dispersion_env)
          END IF
 
-         IF (ASSOCIATED(ec_env%matrix_hz)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_hz)
-         IF (ASSOCIATED(ec_env%matrix_wz)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_wz)
-         IF (ASSOCIATED(ec_env%matrix_z)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_z)
-         IF (ASSOCIATED(ec_env%z_admm)) CALL dbcsr_deallocate_matrix_set(ec_env%z_admm)
-         NULLIFY (ec_env%matrix_z, ec_env%matrix_hz, ec_env%matrix_wz)
-         NULLIFY (ec_env%z_admm)
+         CALL ec_env_matrix_release(ec_env)
 
          IF (ASSOCIATED(ec_env%p_env)) THEN
             CALL p_env_release(ec_env%p_env)
             DEALLOCATE (ec_env%p_env)
          END IF
          ! potential
-         IF (ASSOCIATED(ec_env%vh_rspace%pw_grid)) THEN
-            CALL ec_env%vh_rspace%release()
-         END IF
-         IF (ASSOCIATED(ec_env%vxc_rspace)) THEN
-            DO iab = 1, SIZE(ec_env%vxc_rspace)
-               CALL ec_env%vxc_rspace(iab)%release()
-            END DO
-            DEALLOCATE (ec_env%vxc_rspace)
-         END IF
-         IF (ASSOCIATED(ec_env%vtau_rspace)) THEN
-            DO iab = 1, SIZE(ec_env%vtau_rspace)
-               CALL ec_env%vtau_rspace(iab)%release()
-            END DO
-            DEALLOCATE (ec_env%vtau_rspace)
-         END IF
-         IF (ASSOCIATED(ec_env%vadmm_rspace)) THEN
-            DO iab = 1, SIZE(ec_env%vadmm_rspace)
-               CALL ec_env%vadmm_rspace(iab)%release()
-            END DO
-            DEALLOCATE (ec_env%vadmm_rspace)
-         END IF
+         CALL ec_env_potential_release(ec_env)
+         !
          CALL efield_berry_release(ec_env%efield)
 
          IF (ASSOCIATED(ec_env%ls_env)) THEN
@@ -215,6 +221,10 @@ CONTAINS
          CALL cp_fm_release(ec_env%mo_occ)
          CALL cp_fm_release(ec_env%cpmos)
 
+         IF (ASSOCIATED(ec_env%rf)) THEN
+            DEALLOCATE (ec_env%rf)
+         END IF
+
          DEALLOCATE (ec_env)
 
       END IF
@@ -224,5 +234,71 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE ec_env_release
+
+! **************************************************************************************************
+!> \brief ...
+!> \param ec_env ...
+! **************************************************************************************************
+   SUBROUTINE ec_env_matrix_release(ec_env)
+      TYPE(energy_correction_type), POINTER              :: ec_env
+
+      IF (ASSOCIATED(ec_env)) THEN
+         IF (ASSOCIATED(ec_env%matrix_hz)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_hz)
+         NULLIFY (ec_env%matrix_hz)
+         IF (ASSOCIATED(ec_env%matrix_wz)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_wz)
+         NULLIFY (ec_env%matrix_wz)
+         IF (ASSOCIATED(ec_env%matrix_z)) CALL dbcsr_deallocate_matrix_set(ec_env%matrix_z)
+         NULLIFY (ec_env%matrix_z)
+         IF (ASSOCIATED(ec_env%z_admm)) CALL dbcsr_deallocate_matrix_set(ec_env%z_admm)
+         NULLIFY (ec_env%z_admm)
+      END IF
+
+   END SUBROUTINE ec_env_matrix_release
+
+! **************************************************************************************************
+!> \brief ...
+!> \param ec_env ...
+! **************************************************************************************************
+   SUBROUTINE ec_env_potential_release(ec_env)
+      TYPE(energy_correction_type), POINTER              :: ec_env
+
+      INTEGER                                            :: iab
+
+      IF (ASSOCIATED(ec_env)) THEN
+         IF (ASSOCIATED(ec_env%vh_rspace%pw_grid)) THEN
+            CALL ec_env%vh_rspace%release()
+         END IF
+         IF (ASSOCIATED(ec_env%vxc_rspace)) THEN
+            DO iab = 1, SIZE(ec_env%vxc_rspace)
+               CALL ec_env%vxc_rspace(iab)%release()
+            END DO
+            DEALLOCATE (ec_env%vxc_rspace)
+            NULLIFY (ec_env%vxc_rspace)
+         END IF
+         IF (ASSOCIATED(ec_env%vtau_rspace)) THEN
+            DO iab = 1, SIZE(ec_env%vtau_rspace)
+               CALL ec_env%vtau_rspace(iab)%release()
+            END DO
+            DEALLOCATE (ec_env%vtau_rspace)
+            NULLIFY (ec_env%vtau_rspace)
+         END IF
+         IF (ASSOCIATED(ec_env%vadmm_rspace)) THEN
+            DO iab = 1, SIZE(ec_env%vadmm_rspace)
+               CALL ec_env%vadmm_rspace(iab)%release()
+            END DO
+            DEALLOCATE (ec_env%vadmm_rspace)
+            NULLIFY (ec_env%vadmm_rspace)
+         END IF
+         IF (ASSOCIATED(ec_env%local_rho_set)) THEN
+            CALL local_rho_set_release(ec_env%local_rho_set)
+            NULLIFY (ec_env%local_rho_set)
+         END IF
+         IF (ASSOCIATED(ec_env%local_rho_set_admm)) THEN
+            CALL local_rho_set_release(ec_env%local_rho_set_admm)
+            NULLIFY (ec_env%local_rho_set_admm)
+         END IF
+      END IF
+
+   END SUBROUTINE ec_env_potential_release
 
 END MODULE ec_env_types

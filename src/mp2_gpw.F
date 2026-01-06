@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -27,8 +27,8 @@ MODULE mp2_gpw
         dbcsr_clear_mempools, dbcsr_copy, dbcsr_create, dbcsr_distribution_release, &
         dbcsr_distribution_type, dbcsr_filter, dbcsr_init_p, dbcsr_iterator_blocks_left, &
         dbcsr_iterator_next_block, dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, &
-        dbcsr_p_type, dbcsr_release, dbcsr_reserve_all_blocks, dbcsr_type, dbcsr_type_no_symmetry, &
-        dbcsr_type_real_default, dbcsr_type_symmetric
+        dbcsr_p_type, dbcsr_release, dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_reserve_all_blocks
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_alloc_block_from_nbl
    USE cp_dbcsr_operations,             ONLY: cp_dbcsr_dist2d_to_dist,&
                                               cp_dbcsr_m_by_n_from_row_template
@@ -139,9 +139,9 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'mp2_gpw_main'
 
-      INTEGER :: blacs_grid_layout, bse_lev_virt, color_sub, dimen, dimen_RI, dimen_RI_red, &
-         eri_method, handle, ispin, local_unit_nr, my_group_L_end, my_group_L_size, &
-         my_group_L_start, nmo, nspins, potential_type, ri_metric_type
+      INTEGER :: blacs_grid_layout, bse_lev_virt, color_sub, dimen_RI, dimen_RI_red, eri_method, &
+         handle, ispin, local_unit_nr, my_group_L_end, my_group_L_size, my_group_L_start, nmo, &
+         nspins, potential_type, ri_metric_type
       INTEGER, ALLOCATABLE, DIMENSION(:) :: ends_array_mc, ends_array_mc_block, gw_corr_lev_occ, &
          gw_corr_lev_virt, homo, starts_array_mc, starts_array_mc_block
       INTEGER, DIMENSION(3)                              :: periodic
@@ -229,14 +229,14 @@ CONTAINS
       ELSE
          CALL get_qs_env(qs_env=qs_env, dft_control=dft_control, mos=mos)
       END IF
-      CALL get_mo_set(mo_set=mos_mp2(1), nao=dimen)
-      ALLOCATE (homo(nspins), Eigenval(dimen, nspins), mo_coeff(nspins))
+      CALL get_mo_set(mo_set=mos_mp2(1), nmo=nmo)
+      ALLOCATE (homo(nspins), Eigenval(nmo, nspins), mo_coeff(nspins))
       DO ispin = 1, nspins
          CALL get_mo_set(mo_set=mos_mp2(ispin), &
-                         eigenvalues=mo_eigenvalues, nmo=nmo, homo=homo(ispin), &
+                         eigenvalues=mo_eigenvalues, homo=homo(ispin), &
                          mo_coeff=mo_coeff_ptr)
          mo_coeff(ispin) = mo_coeff_ptr
-         Eigenval(:, ispin) = mo_eigenvalues(:)
+         Eigenval(:, ispin) = mo_eigenvalues(1:nmo)
       END DO
 
       ! a para_env
@@ -373,7 +373,7 @@ CONTAINS
          ! output the two part of the C matrix (virtual, occupied)
          DO ispin = 1, nspins
 
-            CALL replicate_mat_to_subgroup(para_env, para_env_sub, mo_coeff(ispin), dimen, homo(ispin), mat_munu%matrix, &
+            CALL replicate_mat_to_subgroup(para_env, para_env_sub, mo_coeff(ispin), homo(ispin), mat_munu%matrix, &
                                            mo_coeff_o(ispin)%matrix, mo_coeff_v(ispin)%matrix, &
                                            mo_coeff_all(ispin)%matrix, mo_coeff_gw(ispin)%matrix, &
                                            my_do_gw, gw_corr_lev_occ(ispin), gw_corr_lev_virt(ispin), do_bse, &
@@ -560,7 +560,7 @@ CONTAINS
                                 starts_array_mc_block, ends_array_mc_block, calc_forces)
 
          IF (mp2_env%ri_rpa%do_rse) &
-            CALL rse_energy(qs_env, mp2_env, para_env, dft_control, mo_coeff, nmo, homo, Eigenval)
+            CALL rse_energy(qs_env, mp2_env, para_env, dft_control, mo_coeff, homo, Eigenval)
 
          IF (do_im_time) THEN
             IF (ASSOCIATED(mat_P_global%matrix)) THEN
@@ -603,7 +603,7 @@ CONTAINS
 
          CALL calc_ri_mp2_nonsep(qs_env, mp2_env, para_env, para_env_sub, cell, &
                                  particle_set, atomic_kind_set, qs_kind_set, &
-                                 mo_coeff, nmo, homo, dimen_RI, Eigenval, &
+                                 mo_coeff, dimen_RI, Eigenval, &
                                  my_group_L_start, my_group_L_end, my_group_L_size, &
                                  sab_orb_sub, mat_munu, blacs_env_sub)
 
@@ -651,7 +651,7 @@ CONTAINS
       ! finally solve the z-vector equation if forces are required
       IF (calc_forces .AND. .NOT. do_im_time) THEN
          CALL solve_z_vector_eq(qs_env, mp2_env, para_env, dft_control, &
-                                mo_coeff, nmo, homo, Eigenval, unit_nr)
+                                mo_coeff, homo, Eigenval, unit_nr)
       END IF
 
       DEALLOCATE (Eigenval, mo_coeff)
@@ -665,7 +665,6 @@ CONTAINS
 !> \param para_env ...
 !> \param para_env_sub ...
 !> \param mo_coeff ...
-!> \param dimen ...
 !> \param homo ...
 !> \param mat_munu ...
 !> \param mo_coeff_o ...
@@ -681,13 +680,13 @@ CONTAINS
 !> \param mo_coeff_v_bse ...
 !> \param eps_filter ...
 ! **************************************************************************************************
-   SUBROUTINE replicate_mat_to_subgroup(para_env, para_env_sub, mo_coeff, dimen, homo, mat_munu, &
+   SUBROUTINE replicate_mat_to_subgroup(para_env, para_env_sub, mo_coeff, homo, mat_munu, &
                                         mo_coeff_o, mo_coeff_v, mo_coeff_all, mo_coeff_gw, my_do_gw, &
                                         gw_corr_lev_occ, gw_corr_lev_virt, my_do_bse, &
                                         bse_lev_virt, mo_coeff_o_bse, mo_coeff_v_bse, eps_filter)
       TYPE(mp_para_env_type), INTENT(IN)                 :: para_env, para_env_sub
       TYPE(cp_fm_type), INTENT(IN)                       :: mo_coeff
-      INTEGER, INTENT(IN)                                :: dimen, homo
+      INTEGER, INTENT(IN)                                :: homo
       TYPE(dbcsr_type), INTENT(INOUT)                    :: mat_munu
       TYPE(dbcsr_type), POINTER                          :: mo_coeff_o, mo_coeff_v, mo_coeff_all, &
                                                             mo_coeff_gw
@@ -714,7 +713,7 @@ CONTAINS
                                  mat_munu, gd_array, eps_filter)
 
       ALLOCATE (mo_coeff_v)
-      CALL build_dbcsr_from_rows(para_env_sub, mo_coeff_v, C(:, homo + 1:dimen), &
+      CALL build_dbcsr_from_rows(para_env_sub, mo_coeff_v, C(:, homo + 1:), &
                                  mat_munu, gd_array, eps_filter)
 
       IF (my_do_gw) THEN
@@ -893,7 +892,7 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'build_dbcsr_from_rows'
 
-      INTEGER :: blk, col, col_offset, col_size, handle, i, i_global, j, j_global, my_mu_end, &
+      INTEGER :: col, col_offset, col_size, handle, i, i_global, j, j_global, my_mu_end, &
          my_mu_start, ncol_global, proc_receive, proc_send, proc_shift, rec_mu_end, rec_mu_size, &
          rec_mu_start, row, row_offset, row_size
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: rec_C
@@ -907,13 +906,13 @@ CONTAINS
       CALL get_group_dist(gd_array, para_env_sub%mepos, my_mu_start, my_mu_end)
 
       CALL cp_dbcsr_m_by_n_from_row_template(mo_coeff_to_build, template=mat_munu, n=ncol_global, &
-                                             sym=dbcsr_type_no_symmetry, data_type=dbcsr_type_real_default)
+                                             sym=dbcsr_type_no_symmetry)
       CALL dbcsr_reserve_all_blocks(mo_coeff_to_build)
 
       ! accumulate data on mo_coeff_to_build starting from myself
       CALL dbcsr_iterator_start(iter, mo_coeff_to_build)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
-         CALL dbcsr_iterator_next_block(iter, row, col, data_block, blk, &
+         CALL dbcsr_iterator_next_block(iter, row, col, data_block, &
                                         row_size=row_size, col_size=col_size, &
                                         row_offset=row_offset, col_offset=col_offset)
          DO i = 1, row_size
@@ -945,7 +944,7 @@ CONTAINS
          ! accumulate data on mo_coeff_to_build the data received from proc_rec
          CALL dbcsr_iterator_start(iter, mo_coeff_to_build)
          DO WHILE (dbcsr_iterator_blocks_left(iter))
-            CALL dbcsr_iterator_next_block(iter, row, col, data_block, blk, &
+            CALL dbcsr_iterator_next_block(iter, row, col, data_block, &
                                            row_size=row_size, col_size=col_size, &
                                            row_offset=row_offset, col_offset=col_offset)
             DO i = 1, row_size
@@ -1191,24 +1190,21 @@ CONTAINS
          CALL dbcsr_create(matrix=mat_munu%matrix, &
                            name="(ai|munu)", &
                            dist=dbcsr_dist_sub, matrix_type=my_dbcsr_sym_type, &
-                           row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                           nze=0)
+                           row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes)
 
       ELSE IF (my_do_mixed_basis) THEN
 
          CALL dbcsr_create(matrix=mat_munu%matrix, &
                            name="(ai|munu)", &
                            dist=dbcsr_dist_sub, matrix_type=my_dbcsr_sym_type, &
-                           row_blk_size=row_blk_sizes, col_blk_size=col_blk_sizes, &
-                           nze=0)
+                           row_blk_size=row_blk_sizes, col_blk_size=col_blk_sizes)
 
       ELSE
 
          CALL dbcsr_create(matrix=mat_munu%matrix, &
                            name="(ai|munu)", &
                            dist=dbcsr_dist_sub, matrix_type=my_dbcsr_sym_type, &
-                           row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                           nze=0)
+                           row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes)
 
          IF (my_do_alloc_blocks_from_nbl) THEN
 
@@ -1282,7 +1278,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE create_matrix_P
 
 ! **************************************************************************************************
 !> \brief ...

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -58,6 +58,7 @@ MODULE pao_io
    PUBLIC :: pao_read_raw, pao_kinds_ensure_equal
    PUBLIC :: pao_ioblock_type, pao_iokind_type
    PUBLIC :: pao_write_ks_matrix_csr, pao_write_s_matrix_csr
+   PUBLIC :: pao_write_hcore_matrix_csr, pao_write_p_matrix_csr
 
    ! data types used by pao_read_raw()
    TYPE pao_ioblock_type
@@ -120,7 +121,7 @@ CONTAINS
          END IF
 
          ! check parametrization
-         IF (TRIM(param) .NE. TRIM(ADJUSTL(id2str(pao%parameterization)))) &
+         IF (TRIM(param) /= TRIM(ADJUSTL(id2str(pao%parameterization)))) &
             CPABORT("Restart PAO parametrization does not match")
 
          ! check kinds
@@ -271,20 +272,20 @@ CONTAINS
             READ (unit_nr, fmt=*) label, natoms
             ALLOCATE (positions(natoms, 3), atom2kind(natoms), xblocks(natoms))
             positions = 0.0_dp; atom2kind = -1
-            IF (PRESENT(ml_range)) ml_range = (/1, natoms/)
+            IF (PRESENT(ml_range)) ml_range = [1, natoms]
 
          ELSE IF (TRIM(label) == "MLRange") THEN
             ! Natoms entry has to come first
             CPASSERT(natoms > 0)
             ! range of atoms whose xblocks are used for machine learning
             READ (unit_nr, fmt=*) label, i1, i2
-            IF (PRESENT(ml_range)) ml_range = (/i1, i2/)
+            IF (PRESENT(ml_range)) ml_range = [i1, i2]
 
          ELSE IF (TRIM(label) == "Atom") THEN
             READ (unit_nr, fmt=*) label, iatom, str_in, pos_in
             CPASSERT(ALLOCATED(kinds))
             DO ikind = 1, nkinds
-               IF (TRIM(kinds(ikind)%name) .EQ. TRIM(str_in)) EXIT
+               IF (TRIM(kinds(ikind)%name) == TRIM(str_in)) EXIT
             END DO
             CPASSERT(ALLOCATED(atom2kind) .AND. ALLOCATED(positions))
             atom2kind(iatom) = ikind
@@ -351,11 +352,11 @@ CONTAINS
 
       IF (pao_kind%nparams /= nparams) &
          CPABORT("Number of parameters do not match")
-      IF (TRIM(pao_kind%name) .NE. TRIM(name)) &
+      IF (TRIM(pao_kind%name) /= TRIM(name)) &
          CPABORT("Kind names do not match")
       IF (pao_kind%z /= z) &
          CPABORT("Atomic numbers do not match")
-      IF (TRIM(pao_kind%prim_basis_name) .NE. TRIM(basis_set%name)) &
+      IF (TRIM(pao_kind%prim_basis_name) /= TRIM(basis_set%name)) &
          CPABORT("Primary Basis-set name does not match")
       IF (pao_kind%prim_basis_size /= basis_set%nsgf) &
          CPABORT("Primary Basis-set size does not match")
@@ -698,5 +699,89 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE pao_write_s_matrix_csr
+
+!**************************************************************************************************
+!> \brief writing the core Hamiltonian matrix (NYA)
+!> \param qs_env qs environment
+!> \param ls_scf_env ls environment
+!> \author Mohammad Hossein Bani-Hashemian
+! **************************************************************************************************
+   SUBROUTINE pao_write_hcore_matrix_csr(qs_env, ls_scf_env)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(ls_scf_env_type), TARGET                      :: ls_scf_env
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'pao_write_hcore_matrix_csr'
+
+      INTEGER                                            :: handle, output_unit
+      LOGICAL                                            :: do_h_csr_write, do_kpoints
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(section_vals_type), POINTER                   :: dft_section, input
+
+      MARK_USED(ls_scf_env)
+
+      CALL timeset(routineN, handle)
+
+      NULLIFY (dft_section)
+
+      logger => cp_get_default_logger()
+      output_unit = cp_logger_get_default_io_unit(logger)
+
+      CALL get_qs_env(qs_env, input=input)
+      dft_section => section_vals_get_subs_vals(input, "DFT")
+      do_h_csr_write = BTEST(cp_print_key_should_output(logger%iter_info, dft_section, &
+                                                        "PRINT%HCORE_CSR_WRITE"), cp_p_file)
+
+      ! NOTE: k-points has to be treated differently later. k-points has KS matrix as double pointer.
+      CALL get_qs_env(qs_env=qs_env, do_kpoints=do_kpoints)
+
+      IF (do_h_csr_write .AND. (.NOT. do_kpoints)) THEN
+         CALL cp_warn(__LOCATION__, "Writing the PAO Core Hamiltonian matrix in CSR format NYA")
+      END IF
+
+      CALL timestop(handle)
+
+   END SUBROUTINE pao_write_hcore_matrix_csr
+
+!**************************************************************************************************
+!> \brief writing the density matrix (NYA)
+!> \param qs_env qs environment
+!> \param ls_scf_env ls environment
+!> \author Mohammad Hossein Bani-Hashemian
+! **************************************************************************************************
+   SUBROUTINE pao_write_p_matrix_csr(qs_env, ls_scf_env)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(ls_scf_env_type), TARGET                      :: ls_scf_env
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'pao_write_p_matrix_csr'
+
+      INTEGER                                            :: handle, output_unit
+      LOGICAL                                            :: do_kpoints, do_p_csr_write
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(section_vals_type), POINTER                   :: dft_section, input
+
+      MARK_USED(ls_scf_env)
+
+      CALL timeset(routineN, handle)
+
+      NULLIFY (dft_section)
+
+      logger => cp_get_default_logger()
+      output_unit = cp_logger_get_default_io_unit(logger)
+
+      CALL get_qs_env(qs_env, input=input)
+      dft_section => section_vals_get_subs_vals(input, "DFT")
+      do_p_csr_write = BTEST(cp_print_key_should_output(logger%iter_info, dft_section, &
+                                                        "PRINT%P_CSR_WRITE"), cp_p_file)
+
+      ! NOTE: k-points has to be treated differently later. k-points has KS matrix as double pointer.
+      CALL get_qs_env(qs_env=qs_env, do_kpoints=do_kpoints)
+
+      IF (do_p_csr_write .AND. (.NOT. do_kpoints)) THEN
+         CALL cp_warn(__LOCATION__, "Writing the PAO density matrix in CSR format NYA")
+      END IF
+
+      CALL timestop(handle)
+
+   END SUBROUTINE pao_write_p_matrix_csr
 
 END MODULE pao_io

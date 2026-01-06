@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -46,7 +46,10 @@ MODULE basis_set_container_types
                                                aux_opt_basis = 117, &
                                                min_basis = 118, &
                                                tda_k_basis = 119, &
-                                               rhoin_basis = 120
+                                               rhoin_basis = 120, &
+                                               nuclear_basis = 121, &
+                                               nuclear_soft_basis = 122, &
+                                               harris_soft_basis = 123
 ! **************************************************************************************************
    TYPE basis_set_container_type
       PRIVATE
@@ -128,6 +131,8 @@ CONTAINS
          basis_type_nr = mao_basis
       CASE ("HARRIS")
          basis_type_nr = harris_basis
+      CASE ("HARRIS_SOFT")
+         basis_type_nr = harris_soft_basis
       CASE ("AUX_GW")
          basis_type_nr = aux_gw_basis
       CASE ("RI_XAS")
@@ -136,6 +141,10 @@ CONTAINS
          basis_type_nr = aux_opt_basis
       CASE ("RHOIN")
          basis_type_nr = rhoin_basis
+      CASE ("NUC")
+         basis_type_nr = nuclear_basis
+      CASE ("NUC_SOFT")
+         basis_type_nr = nuclear_soft_basis
       CASE DEFAULT
          basis_type_nr = unknown_basis
       END SELECT

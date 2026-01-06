@@ -21,7 +21,7 @@ cd "${BUILDDIR}"
 
 case "${with_spla}" in
   __INSTALL__)
-    echo "==================== Installing spla ===================="
+    echo "==================== Installing SpLA ===================="
     pkg_install_dir="${INSTALLDIR}/SpLA-${spla_ver}"
     install_lock_file="$pkg_install_dir/install_successful"
     if verify_checksums "${install_lock_file}"; then
@@ -59,7 +59,7 @@ case "${with_spla}" in
         mkdir build-cuda
         cd build-cuda
         cmake \
-          -DCMAKE_INSTALL_PREFIX="${pkg_install_dir}" \
+          -DCMAKE_INSTALL_PREFIX="${pkg_install_dir}-cuda" \
           -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_VERBOSE_MAKEFILE=ON \
           -DCMAKE_BUILD_TYPE="RelWithDebInfo" \
@@ -71,9 +71,7 @@ case "${with_spla}" in
           .. \
           > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
         make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
-        install -d ${pkg_install_dir}/lib/cuda
-        [ -f src/libspla.a ] && install -m 644 src/*.a ${pkg_install_dir}/lib/cuda >> install.log 2>&1
-        [ -f src/libspla.so ] && install -m 644 src/*.so ${pkg_install_dir}/lib/cuda >> install.log 2>&1
+        make -j $(get_nprocs) install > install.log 2>&1 || tail -n ${LOG_LINES} install.log
       fi
 
       if [ "$ENABLE_HIP" = "__TRUE__" ]; then
@@ -84,7 +82,7 @@ case "${with_spla}" in
             mkdir build-cuda
             cd build-cuda
             cmake \
-              -DCMAKE_INSTALL_PREFIX="${pkg_install_dir}" \
+              -DCMAKE_INSTALL_PREFIX="${pkg_install_dir}-hip" \
               -DCMAKE_INSTALL_LIBDIR=lib \
               -DCMAKE_VERBOSE_MAKEFILE=ON \
               -DCMAKE_BUILD_TYPE="RelWithDebInfo" \
@@ -96,16 +94,14 @@ case "${with_spla}" in
               .. \
               > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
             make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
-            install -d ${pkg_install_dir}/lib/hip
-            [ -f src/libspla.a ] && install -m 644 src/*.a ${pkg_install_dir}/lib/hip >> install.log 2>&1
-            [ -f src/libspla.so ] && install -m 644 src/*.so ${pkg_install_dir}/lib/hip >> install.log 2>&1
+            make -j $(get_nprocs) install > install.log 2>&1 || tail -n ${LOG_LINES} install.log
             ;;
           Mi50 | Mi100 | Mi200 | Mi250)
             [ -d build-hip ] && rm -rf "build-hip"
             mkdir build-hip
             cd build-hip
             cmake \
-              -DCMAKE_INSTALL_PREFIX="${pkg_install_dir}" \
+              -DCMAKE_INSTALL_PREFIX="${pkg_install_dir}-hip" \
               -DCMAKE_INSTALL_LIBDIR=lib \
               -DCMAKE_VERBOSE_MAKEFILE=ON \
               -DCMAKE_BUILD_TYPE="RelWithDebInfo" \
@@ -117,9 +113,7 @@ case "${with_spla}" in
               .. \
               > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
             make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
-            install -d ${pkg_install_dir}/lib/hip
-            [ -f src/libspla.a ] && install -m 644 src/*.a ${pkg_install_dir}/lib/hip >> install.log 2>&1
-            [ -f src/libspla.so ] && install -m 644 src/*.so ${pkg_install_dir}/lib/hip >> install.log 2>&1
+            make -j $(get_nprocs) install > install.log 2>&1 || tail -n ${LOG_LINES} install.log
             ;;
           *) ;;
         esac
@@ -133,7 +127,7 @@ case "${with_spla}" in
     SPLA_HIP_LDFLAGS="-L'${pkg_install_dir}/lib/hip' -Wl,-rpath,'${pkg_install_dir}/lib/hip'"
     ;;
   __SYSTEM__)
-    echo "==================== Finding spla from system paths ===================="
+    echo "==================== Finding SpLA from system paths ===================="
     check_command pkg-config --modversion spla
     add_include_from_paths SPLA_CFLAGS "spla.h" $INCLUDE_PATHS
     add_lib_from_paths SPLA_LDFLAGS "libspla.*" $LIB_PATHS
@@ -142,7 +136,7 @@ case "${with_spla}" in
     # Nothing to do
     ;;
   *)
-    echo "==================== Linking spla to user paths ===================="
+    echo "==================== Linking SpLA to user paths ===================="
     pkg_install_dir="$with_spla"
 
     # use the lib64 directory if present (multi-abi distros may link lib/ to lib32/ instead)

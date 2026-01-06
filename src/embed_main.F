@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -22,7 +22,8 @@ MODULE embed_main
                                               embed_env_type
    USE input_section_types,             ONLY: section_vals_type,&
                                               section_vals_val_get
-   USE kinds,                           ONLY: default_path_length
+   USE kinds,                           ONLY: default_path_length,&
+                                              default_string_length
    USE message_passing,                 ONLY: mp_para_env_type
 #include "./base/base_uses.f90"
 
@@ -30,7 +31,7 @@ MODULE embed_main
 
    PRIVATE
 
-! *** Global parameters ***
+   ! Global parameters
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'embed_main'
 
    PUBLIC :: embed_create_force_env
@@ -92,7 +93,7 @@ CONTAINS
          CALL section_vals_val_get(force_env_section, "EMBED%NGROUPS", n_rep_val=n_rep_val)
          IF (n_rep_val > 0) THEN
             CALL section_vals_val_get(force_env_section, "EMBED%NGROUPS", i_val=ngroup_wish)
-            IF (ngroup_wish .NE. 1) CPABORT("Embedding runs with NGROUP=1 and no group partitioning")
+            IF (ngroup_wish /= 1) CPABORT("Embedding runs with NGROUP=1 and no group partitioning")
          ELSE
             ngroup_wish = n_subforce_eval
          END IF
@@ -156,7 +157,10 @@ CONTAINS
          CALL cp_logger_set(embed_env%sub_logger(i)%p, &
                             local_filename=TRIM(c_val)//"_localLog")
       END IF
-      embed_env%sub_logger(i)%p%iter_info%project_name = c_val
+      IF (LEN_TRIM(c_val) > default_string_length) THEN
+         CPWARN("The project name will be truncated.")
+      END IF
+      embed_env%sub_logger(i)%p%iter_info%project_name = TRIM(c_val)
       CALL section_vals_val_get(root_section, "GLOBAL%PRINT_LEVEL", &
                                 i_val=embed_env%sub_logger(i)%p%iter_info%print_level)
 

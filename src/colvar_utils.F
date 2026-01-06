@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -476,7 +476,7 @@ CONTAINS
          ! Update colvar
          IF (PRESENT(coords)) THEN
             CALL colvar_eval_mol_f(lcolv(iconst)%colvar, cell, particles=particle_set, &
-                                   pos=RESHAPE(coords, (/3, SIZE(particle_set)/)), fixd_list=fixd_list)
+                                   pos=RESHAPE(coords, [3, SIZE(particle_set)]), fixd_list=fixd_list)
          ELSE
             CALL colvar_eval_mol_f(lcolv(iconst)%colvar, cell, particles=particle_set, &
                                    fixd_list=fixd_list)

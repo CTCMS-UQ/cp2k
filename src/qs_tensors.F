@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -57,6 +57,7 @@ MODULE qs_tensors
                                               hfx_init_container
    USE input_constants,                 ONLY: do_potential_coulomb,&
                                               do_potential_id,&
+                                              do_potential_mix_cl_trunc,&
                                               do_potential_short,&
                                               do_potential_truncated
    USE input_section_types,             ONLY: section_vals_val_get
@@ -117,7 +118,7 @@ MODULE qs_tensors
 
    TYPE one_dim_int_array
       INTEGER, DIMENSION(:), ALLOCATABLE    :: array
-   END TYPE
+   END TYPE one_dim_int_array
 
    ! cache size for integral compression
    INTEGER, PARAMETER, PRIVATE :: cache_size = 1024
@@ -183,13 +184,10 @@ CONTAINS
 
       CALL section_vals_val_get(qs_env%input, "DFT%SUBCELLS", r_val=subcells)
 
-      ALLOCATE (i_present(nkind), j_present(nkind))
-      ALLOCATE (i_radius(nkind), j_radius(nkind))
-
-      i_present = .FALSE.
-      j_present = .FALSE.
-      i_radius = 0.0_dp
-      j_radius = 0.0_dp
+      ALLOCATE (i_present(nkind), SOURCE=.FALSE.)
+      ALLOCATE (j_present(nkind), SOURCE=.FALSE.)
+      ALLOCATE (i_radius(nkind), SOURCE=0.0_dp)
+      ALLOCATE (j_radius(nkind), SOURCE=0.0_dp)
 
       IF (PRESENT(dist_2d)) dist_2d_prv => dist_2d
 
@@ -223,7 +221,8 @@ CONTAINS
          END DO !ikind
 
       ELSE IF (potential_parameter%potential_type == do_potential_truncated .OR. &
-               potential_parameter%potential_type == do_potential_short) THEN
+               potential_parameter%potential_type == do_potential_short .OR. &
+               potential_parameter%potential_type == do_potential_mix_cl_trunc) THEN
 
          !Truncated coulomb/short range: set j_radius to r_cutoff + the kind_radii
          DO ikind = 1, nkind
@@ -243,8 +242,7 @@ CONTAINS
          CPABORT("Operator not implemented.")
       END IF
 
-      ALLOCATE (pair_radius(nkind, nkind))
-      pair_radius = 0.0_dp
+      ALLOCATE (pair_radius(nkind, nkind), SOURCE=0.0_dp)
       CALL pair_radius_setup(i_present, j_present, i_radius, j_radius, pair_radius)
 
       ALLOCATE (atom2d(nkind))
@@ -256,7 +254,7 @@ CONTAINS
 
       CALL atom2d_cleanup(atom2d)
 
-   END SUBROUTINE
+   END SUBROUTINE build_2c_neighbor_lists
 
 ! **************************************************************************************************
 !> \brief Build a 3-center neighbor list
@@ -355,7 +353,7 @@ CONTAINS
       END IF
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE build_3c_neighbor_lists
 
 ! **************************************************************************************************
 !> \brief Symmetry criterion
@@ -373,7 +371,7 @@ CONTAINS
          include_symmetric = (MODULO(a + b, 2) == 0)
       END IF
 
-   END FUNCTION
+   END FUNCTION include_symmetric
 
 ! **************************************************************************************************
 !> \brief Destroy 3c neighborlist
@@ -389,7 +387,7 @@ CONTAINS
          CALL distribution_3d_destroy(ijk_list%dist_3d)
       END IF
 
-   END SUBROUTINE
+   END SUBROUTINE neighbor_list_3c_destroy
 
 ! **************************************************************************************************
 !> \brief Create a 3-center neighborlist iterator
@@ -417,7 +415,7 @@ CONTAINS
       iterator%bounds_k = 0
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE neighbor_list_3c_iterator_create
 
 ! **************************************************************************************************
 !> \brief impose atomic upper and lower bounds
@@ -435,7 +433,7 @@ CONTAINS
       IF (PRESENT(bounds_j)) iterator%bounds_j = bounds_j
       IF (PRESENT(bounds_k)) iterator%bounds_k = bounds_k
 
-   END SUBROUTINE
+   END SUBROUTINE nl_3c_iter_set_bounds
 
 ! **************************************************************************************************
 !> \brief Destroy 3c-nl iterator
@@ -456,7 +454,7 @@ CONTAINS
       NULLIFY (iterator%iter_jk)
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE neighbor_list_3c_iterator_destroy
 
 ! **************************************************************************************************
 !> \brief Iterate 3c-nl iterator
@@ -492,8 +490,8 @@ CONTAINS
             iter_stat = neighbor_list_3c_iterate(iterator)
             RETURN
          END IF
-
       END IF
+
       iter_stat = nl_sub_iterate(iterator%iter_jk, iterator%iter_ij)
       IF (iter_stat /= 0) THEN
          iterator%iter_level = 0
@@ -540,7 +538,7 @@ CONTAINS
          RETURN
       END IF
 
-   END FUNCTION
+   END FUNCTION neighbor_list_3c_iterate
 
 ! **************************************************************************************************
 !> \brief Get info of current iteration
@@ -598,7 +596,7 @@ CONTAINS
       IF (PRESENT(cell_j)) cell_j = cell_1
       IF (PRESENT(cell_k)) cell_k = cell_1 + cell_2
 
-   END SUBROUTINE
+   END SUBROUTINE get_3c_iterator_info
 
 ! **************************************************************************************************
 !> \brief Allocate blocks of a 3-center tensor based on neighborlist
@@ -711,7 +709,8 @@ CONTAINS
          op_jk = potential_parameter%potential_type
       END SELECT
 
-      IF (op_ij == do_potential_truncated .OR. op_ij == do_potential_short) THEN
+      IF (op_ij == do_potential_truncated .OR. op_ij == do_potential_short &
+          .OR. op_ij == do_potential_mix_cl_trunc) THEN
          dr_ij = potential_parameter%cutoff_radius*cutoff_screen_factor
          dr_ik = potential_parameter%cutoff_radius*cutoff_screen_factor
       ELSEIF (op_ij == do_potential_coulomb) THEN
@@ -719,7 +718,8 @@ CONTAINS
          dr_ik = 1000000.0_dp
       END IF
 
-      IF (op_jk == do_potential_truncated .OR. op_jk == do_potential_short) THEN
+      IF (op_jk == do_potential_truncated .OR. op_jk == do_potential_short &
+          .OR. op_jk == do_potential_mix_cl_trunc) THEN
          dr_jk = potential_parameter%cutoff_radius*cutoff_screen_factor
          dr_ik = potential_parameter%cutoff_radius*cutoff_screen_factor
       ELSEIF (op_jk == do_potential_coulomb) THEN
@@ -891,7 +891,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE alloc_block_3c
 
 ! **************************************************************************************************
 !> \brief Build 3-center derivative tensors
@@ -1026,7 +1026,8 @@ CONTAINS
 
       dr_ij = 0.0_dp; dr_jk = 0.0_dp; dr_ik = 0.0_dp
 
-      IF (op_ij == do_potential_truncated .OR. op_ij == do_potential_short) THEN
+      IF (op_ij == do_potential_truncated .OR. op_ij == do_potential_short &
+          .OR. op_ij == do_potential_mix_cl_trunc) THEN
          dr_ij = potential_parameter%cutoff_radius*cutoff_screen_factor
          dr_ik = potential_parameter%cutoff_radius*cutoff_screen_factor
       ELSEIF (op_ij == do_potential_coulomb) THEN
@@ -1034,7 +1035,8 @@ CONTAINS
          dr_ik = 1000000.0_dp
       END IF
 
-      IF (op_jk == do_potential_truncated .OR. op_jk == do_potential_short) THEN
+      IF (op_jk == do_potential_truncated .OR. op_jk == do_potential_short &
+          .OR. op_jk == do_potential_mix_cl_trunc) THEN
          dr_jk = potential_parameter%cutoff_radius*cutoff_screen_factor
          dr_ik = potential_parameter%cutoff_radius*cutoff_screen_factor
       ELSEIF (op_jk == do_potential_coulomb) THEN
@@ -1180,7 +1182,8 @@ CONTAINS
       END DO !ilist
 
       !Init the truncated Coulomb operator
-      IF (op_ij == do_potential_truncated .OR. op_jk == do_potential_truncated) THEN
+      IF (op_ij == do_potential_truncated .OR. op_jk == do_potential_truncated .OR. &
+          op_ij == do_potential_mix_cl_trunc .OR. op_jk == do_potential_mix_cl_trunc) THEN
 
          IF (m_max > get_lmax_init()) THEN
             IF (para_env%mepos == 0) THEN
@@ -1314,36 +1317,32 @@ CONTAINS
          IF (kind_radius_j + kind_radius_k + dr_jk < djk) CYCLE
          IF (kind_radius_k + kind_radius_i + dr_ik < dik) CYCLE
 
-         ALLOCATE (max_contraction_i(nseti))
-         max_contraction_i = 0.0_dp
-         DO iset = 1, nseti
-            sgfi = first_sgf_i(1, iset)
-            max_contraction_i(iset) = MAXVAL((/(SUM(ABS(sphi_i(:, i))), i=sgfi, sgfi + nsgfi(iset) - 1)/))
-         END DO
+         IF (PRESENT(der_eps)) THEN
+            ALLOCATE (max_contraction_i(nseti))
+            DO iset = 1, nseti
+               sgfi = first_sgf_i(1, iset)
+               max_contraction_i(iset) = MAXVAL([(SUM(ABS(sphi_i(:, i))), i=sgfi, sgfi + nsgfi(iset) - 1)])
+            END DO
 
-         ALLOCATE (max_contraction_j(nsetj))
-         max_contraction_j = 0.0_dp
-         DO jset = 1, nsetj
-            sgfj = first_sgf_j(1, jset)
-            max_contraction_j(jset) = MAXVAL((/(SUM(ABS(sphi_j(:, i))), i=sgfj, sgfj + nsgfj(jset) - 1)/))
-         END DO
+            ALLOCATE (max_contraction_j(nsetj))
+            DO jset = 1, nsetj
+               sgfj = first_sgf_j(1, jset)
+               max_contraction_j(jset) = MAXVAL([(SUM(ABS(sphi_j(:, i))), i=sgfj, sgfj + nsgfj(jset) - 1)])
+            END DO
 
-         ALLOCATE (max_contraction_k(nsetk))
-         max_contraction_k = 0.0_dp
-         DO kset = 1, nsetk
-            sgfk = first_sgf_k(1, kset)
-            max_contraction_k(kset) = MAXVAL((/(SUM(ABS(sphi_k(:, i))), i=sgfk, sgfk + nsgfk(kset) - 1)/))
-         END DO
+            ALLOCATE (max_contraction_k(nsetk))
+            DO kset = 1, nsetk
+               sgfk = first_sgf_k(1, kset)
+               max_contraction_k(kset) = MAXVAL([(SUM(ABS(sphi_k(:, i))), i=sgfk, sgfk + nsgfk(kset) - 1)])
+            END DO
+         END IF
 
          CALL dbt_blk_sizes(t3c_der_i(jcell, kcell, 1), blk_idx, blk_size)
 
-         ALLOCATE (block_t_i(blk_size(2), blk_size(3), blk_size(1), 3))
-         ALLOCATE (block_t_j(blk_size(2), blk_size(3), blk_size(1), 3))
-         ALLOCATE (block_t_k(blk_size(2), blk_size(3), blk_size(1), 3))
+         ALLOCATE (block_t_i(blk_size(2), blk_size(3), blk_size(1), 3), SOURCE=0.0_dp)
+         ALLOCATE (block_t_j(blk_size(2), blk_size(3), blk_size(1), 3), SOURCE=0.0_dp)
+         ALLOCATE (block_t_k(blk_size(2), blk_size(3), blk_size(1), 3), SOURCE=0.0_dp)
 
-         block_t_i = 0.0_dp
-         block_t_j = 0.0_dp
-         block_t_k = 0.0_dp
          block_j_not_zero = .FALSE.
          block_k_not_zero = .FALSE.
 
@@ -1367,10 +1366,8 @@ CONTAINS
                   sgfk = first_sgf_k(1, kset)
 
                   IF (ncoj*ncok*ncoi > 0) THEN
-                     ALLOCATE (dijk_j(ncoj, ncok, ncoi, 3))
-                     ALLOCATE (dijk_k(ncoj, ncok, ncoi, 3))
-                     dijk_j(:, :, :, :) = 0.0_dp
-                     dijk_k(:, :, :, :) = 0.0_dp
+                     ALLOCATE (dijk_j(ncoj, ncok, ncoi, 3), SOURCE=0.0_dp)
+                     ALLOCATE (dijk_k(ncoj, ncok, ncoi, 3), SOURCE=0.0_dp)
 
                      der_j_zero = .FALSE.
                      der_k_zero = .FALSE.
@@ -1388,10 +1385,8 @@ CONTAINS
                                                 djk, dij, dik, lib, potential_parameter, &
                                                 der_abc_1_ext=der_ext_j, der_abc_2_ext=der_ext_k)
                      ELSE
-                        ALLOCATE (tmp_ijk_i(ncoi, ncoj, ncok, 3))
-                        ALLOCATE (tmp_ijk_j(ncoi, ncoj, ncok, 3))
-                        tmp_ijk_i(:, :, :, :) = 0.0_dp
-                        tmp_ijk_j(:, :, :, :) = 0.0_dp
+                        ALLOCATE (tmp_ijk_i(ncoi, ncoj, ncok, 3), SOURCE=0.0_dp)
+                        ALLOCATE (tmp_ijk_j(ncoi, ncoj, ncok, 3), SOURCE=0.0_dp)
 
                         CALL eri_3center_derivs(tmp_ijk_i, tmp_ijk_j, &
                                                 lmin_i(iset), lmax_i(iset), npgfi(iset), zeti(:, iset), rpgf_i(:, iset), ri, &
@@ -1489,7 +1484,7 @@ CONTAINS
          END DO
 
          CALL timeset(routineN//"_put_dbcsr", handle2)
-!$OMP CRITICAL
+!$OMP CRITICAL(qs_tensors_t3c_der_i)
          sp = SHAPE(block_t_i(:, :, :, 1))
          sp([2, 3, 1]) = sp
 
@@ -1512,25 +1507,27 @@ CONTAINS
                                RESHAPE(block_t_k(:, :, :, i_xyz), SHAPE=sp, ORDER=[2, 3, 1]), &
                                summation=.TRUE.)
          END DO
-!$OMP END CRITICAL
+!$OMP END CRITICAL(qs_tensors_t3c_der_i)
 
          IF (nl_3c%sym == symmetric_jk) THEN
             sp = SHAPE(block_t_j(:, :, :, 1))
             sp([2, 3, 1]) = sp
-!$OMP CRITICAL
+!$OMP CRITICAL(qs_tensors_t3c_der_j)
             DO i_xyz = 1, 3
                IF (.NOT. block_j_not_zero(i_xyz)) CYCLE
                CALL dbt_put_block(t3c_der_j(jcell, kcell, i_xyz), blk_idx, sp, &
                                   RESHAPE(block_t_j(:, :, :, i_xyz), SHAPE=sp, ORDER=[2, 3, 1]), &
                                   summation=.TRUE.)
             END DO
-!$OMP END CRITICAL
+!$OMP END CRITICAL(qs_tensors_t3c_der_j)
          END IF
 
          CALL timestop(handle2)
 
          DEALLOCATE (block_t_i, block_t_j, block_t_k)
-         DEALLOCATE (max_contraction_i, max_contraction_j, max_contraction_k)
+         IF (PRESENT(der_eps)) THEN
+            DEALLOCATE (max_contraction_i, max_contraction_j, max_contraction_k)
+         END IF
       END DO
 
       IF (ALLOCATED(ccp_buffer)) DEALLOCATE (ccp_buffer)
@@ -1700,7 +1697,8 @@ CONTAINS
 
       dr_ij = 0.0_dp; dr_jk = 0.0_dp; dr_ik = 0.0_dp
 
-      IF (op_ij == do_potential_truncated .OR. op_ij == do_potential_short) THEN
+      IF (op_ij == do_potential_truncated .OR. op_ij == do_potential_short &
+          .OR. op_ij == do_potential_mix_cl_trunc) THEN
          dr_ij = potential_parameter%cutoff_radius*cutoff_screen_factor
          dr_ik = potential_parameter%cutoff_radius*cutoff_screen_factor
       ELSEIF (op_ij == do_potential_coulomb) THEN
@@ -1708,7 +1706,8 @@ CONTAINS
          dr_ik = 1000000.0_dp
       END IF
 
-      IF (op_jk == do_potential_truncated .OR. op_jk == do_potential_short) THEN
+      IF (op_jk == do_potential_truncated .OR. op_jk == do_potential_short &
+          .OR. op_jk == do_potential_mix_cl_trunc) THEN
          dr_jk = potential_parameter%cutoff_radius*cutoff_screen_factor
          dr_ik = potential_parameter%cutoff_radius*cutoff_screen_factor
       ELSEIF (op_jk == do_potential_coulomb) THEN
@@ -1753,8 +1752,8 @@ CONTAINS
       END DO
       m_max = maxli + maxlj + maxlk + 1
 
-      !To minimize expensive memory opsand generally optimize contraction, pre-allocate
-      !contiguous sphi arrays (and transposed in the cas of sphi_i)
+      !To minimize expensive memory ops and generally optimize contraction, pre-allocate
+      !contiguous sphi arrays (and transposed in the case of sphi_i)
 
       NULLIFY (tspj, spi, spk)
       ALLOCATE (spi(max_nset, nbasis), tspj(max_nset, nbasis), spk(max_nset, nbasis))
@@ -1798,7 +1797,8 @@ CONTAINS
       END DO !ilist
 
       !Init the truncated Coulomb operator
-      IF (op_ij == do_potential_truncated .OR. op_jk == do_potential_truncated) THEN
+      IF (op_ij == do_potential_truncated .OR. op_jk == do_potential_truncated .OR. &
+          op_ij == do_potential_mix_cl_trunc .OR. op_jk == do_potential_mix_cl_trunc) THEN
 
          IF (m_max > get_lmax_init()) THEN
             IF (para_env%mepos == 0) THEN
@@ -1817,7 +1817,7 @@ CONTAINS
 !$    nthread = omp_get_max_threads()
 
 !$OMP PARALLEL DEFAULT(NONE) &
-!$OMP SHARED (nthread,maxli,maxlk,maxlj,i,work_virial,pref,basis_i,basis_j,basis_k,dr_ij,dr_jk,dr_ik,&
+!$OMP SHARED (nthread,maxli,maxlk,maxlj,work_virial,pref,basis_i,basis_j,basis_k,dr_ij,dr_jk,dr_ik,&
 !$OMP         ncoset,potential_parameter,der_eps,tspj,spi,spk,natom,nl_3c,t3c_trace,cell,particle_set) &
 !$OMP PRIVATE (lib,nl_3c_iter,ikind,jkind,kkind,iatom,jatom,katom,rij,rjk,rik,i_xyz,j_xyz,first_sgf_i,&
 !$OMP          lmax_i,lmin_i,npgfi,nseti,nsgfi,rpgf_i,set_radius_i,sphi_i,zeti,kind_radius_i,first_sgf_j,&
@@ -1827,7 +1827,7 @@ CONTAINS
 !$OMP          tmp_block,max_contraction_k,iset,jset,kset,block_t_i,blk_size,dijk_contr,found,sp,mepos,&
 !$OMP          block_start_j,block_end_j,block_start_k,block_end_k,block_start_i,block_end_i,block_t_k,&
 !$OMP          bo,der_ext_i,der_ext_j,der_ext_k,ablock,force,scoord,skip,cpp_buffer,ccp_buffer,&
-!$OMP          block_k_not_zero,der_k_zero,der_j_zero,block_t_j,block_j_not_zero)
+!$OMP          block_k_not_zero,der_k_zero,der_j_zero,block_t_j,block_j_not_zero,i)
 
       mepos = 0
 !$    mepos = omp_get_thread_num()
@@ -1873,26 +1873,25 @@ CONTAINS
          IF (kind_radius_j + kind_radius_k + dr_jk < djk) CYCLE
          IF (kind_radius_k + kind_radius_i + dr_ik < dik) CYCLE
 
-         ALLOCATE (max_contraction_i(nseti))
-         max_contraction_i = 0.0_dp
-         DO iset = 1, nseti
-            sgfi = first_sgf_i(1, iset)
-            max_contraction_i(iset) = MAXVAL((/(SUM(ABS(sphi_i(:, i))), i=sgfi, sgfi + nsgfi(iset) - 1)/))
-         END DO
+         IF (PRESENT(der_eps)) THEN
+            ALLOCATE (max_contraction_i(nseti))
+            DO iset = 1, nseti
+               sgfi = first_sgf_i(1, iset)
+               max_contraction_i(iset) = MAXVAL([(SUM(ABS(sphi_i(:, i))), i=sgfi, sgfi + nsgfi(iset) - 1)])
+            END DO
 
-         ALLOCATE (max_contraction_j(nsetj))
-         max_contraction_j = 0.0_dp
-         DO jset = 1, nsetj
-            sgfj = first_sgf_j(1, jset)
-            max_contraction_j(jset) = MAXVAL((/(SUM(ABS(sphi_j(:, i))), i=sgfj, sgfj + nsgfj(jset) - 1)/))
-         END DO
+            ALLOCATE (max_contraction_j(nsetj))
+            DO jset = 1, nsetj
+               sgfj = first_sgf_j(1, jset)
+               max_contraction_j(jset) = MAXVAL([(SUM(ABS(sphi_j(:, i))), i=sgfj, sgfj + nsgfj(jset) - 1)])
+            END DO
 
-         ALLOCATE (max_contraction_k(nsetk))
-         max_contraction_k = 0.0_dp
-         DO kset = 1, nsetk
-            sgfk = first_sgf_k(1, kset)
-            max_contraction_k(kset) = MAXVAL((/(SUM(ABS(sphi_k(:, i))), i=sgfk, sgfk + nsgfk(kset) - 1)/))
-         END DO
+            ALLOCATE (max_contraction_k(nsetk))
+            DO kset = 1, nsetk
+               sgfk = first_sgf_k(1, kset)
+               max_contraction_k(kset) = MAXVAL([(SUM(ABS(sphi_k(:, i))), i=sgfk, sgfk + nsgfk(kset) - 1)])
+            END DO
+         END IF
 
          CALL dbt_blk_sizes(t3c_trace, [iatom, jatom, katom], blk_size)
 
@@ -1932,10 +1931,8 @@ CONTAINS
                   sgfk = first_sgf_k(1, kset)
 
                   IF (ncoj*ncok*ncoi > 0) THEN
-                     ALLOCATE (dijk_j(ncoj, ncok, ncoi, 3))
-                     ALLOCATE (dijk_k(ncoj, ncok, ncoi, 3))
-                     dijk_j(:, :, :, :) = 0.0_dp
-                     dijk_k(:, :, :, :) = 0.0_dp
+                     ALLOCATE (dijk_j(ncoj, ncok, ncoi, 3), SOURCE=0.0_dp)
+                     ALLOCATE (dijk_k(ncoj, ncok, ncoi, 3), SOURCE=0.0_dp)
 
                      der_j_zero = .FALSE.
                      der_k_zero = .FALSE.
@@ -2063,7 +2060,9 @@ CONTAINS
          END DO
 
          DEALLOCATE (block_t_i, block_t_j, block_t_k)
-         DEALLOCATE (max_contraction_i, max_contraction_j, max_contraction_k, ablock)
+         IF (PRESENT(der_eps)) THEN
+            DEALLOCATE (max_contraction_i, max_contraction_j, max_contraction_k, ablock)
+         END IF
       END DO
 
       IF (ALLOCATED(ccp_buffer)) DEALLOCATE (ccp_buffer)
@@ -2235,7 +2234,8 @@ CONTAINS
 
       dr_ij = 0.0_dp; dr_jk = 0.0_dp; dr_ik = 0.0_dp
 
-      IF (op_ij == do_potential_truncated .OR. op_ij == do_potential_short) THEN
+      IF (op_ij == do_potential_truncated .OR. op_ij == do_potential_short &
+          .OR. op_ij == do_potential_mix_cl_trunc) THEN
          dr_ij = potential_parameter%cutoff_radius*cutoff_screen_factor
          dr_ik = potential_parameter%cutoff_radius*cutoff_screen_factor
       ELSEIF (op_ij == do_potential_coulomb) THEN
@@ -2243,7 +2243,8 @@ CONTAINS
          dr_ik = 1000000.0_dp
       END IF
 
-      IF (op_jk == do_potential_truncated .OR. op_jk == do_potential_short) THEN
+      IF (op_jk == do_potential_truncated .OR. op_jk == do_potential_short &
+          .OR. op_jk == do_potential_mix_cl_trunc) THEN
          dr_jk = potential_parameter%cutoff_radius*cutoff_screen_factor
          dr_ik = potential_parameter%cutoff_radius*cutoff_screen_factor
       ELSEIF (op_jk == do_potential_coulomb) THEN
@@ -2364,7 +2365,8 @@ CONTAINS
       END DO !ilist
 
       !Init the truncated Coulomb operator
-      IF (op_ij == do_potential_truncated .OR. op_jk == do_potential_truncated) THEN
+      IF (op_ij == do_potential_truncated .OR. op_jk == do_potential_truncated &
+          .OR. op_ij == do_potential_mix_cl_trunc .OR. op_jk == do_potential_mix_cl_trunc) THEN
 
          IF (m_max > get_lmax_init()) THEN
             IF (para_env%mepos == 0) THEN
@@ -2498,41 +2500,40 @@ CONTAINS
          CALL get_gto_basis_set(basis_i(ikind)%gto_basis_set, first_sgf=first_sgf_i, lmax=lmax_i, lmin=lmin_i, &
                                 npgf=npgfi, nset=nseti, nsgf_set=nsgfi, pgf_radius=rpgf_i, set_radius=set_radius_i, &
                                 sphi=sphi_i, zet=zeti, kind_radius=kind_radius_i)
-
          CALL get_gto_basis_set(basis_j(jkind)%gto_basis_set, first_sgf=first_sgf_j, lmax=lmax_j, lmin=lmin_j, &
                                 npgf=npgfj, nset=nsetj, nsgf_set=nsgfj, pgf_radius=rpgf_j, set_radius=set_radius_j, &
                                 sphi=sphi_j, zet=zetj, kind_radius=kind_radius_j)
+         IF (kind_radius_j + kind_radius_i + dr_ij < dij) CYCLE
 
          CALL get_gto_basis_set(basis_k(kkind)%gto_basis_set, first_sgf=first_sgf_k, lmax=lmax_k, lmin=lmin_k, &
                                 npgf=npgfk, nset=nsetk, nsgf_set=nsgfk, pgf_radius=rpgf_k, set_radius=set_radius_k, &
                                 sphi=sphi_k, zet=zetk, kind_radius=kind_radius_k)
-
-         IF (kind_radius_j + kind_radius_i + dr_ij < dij) CYCLE
          IF (kind_radius_j + kind_radius_k + dr_jk < djk) CYCLE
          IF (kind_radius_k + kind_radius_i + dr_ik < dik) CYCLE
 
-         ALLOCATE (max_contraction_j(nsetj))
-         DO jset = 1, nsetj
-            sgfj = first_sgf_j(1, jset)
-            max_contraction_j(jset) = MAXVAL((/(SUM(ABS(sphi_j(:, i))), i=sgfj, sgfj + nsgfj(jset) - 1)/))
-         END DO
+         IF (PRESENT(int_eps)) THEN
+            ALLOCATE (max_contraction_j(nsetj))
+            DO jset = 1, nsetj
+               sgfj = first_sgf_j(1, jset)
+               max_contraction_j(jset) = MAXVAL([(SUM(ABS(sphi_j(:, i))), i=sgfj, sgfj + nsgfj(jset) - 1)])
+            END DO
 
-         ALLOCATE (max_contraction_k(nsetk))
-         DO kset = 1, nsetk
-            sgfk = first_sgf_k(1, kset)
-            max_contraction_k(kset) = MAXVAL((/(SUM(ABS(sphi_k(:, i))), i=sgfk, sgfk + nsgfk(kset) - 1)/))
-         END DO
+            ALLOCATE (max_contraction_k(nsetk))
+            DO kset = 1, nsetk
+               sgfk = first_sgf_k(1, kset)
+               max_contraction_k(kset) = MAXVAL([(SUM(ABS(sphi_k(:, i))), i=sgfk, sgfk + nsgfk(kset) - 1)])
+            END DO
+         END IF
 
          CALL dbt_blk_sizes(t3c(jcell, kcell), blk_idx, blk_size)
 
-         ALLOCATE (block_t(blk_size(2), blk_size(3), blk_size(1)))
+         ALLOCATE (block_t(blk_size(2), blk_size(3), blk_size(1)), SOURCE=0.0_dp)
 
-         block_t = 0.0_dp
          block_not_zero = .FALSE.
          DO iset = 1, nseti
 
             sgfi = first_sgf_i(1, iset)
-            max_contraction_i = MAXVAL((/(SUM(ABS(sphi_i(:, i))), i=sgfi, sgfi + nsgfi(iset) - 1)/))
+            max_contraction_i = MAXVAL([(SUM(ABS(sphi_i(:, i))), i=sgfi, sgfi + nsgfi(iset) - 1)])
 
             DO jset = 1, nsetj
 
@@ -2564,8 +2565,7 @@ CONTAINS
                                       lmin_i(iset), lmax_i(iset), npgfi(iset), zeti(:, iset), rpgf_i(:, iset), ri, &
                                       djk, dij, dik, lib, potential_parameter, int_abc_ext=sijk_ext)
                   ELSE
-                     ALLOCATE (tmp_ijk(ncoi, ncoj, ncok))
-                     tmp_ijk(:, :, :) = 0.0_dp
+                     ALLOCATE (tmp_ijk(ncoi, ncoj, ncok), SOURCE=0.0_dp)
                      CALL eri_3center(tmp_ijk, &
                                       lmin_i(iset), lmax_i(iset), npgfi(iset), zeti(:, iset), rpgf_i(:, iset), ri, &
                                       lmin_j(jset), lmax_j(jset), npgfj(jset), zetj(:, jset), rpgf_j(:, jset), rj, &
@@ -2622,7 +2622,7 @@ CONTAINS
          END DO
 
          IF (block_not_zero) THEN
-!$OMP CRITICAL
+!$OMP CRITICAL(qs_tensors_t3c)
             CALL timeset(routineN//"_put_dbcsr", handle2)
             IF (debug) THEN
                CALL dbt_get_block(t3c(jcell, kcell), blk_idx, dummy_block_t, found=found)
@@ -2636,11 +2636,13 @@ CONTAINS
                                RESHAPE(block_t, SHAPE=sp, ORDER=[2, 3, 1]), summation=.TRUE.)
 
             CALL timestop(handle2)
-!$OMP END CRITICAL
+!$OMP END CRITICAL(qs_tensors_t3c)
          END IF
 
          DEALLOCATE (block_t)
-         DEALLOCATE (max_contraction_j, max_contraction_k)
+         IF (PRESENT(int_eps)) THEN
+            DEALLOCATE (max_contraction_j, max_contraction_k)
+         END IF
       END DO
 
       IF (ALLOCATED(ccp_buffer)) DEALLOCATE (ccp_buffer)
@@ -2703,8 +2705,8 @@ CONTAINS
          CPABORT("requested symmetric case not implemented")
       END IF
 
-      DO iset = 1, max_nset
-         DO ibasis = 1, nbasis
+      DO ibasis = 1, nbasis
+         DO iset = 1, max_nset
             IF (ASSOCIATED(spi(iset, ibasis)%array)) DEALLOCATE (spi(iset, ibasis)%array)
             IF (ASSOCIATED(tspj(iset, ibasis)%array)) DEALLOCATE (tspj(iset, ibasis)%array)
             IF (ASSOCIATED(spk(iset, ibasis)%array)) DEALLOCATE (spk(iset, ibasis)%array)
@@ -2834,7 +2836,7 @@ CONTAINS
       m_max = maxli + maxlj + 1
 
       !Init the truncated Coulomb operator
-      IF (op_prv == do_potential_truncated) THEN
+      IF (op_prv == do_potential_truncated .OR. op_prv == do_potential_mix_cl_trunc) THEN
 
          IF (m_max > get_lmax_init()) THEN
             IF (para_env%mepos == 0) THEN
@@ -2908,8 +2910,7 @@ CONTAINS
 
                IF (ncoi*ncoj > 0) THEN
                   ALLOCATE (dij_contr(nsgfi(iset), nsgfj(jset)))
-                  ALLOCATE (dij(ncoi, ncoj, 3))
-                  dij(:, :, :) = 0.0_dp
+                  ALLOCATE (dij(ncoi, ncoj, 3), SOURCE=0.0_dp)
 
                   ri = 0.0_dp
                   rj = rij
@@ -3039,7 +3040,7 @@ CONTAINS
       m_max = maxli + maxlj + 1
 
       !Init the truncated Coulomb operator
-      IF (op_prv == do_potential_truncated) THEN
+      IF (op_prv == do_potential_truncated .OR. op_prv == do_potential_mix_cl_trunc) THEN
 
          IF (m_max > get_lmax_init()) THEN
             IF (para_env%mepos == 0) THEN
@@ -3088,8 +3089,7 @@ CONTAINS
 
                IF (ncoi*ncoj > 0) THEN
                   ALLOCATE (dij_contr(nsgfi(iset), nsgfj(jset)))
-                  ALLOCATE (dij(ncoi, ncoj, 3))
-                  dij(:, :, :) = 0.0_dp
+                  ALLOCATE (dij(ncoi, ncoj, 3), SOURCE=0.0_dp)
 
                   ri = 0.0_dp
                   rj = rij
@@ -3263,7 +3263,7 @@ CONTAINS
       m_max = maxli + maxlj
 
       !Init the truncated Coulomb operator
-      IF (op_prv == do_potential_truncated) THEN
+      IF (op_prv == do_potential_truncated .OR. op_prv == do_potential_mix_cl_trunc) THEN
 
          IF (m_max > get_lmax_init()) THEN
             IF (para_env%mepos == 0) THEN
@@ -3334,11 +3334,8 @@ CONTAINS
                sgfj = first_sgf_j(1, jset)
 
                IF (ncoi*ncoj > 0) THEN
-                  ALLOCATE (sij_contr(nsgfi(iset), nsgfj(jset)))
-                  sij_contr(:, :) = 0.0_dp
-
-                  ALLOCATE (sij(ncoi, ncoj))
-                  sij(:, :) = 0.0_dp
+                  ALLOCATE (sij_contr(nsgfi(iset), nsgfj(jset)), SOURCE=0.0_dp)
+                  ALLOCATE (sij(ncoi, ncoj), SOURCE=0.0_dp)
 
                   ri = 0.0_dp
                   rj = rij
@@ -3449,10 +3446,10 @@ CONTAINS
 !$OMP PRIVATE(iter,ind,offset,nblk,iblk)
       CALL dbt_iterator_start(iter, tensor)
       nblk = dbt_iterator_num_blocks(iter)
-!$OMP CRITICAL
+!$OMP CRITICAL(qs_tensors_offset)
       offset = shared_offset
       shared_offset = shared_offset + nblk
-!$OMP END CRITICAL
+!$OMP END CRITICAL(qs_tensors_offset)
       DO iblk = 1, nblk
          CALL dbt_iterator_next_block(iter, ind)
          blk_indices(offset + iblk, :) = ind(:)
@@ -3523,7 +3520,7 @@ CONTAINS
                                             memory_usage, .FALSE.)
       END DO
 
-   END SUBROUTINE
+   END SUBROUTINE compress_tensor
 
 ! **************************************************************************************************
 !> \brief ...
@@ -3615,7 +3612,7 @@ CONTAINS
          CALL hfx_reset_cache_and_container(integral_caches(i), integral_containers(i), &
                                             memory_usage, .FALSE.)
       END DO
-   END SUBROUTINE
+   END SUBROUTINE decompress_tensor
 
 ! **************************************************************************************************
 !> \brief ...
@@ -3634,6 +3631,6 @@ CONTAINS
       CALL dbt_get_info(tensor, nfull_total=dims)
       occ = REAL(nze, dp)/PRODUCT(REAL(dims, dp))
 
-   END SUBROUTINE
+   END SUBROUTINE get_tensor_occupancy
 
-END MODULE
+END MODULE qs_tensors

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -34,6 +34,7 @@ MODULE particle_methods
    USE input_constants,                 ONLY: dump_atomic,&
                                               dump_dcd,&
                                               dump_dcd_aligned_cell,&
+                                              dump_extxyz,&
                                               dump_pdb,&
                                               dump_xmol
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
@@ -224,7 +225,7 @@ CONTAINS
          factor = unit_conv
       END IF
       SELECT CASE (output_format)
-      CASE (dump_xmol)
+      CASE (dump_xmol, dump_extxyz)
          my_print_kind = .FALSE.
          IF (PRESENT(print_kind)) my_print_kind = print_kind
          WRITE (iunit, "(I8)") natom
@@ -330,7 +331,7 @@ CONTAINS
          END IF
          ALLOCATE (arr(3, natom))
          IF (PRESENT(array)) THEN
-            arr(1:3, 1:natom) = RESHAPE(array, (/3, natom/))
+            arr(1:3, 1:natom) = RESHAPE(array, [3, natom])
          ELSE
             SELECT CASE (TRIM(content))
             CASE ("POS")

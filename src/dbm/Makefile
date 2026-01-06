@@ -1,12 +1,14 @@
 PROJHOME := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CP2KHOME := $(abspath $(PROJHOME)/../..)
+OMP_TRACE := $(wildcard $(PROJHOME)/../base/openmp_trace.c)
 ALL_HEADERS := $(shell find . -name "*.h") $(shell find ../offload/ -name "*.h")
-ALL_OBJECTS := ../offload/offload_library.o \
+ALL_OBJECTS :=  $(OMP_TRACE:.c=.o) \
+        ../offload/offload_library.o \
+        ../offload/offload_mempool.o \
+        ../mpiwrap/cp_mpi.o \
         dbm_distribution.o \
         dbm_library.o \
         dbm_matrix.o \
-        dbm_mempool.o \
-        dbm_mpi.o \
         dbm_multiply.o \
         dbm_multiply_comm.o \
         dbm_multiply_cpu.o \
@@ -22,20 +24,50 @@ endif
 # Optimization flag derived from OPT flag
 OPTFLAG ?= -O$(patsubst O%,%,$(OPT))
 
-CFLAGS := -fopenmp -g $(OPTFLAG) -march=native -Wall -Wextra -Wcast-qual
+CFLAGS := -fPIC -g $(OPTFLAG) -march=native -Wall -Wextra -Wcast-qual
 
-# Some additional flags when relying on default-CC
-ifeq ($(CC),)
-CFLAGS += -Wno-vla-parameter
+VALIDATE ?= 0
+ifneq ($(VALIDATE),0)
+CFLAGS += -DDBM_VALIDATE_AGAINST_LIBXSMM
 endif
 
+# Intel Compiler
+ICX := $(shell which icx 2>/dev/null)
+INTEL ?= $(if $(ICX),$(if $(filter-out 0,$(GNU)),0,1),0)
+
+# Build with MPI when MPICC is given
+MPI ?= $(if $(MPICC),1,0)
+
+ifeq ($(INTEL),0)
+MKL_FCRTL := gf
+LIBS += $(if $(OMPRT),-l$(OMPRT),-fopenmp)
+CFLAGS += -fopenmp -Wno-vla-parameter
+CC := $(if $(filter-out 0,$(MPI)),mpicc,gcc)
+else
+MKL_FCRTL := intel
+LIBS += $(if $(OMPRT),-fopenmp -Wno-recommended-option,-qopenmp)
+CFLAGS += $(if $(OMPRT),-fopenmp -Wno-recommended-option,-qopenmp)
+CC := $(if $(filter-out 0,$(MPI)),mpiicx,icx)
+endif
+
+ifneq ($(MPI),0)
+CFLAGS += -D__parallel
+ifneq ($(MPICC),)
+CC := $(MPICC)
+endif
+endif
+
+ifeq ($(filter-out 0,$(OPENCL)),)
 NVCC := $(shell which nvcc 2>/dev/null)
 NVARCH := sm_70
 NVFLAGS := -g $(OPTFLAG) -lineinfo -arch $(NVARCH) -Wno-deprecated-gpu-targets -Xcompiler "$(CFLAGS)" -D__OFFLOAD_CUDA
 
 HIPCC := $(shell which hipcc 2>/dev/null)
 HIPARCH := gfx90a
+ROCM_PATH_ENV := $(shell echo "$${ROCM_PATH}")
+ROCM_PATH := $(if $(ROCM_PATH_ENV),$(ROCM_PATH_ENV),/opt/rocm)
 HIPFLAGS := -fPIE -g $(OPTFLAG) --offload-arch=$(HIPARCH) -Wall -Wextra -Werror -I${ROCM_PATH}/include -D__OFFLOAD_HIP -D__HIP_PLATFORM_AMD__ -D__HIP_PLATFORM_AMD__
+endif
 
 # prefer NVCC or HIPCC over OpenCL
 ifneq ($(NVCC)$(HIPCC),)
@@ -48,21 +80,25 @@ endif
 ifneq ($(OPENCL),0)
 OPENCL_OFFLOAD := $(firstword $(wildcard $(CP2KHOME)/lib/*/*/exts/dbcsr/libdbcsr.a))
 OPENCL_GENKRNL := $(PROJHOME)/dbm_multiply_opencl.cl.h
+ifneq ($(ICX),)
+LIBS += -lifcoremt -limf
+endif
 endif
 
 # Make foundational runtimes available
-LIBS += -fopenmp -ldl -lstdc++ -lc -lm
+LIBS += -ldl -lstdc++ -lc -lm
 
 
 # Make BLAS/LAPACK available
 ifneq ($(MKLROOT),)
-LIBS += \
-        -L$(MKLROOT)/lib/intel64 \
+LIBS += -L$(MKLROOT)/lib/intel64 \
         -Wl,--start-group \
-        -lmkl_gf_lp64 \
+        -lmkl_$(MKL_FCRTL)_lp64 \
         -lmkl_core \
         -lmkl_sequential \
         -Wl,--end-group
+else ifneq ($(OPENBLAS),0)
+LIBS += -lopenblas
 else
 LIBS += -lblas
 endif
@@ -72,10 +108,14 @@ endif
 all: dbm_miniapp.x
 
 clean:
-	rm -fv *.o ../offload/*.o $(OPENCL_GENKRNL)
+	rm -fv $(ALL_OBJECTS) $(OPENCL_GENKRNL) \
+        dbm_multiply_gpu.o \
+        dbm_multiply_gpu_kernel.o \
+        dbm_multiply_opencl.o \
+        dbm_miniapp.o
 
 realclean: clean
-	rm -fv *.x
+	rm -fv dbm_miniapp.x
 
 
 # Enable OpenCL when DBCSR library was prebuilt (assume __DBCSR_ACC).
@@ -86,13 +126,14 @@ OPENCL_GEN := $(CP2KHOME)/exts/dbcsr/src/acc/opencl/acc_opencl.sh
 ALL_HEADERS += $(OPENCL_GENKRNL)
 
 ALL_OBJECTS += dbm_multiply_gpu.o dbm_multiply_opencl.o
-CFLAGS += -I$(CP2KHOME)/exts/dbcsr -D__OFFLOAD_OPENCL -D__DBCSR_ACC
+CFLAGS += -I$(CP2KHOME)/exts/dbcsr/src/acc/opencl -I$(CP2KHOME)/exts/dbcsr
+CFLAGS += -D__OFFLOAD_OPENCL -D__DBCSR_ACC
 LIBS += $(OPENCL_OFFLOAD) -lgfortran
 
 ifneq (Darwin,$(shell uname))
 OPENCL_LIB := $(shell ldconfig -p 2>/dev/null | grep -m1 OpenCL | rev | cut -d' ' -f1 | rev)
 ifeq (,$(OPENCL_LIB))
-OPENCL_LIB := $(wildcard /usr/lib/x86_64-linux-gnu/libOpenCL.so.1)
+OPENCL_LIB := /usr/lib/x86_64-linux-gnu/libOpenCL.so.1
 endif
 ifneq (,$(CUDA_PATH))
 ifeq (,$(wildcard $(OPENCL_INC)))
@@ -106,12 +147,17 @@ else ifneq (,$(wildcard $(OPENCL_ROOT)/include/CL/cl.h))
 ifeq (,$(wildcard $(OPENCL_INC)))
 CFLAGS += -I$(OPENCL_ROOT)/include
 endif
-LIBS += -L$(OPENCL_ROOT)/lib64
-else ifneq (,$(wildcard $(OCL_ROOT)/include/CL/cl.h))
+LIBS += -L$(OPENCL_ROOT)/$(if $(wildcard $(OPENCL_ROOT)/lib64),lib64,lib)
+else ifneq (,$(ICX))
+OPENCL_ROOT := $(abspath $(dir $(ICX))/..)
+CLINC := $(wildcard $(OPENCL_ROOT)/include/sycl/CL/cl.h $(OPENCL_ROOT)/include/CL/cl.h)
+ifneq (,$(CLINC))
+LIBS += -L$(OPENCL_ROOT)/$(if $(wildcard $(OPENCL_ROOT)/lib64),lib64,lib)
+LIBS += -L$(OPENCL_ROOT)/compiler/lib/intel64 -lintlc
 ifeq (,$(wildcard $(OPENCL_INC)))
-CFLAGS += -I$(OCL_ROOT)/include
+CFLAGS += -I$(abspath $(dir $(firstword $(CLINC)))/..)
 endif
-LIBS += -L$(OCL_ROOT)/lib64
+endif
 endif
 # OPENCL_INC: directory containing CL/cl.h.
 ifneq (,$(wildcard $(OPENCL_INC)))
@@ -127,6 +173,7 @@ else # macOS
 LIBS += -framework OpenCL
 endif
 
+dbm_miniapp.x: $(OPENCL_OFFLOAD)
 $(OPENCL_GENKRNL): $(OPENCL_GEN) $(OPENCL_SRC) $(OPENCL_CMN)
 	$(OPENCL_GEN) -b 6 -p "" $(OPENCL_SRC) $@
 
@@ -146,7 +193,7 @@ endif
 
 # Enable HIP/ROCm when hipcc compiler is present.
 else ifneq ($(HIPCC),)
-ALL_OBJECTS += dbm_multiply_gpu.o
+ALL_OBJECTS += dbm_multiply_gpu.o dbm_multiply_gpu_kernel.o
 CFLAGS += -I${ROCM_PATH}/include -D__OFFLOAD_HIP -D__HIP_PLATFORM_AMD__
 LIBS += -L${ROCM_PATH}/lib -lamdhip64 -lhipfft -lhipblas -lrocblas
 
@@ -154,32 +201,18 @@ LIBS += -L${ROCM_PATH}/lib -lamdhip64 -lhipfft -lhipblas -lrocblas
 	cd $(dir $<); $(HIPCC) -c $(HIPFLAGS) $(notdir $<)
 endif
 
-
 # Make LIBXSMM available
 ifneq ($(LIBXSMMROOT),)
 CFLAGS += -D__LIBXSMM -I$(LIBXSMMROOT)/include
-LIBS += \
-        $(LIBXSMMROOT)/lib/libxsmm.a $(LIBXSMMROOT)/lib/libxsmmext.a \
+LIBS += $(LIBXSMMROOT)/lib/libxsmm.a \
+        $(LIBXSMMROOT)/lib/libxsmmext.a \
         -lpthread -lrt
 endif
 
-
-# Build with MPI when mpicc compiler is present.
-ifneq ($(MPICC),)
-%.o: %.c $(ALL_HEADERS)
-	cd $(dir $<); $(MPICC) -c -std=c11 $(CFLAGS) -D__parallel $(notdir $<)
-
-dbm_miniapp.x: dbm_miniapp.o $(ALL_OBJECTS)
-	$(MPICC) $(CFLAGS) -o $@ $^ $(LIBS)
-
-
-# Build without MPI otherwise.
-else
-%.o: %.c $(ALL_HEADERS)
+%.o: %.c $(OMP_TRACE) $(ALL_HEADERS)
 	cd $(dir $<); $(CC) -c -std=c11 $(CFLAGS) $(notdir $<)
 
 dbm_miniapp.x: dbm_miniapp.o $(ALL_OBJECTS)
-	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
+	$(CC) -o $@ $^ $(LIBS)
 
-endif
 #EOF

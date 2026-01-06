@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -139,18 +139,18 @@ CONTAINS
             pol(:) = efield%polarisation(:)/(SQRT(DOT_PRODUCT(efield%polarisation, efield%polarisation)))
          END IF
          IF (efield%envelop_id == constant_env) THEN
-            IF (sim_step .GE. efield%envelop_i_vars(1) .AND. &
-                (sim_step .LE. efield%envelop_i_vars(2) .OR. efield%envelop_i_vars(2) .LT. 0)) THEN
+            IF (sim_step >= efield%envelop_i_vars(1) .AND. &
+                (sim_step <= efield%envelop_i_vars(2) .OR. efield%envelop_i_vars(2) < 0)) THEN
                field = field + strength*COS(sim_time*nu*2.0_dp*pi + &
                                             efield%phase_offset*pi)*pol(:)
             END IF
          ELSE IF (efield%envelop_id == ramp_env) THEN
-            IF (sim_step .GE. efield%envelop_i_vars(1) .AND. sim_step .LE. efield%envelop_i_vars(2)) &
+            IF (sim_step >= efield%envelop_i_vars(1) .AND. sim_step <= efield%envelop_i_vars(2)) &
                strength = strength*(sim_step - efield%envelop_i_vars(1))/(efield%envelop_i_vars(2) - efield%envelop_i_vars(1))
-            IF (sim_step .GE. efield%envelop_i_vars(3) .AND. sim_step .LE. efield%envelop_i_vars(4)) &
+            IF (sim_step >= efield%envelop_i_vars(3) .AND. sim_step <= efield%envelop_i_vars(4)) &
                strength = strength*(efield%envelop_i_vars(4) - sim_step)/(efield%envelop_i_vars(4) - efield%envelop_i_vars(3))
-            IF (sim_step .GT. efield%envelop_i_vars(4) .AND. efield%envelop_i_vars(4) .GT. 0) strength = 0.0_dp
-            IF (sim_step .LE. efield%envelop_i_vars(1)) strength = 0.0_dp
+            IF (sim_step > efield%envelop_i_vars(4) .AND. efield%envelop_i_vars(4) > 0) strength = 0.0_dp
+            IF (sim_step <= efield%envelop_i_vars(1)) strength = 0.0_dp
             field = field + strength*COS(sim_time*nu*2.0_dp*pi + &
                                          efield%phase_offset*pi)*pol(:)
          ELSE IF (efield%envelop_id == gaussian_env) THEN
@@ -159,7 +159,7 @@ CONTAINS
                                              efield%phase_offset*pi)*pol(:)
          ELSE IF (efield%envelop_id == custom_env) THEN
             dt = efield%envelop_r_vars(1)
-            IF (sim_time .LT. (SIZE(efield%envelop_r_vars) - 2)*dt) THEN
+            IF (sim_time < (SIZE(efield%envelop_r_vars) - 2)*dt) THEN
                !make a linear interpolation between the two next points
                lower = FLOOR(sim_time/dt)
                upper = lower + 1
@@ -239,7 +239,6 @@ CONTAINS
 
          END DO
          IF (dft_control%apply_efield_field) energy%efield_core = efield_ener
-!          energy%efield_core = efield_ener
       END IF
       CALL timestop(handle)
    END SUBROUTINE calculate_ecore_efield

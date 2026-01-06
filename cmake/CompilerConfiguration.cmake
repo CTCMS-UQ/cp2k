@@ -1,12 +1,12 @@
 #!-------------------------------------------------------------------------------------------------!
 #!   CP2K: A general program to perform molecular dynamics simulations                             !
-#!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                  !
+#!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                  !
 #!                                                                                                 !
 #!   SPDX-License-Identifier: GPL-2.0-or-later                                                     !
 #!-------------------------------------------------------------------------------------------------!
 
-set(CP2K_C_COMPILER_LIST "GNU;Intel;NAG;Cray;PGI;Clang;AppleClang")
-set(CP2K_Fortran_COMPILER_LIST "GNU;Intel;NAG;Cray;PGI")
+set(CP2K_C_COMPILER_LIST "GNU;Intel;IntelLLVM;NAG;Cray;PGI;Clang;AppleClang")
+set(CP2K_Fortran_COMPILER_LIST "GNU;Intel;IntelLLVM;NAG;Cray;PGI")
 
 if(NOT CMAKE_C_COMPILER_ID IN_LIST CP2K_C_COMPILER_LIST)
   message(
@@ -31,28 +31,110 @@ if(NOT CMAKE_Fortran_COMPILER_ID IN_LIST CP2K_Fortran_COMPILER_LIST)
           "-- CMAKE_Fortran_COMPILER full path: ${CMAKE_Fortran_COMPILER}\n")
 endif()
 
-# OpenACC support with CCE is EOL: causes
-# https://github.com/cp2k/dbcsr/issues/261 eventually check compiler version
-# (similar to -h system_alloc)
+# ================================ GNU Compilers ===============================
+
+# Baseline
 add_compile_options(
-  "$<$<COMPILE_LANG_AND_ID:Fortran,GNU>:-mtune=native;-ffree-line-length-512;-ffree-form;-std=f2008;-fimplicit-none;-Werror=aliasing;-Werror=ampersand;-Werror=c-binding-type;-Werror=conversion;-Werror=intrinsic-shadow;-Werror=intrinsics-std;-Werror=line-truncation;-Werror=tabs;-Werror=target-lifetime;-Werror=underflow;-Werror=unused-but-set-variable;-Werror=unused-variable>"
-  "$<$<AND:$<COMPILE_LANG_AND_ID:Fortran,GNU>,$<VERSION_GREATER_EQUAL:${CMAKE_Fortran_COMPILER_VERSION},11>>:-fallow-argument-mismatch>"
-  "$<$<COMPILE_LANG_AND_ID:Fortran,Intel>:-free -stand=f18 -fpp -heap-arrays>"
-  "$<$<COMPILE_LANG_AND_ID:Fortran,PGI>:-Mfreeform -Mextend -Mallocatable=03>"
-  "$<$<COMPILE_LANG_AND_ID:Fortran,NAG>:-f2008 -free -Warn=reallocation -Warn=subnormal>"
-  "$<$<COMPILE_LANG_AND_ID:C,Cray>:-hnoacc -h nomessage=1234>"
-  "$<$<COMPILE_LANG_AND_ID:Fortran,Cray>:-f free -M3105 -ME7212  -hnoacc -M1234>"
+  "$<$<COMPILE_LANG_AND_ID:Fortran,GNU>:-std=f2008;-ffree-form;-fimplicit-none>"
+  "$<$<COMPILE_LANG_AND_ID:Fortran,GNU>:-g;-fno-omit-frame-pointer;-fbacktrace>"
+  "$<$<COMPILE_LANG_AND_ID:Fortran,GNU>:$<$<VERSION_GREATER:$<Fortran_COMPILER_VERSION>,10>:-fallow-argument-mismatch>>"
+  "$<$<COMPILE_LANG_AND_ID:Fortran,GNU>:-Wno-deprecated-declarations;-Wno-maybe-uninitialized;-Wuninitialized;-Wuse-without-only>"
+)
+add_compile_options(
+  "$<$<COMPILE_LANG_AND_ID:CXX,GNU>:-g;-fno-omit-frame-pointer>"
+  "$<$<COMPILE_LANG_AND_ID:CXX,GNU>:-Wno-deprecated-declarations;-Wno-vla-parameter>"
+)
+add_compile_options(
+  "$<$<COMPILE_LANG_AND_ID:C,GNU>:-g;-fno-omit-frame-pointer>"
+  "$<$<COMPILE_LANG_AND_ID:C,GNU>:-Wno-deprecated-declarations;-Wno-vla-parameter>"
 )
 
+# Release
 add_compile_options(
-  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-O3;-g;-funroll-loops>"
+  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-O3;-march=native;-mtune=native;-funroll-loops>"
+  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:CXX,GNU>>:-O3;-march=native;-mtune=native;-funroll-loops>"
+  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:C,GNU>>:-O3;-march=native;-mtune=native;-funroll-loops>"
+)
+
+# Generic
+add_compile_options(
+  "$<$<AND:$<CONFIG:GENERIC>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-O3;-mtune=generic;-funroll-loops>"
+  "$<$<AND:$<CONFIG:GENERIC>,$<COMPILE_LANG_AND_ID:CXX,GNU>>:-O3;-mtune=generic;-funroll-loops>"
+  "$<$<AND:$<CONFIG:GENERIC>,$<COMPILE_LANG_AND_ID:C,GNU>>:-O3;-mtune=generic;-funroll-loops>"
+)
+
+# Debug
+add_compile_options(
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-O1;-march=native;-mtune=native>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:CXX,GNU>>:-O1;-march=native;-mtune=native>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,GNU>>:-O1;-march=native;-mtune=native;-Wall;-Wextra;-Werror>"
+)
+add_compile_options(
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-fsanitize=leak;-Werror=realloc-lhs>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-fcheck=all,no-array-temps;-finline-matmul-limit=0>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-ffpe-trap=invalid,zero,overflow>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-finit-derived;-finit-real=snan;-finit-integer=-42>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-Werror=aliasing;-Werror=ampersand;-Werror=c-binding-type>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-Werror=character-truncation;-Werror=intrinsic-shadow>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-Werror=intrinsics-std;-Werror=line-truncation;-Werror=tabs;-Werror=target-lifetime>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-Werror=underflow;-Werror=unused-but-set-variable;-Werror=unused-variable>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-Werror=unused-dummy-argument;-Werror=unused-parameter>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-Werror=unused-label;-Werror=conversion;-Werror=zerotrip>"
+)
+add_compile_definitions("$<$<CONFIG:DEBUG>:__HAS_IEEE_EXCEPTIONS;__CHECK_DIAG>")
+add_link_options(
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-fsanitize=leak>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:CXX,GNU>>:-fsanitize=leak>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,GNU>>:-fsanitize=leak>")
+
+# Conventions
+add_compile_options(
+  "$<$<CONFIG:CONVENTIONS>:-O1;-march=native;-mtune=native>"
+  "$<$<AND:$<CONFIG:CONVENTIONS>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-Wno-pedantic;-Wall;-Wextra;-Wsurprising>"
+  "$<$<AND:$<CONFIG:CONVENTIONS>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-Warray-temporaries;-Wconversion-extra;-Wimplicit-interface>"
+  "$<$<AND:$<CONFIG:CONVENTIONS>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-Wimplicit-procedure;-Wreal-q-constant;-Walign-commons>"
+  "$<$<AND:$<CONFIG:CONVENTIONS>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-Wfunction-elimination;-Wrealloc-lhs;-Wcompare-reals;-Wzerotrip>"
+  # Writes a lot of output. Make sure to use:
+  # -DCMAKE_Fortran_COMPILER_LAUNCHER="redirect_gfortran_output.py"
+  "$<$<AND:$<CONFIG:CONVENTIONS>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-fdump-fortran-original>"
+)
+
+# Coverage
+add_compile_options(
+  "$<$<CONFIG:COVERAGE>:-coverage;-fkeep-static-functions;-O1;-march=native;-mtune=native>"
+)
+add_compile_definitions("$<$<CONFIG:COVERAGE>:__NO_ABORT>")
+
+# Address Sanitizer
+add_compile_options(
+  "$<$<CONFIG:ASAN>:-fsanitize=address;-no-pie;-O3;-march=native;-mtune=native;-funroll-loops>"
+)
+add_link_options("$<$<CONFIG:ASAN>:-fsanitize=address>")
+
+# =============================== Other Compilers ==============================
+
+# Baseline
+add_compile_options(
+  "$<$<COMPILE_LANG_AND_ID:Fortran,Intel>:-free;-stand f18;-fpp;-qopenmp;-heap-arrays;-D__MAX_CONTR=4>"
+  "$<$<COMPILE_LANG_AND_ID:Fortran,IntelLLVM>:-free;-fpp;-qopenmp;-D__MAX_CONTR=4>"
+  "$<$<COMPILE_LANG_AND_ID:Fortran,PGI>:-Mfreeform;-Mextend;-Mallocatable=03>"
+  "$<$<COMPILE_LANG_AND_ID:Fortran,NAG>:-f2008;-free;-Warn=reallocation;-Warn=subnormal>"
+  "$<$<COMPILE_LANG_AND_ID:Fortran,Cray>:-f;free;-M3105;-ME7212;-hnoacc;-M1234>"
+)
+add_compile_options(
+  "$<$<COMPILE_LANG_AND_ID:C,Cray>:-hnoacc;-h;nomessage=1234>")
+
+# Release
+add_compile_options(
   "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:Fortran,PGI>>:-fast>"
-  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:Fortran,Intel>>:-O3;-g>"
+  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:Fortran,Intel>>:-O3;-g;-D__HAS_IEEE_EXCEPTIONS>"
+  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:Fortran,IntelLLVM>>:-O3;-g;-D__HAS_IEEE_EXCEPTIONS>"
   "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:Fortran,Cray>>:-O2;-G2>"
-  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:Fortran,NAG>>:-gline>"
-  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:C,GNU>>:-O3;-g;-funroll-loops;-Wall>"
+  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:Fortran,NAG>>:-gline>")
+add_compile_options(
   "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:C,PGI>>:-fast>"
   "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:C,Intel>>:-O3;-g>"
+  "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:C,IntelLLVM>>:-O3;-g>"
   "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:C,Cray>>:-O3>"
   "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:C,NAG>>:-gline>"
   "$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:C,Clang>>:-O3;-funroll-loops>"
@@ -60,32 +142,29 @@ add_compile_options(
   "$<$<NOT:$<BOOL:OpenMP_FOUND>>:$<$<AND:$<CONFIG:RELEASE>,$<COMPILE_LANG_AND_ID:Fortran,NAG>>:-gline>>"
 )
 
+# Debug
 add_compile_options(
-  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-fbacktrace;-ffree-form;-fimplicit-none;-std=f2008;-fsanitize=leak;-fcheck=all,no-array-temps;-ffpe-trap=invalid,zero,overflow;-finit-derived;-finit-real=snan;-finit-integer=-42;-Werror=realloc-lhs;-finline-matmul-limit=0>"
   "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,PGI>>:-g>"
   "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,Intel>>:-O2;-debug>"
-  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,Cray>>:-G2>"
-  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,GNU>>:-O2;-ggdb;-Wall;-fsanitize=undefined;-fsanitize=address;-fsanitize-recover=all;-Wall;-Wextra;-Werror;-Wno-vla-parameter;-Wno-deprecated-declarations>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,IntelLLVM>>:-O2;-debug>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,Cray>>:-G2>")
+add_compile_options(
   "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,PGI>>:-fast>"
-  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,Intel>>:-O3;-g>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,Intel>>:-O2;-g>"
+  "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,IntelLLVM>>:-O2;-g>"
   "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,Cray>>:-G2>"
   "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,NAG>>:-g;-C>"
   "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,Clang>>:-O1;-g;-fno-omit-frame-pointer>"
   "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:C,AppleClang>>:-O0;-g>"
   "$<$<AND:$<CONFIG:DEBUG>,$<COMPILE_LANG_AND_ID:Fortran,NAG>>:-C=all>")
 
-add_compile_options(
-  "$<$<AND:$<CONFIG:COVERAGE>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-O0;-g;--coverage;-fno-omit-frame-pointer;-fcheck=all;-ffpe-trap=invalid,zero,overflow;-fbacktrace;-finit-real=snan;-finit-integer=-42;-finit-derived;-Werror=realloc-lhs;-finline-matmul-limit=0>"
-  "$<$<AND:$<CONFIG:COVERAGE>,$<COMPILE_LANG_AND_ID:C,GNU>>:-O0;-g;--coverage;-Wall>"
-)
-
-if(NOT CP2K_USE_MPI OR NOT "${MPI_Fortran_LIBRARY_VERSION_STRING}" MATCHES "Open
-  MPI")
-  add_compile_options(
-    "$<$<AND:$<CONFIG:COVERAGE>,$<COMPILE_LANG_AND_ID:Fortran,GNU>>:-fsanitize=leak>"
-    "$<$<AND:$<CONFIG:COVERAGE>,$<COMPILE_LANG_AND_ID:C,GNU>>:-O0;-g;--coverage;-Wall>"
-  )
-endif()
+# =================================== Tweaks ===================================
+# Workaround https://gitlab.kitware.com/cmake/cmake/-/issues/27231
+get_target_property(opts MPI::MPI_Fortran INTERFACE_COMPILE_OPTIONS)
+set_target_properties(
+  MPI::MPI_Fortran PROPERTIES INTERFACE_COMPILE_OPTIONS
+                              "$<$<COMPILE_LANGUAGE:Fortran>:${opts}>")
+unset(opts)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
   set(CMAKE_Fortran_MODOUT_FLAG "-ef") # override to get lower-case module file

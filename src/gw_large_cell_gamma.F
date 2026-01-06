@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -12,11 +12,13 @@
 ! **************************************************************************************************
 MODULE gw_large_cell_gamma
    USE atomic_kind_types,               ONLY: atomic_kind_type
+   USE bibliography,                    ONLY: Graml2024,&
+                                              cite_reference
    USE cell_types,                      ONLY: cell_type,&
                                               get_cell,&
                                               pbc
    USE constants_operator,              ONLY: operator_coulomb
-   USE cp_cfm_basic_linalg,             ONLY: cp_cfm_upper_to_full
+   USE cp_cfm_basic_linalg,             ONLY: cp_cfm_uplo_to_full
    USE cp_cfm_cholesky,                 ONLY: cp_cfm_cholesky_decompose,&
                                               cp_cfm_cholesky_invert
    USE cp_cfm_diag,                     ONLY: cp_cfm_geeig
@@ -30,8 +32,9 @@ MODULE gw_large_cell_gamma
    USE cp_dbcsr_api,                    ONLY: &
         dbcsr_add, dbcsr_copy, dbcsr_create, dbcsr_deallocate_matrix, dbcsr_get_block_p, &
         dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, dbcsr_iterator_start, &
-        dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_p_type, dbcsr_release, &
-        dbcsr_reserve_all_blocks, dbcsr_set, dbcsr_type
+        dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_p_type, dbcsr_release, dbcsr_set, &
+        dbcsr_type
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_reserve_all_blocks
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
                                               dbcsr_deallocate_matrix_set
@@ -113,6 +116,8 @@ CONTAINS
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :, :)  :: fm_Sigma_c_Gamma_time
 
       CALL timeset(routineN, handle)
+
+      CALL cite_reference(Graml2024)
 
       ! G^occ_µλ(i|τ|,k=0) = sum_n^occ C_µn(k=0) e^(-|(ϵ_nk=0-ϵ_F)τ|) C_λn(k=0)
       ! G^vir_µλ(i|τ|,k=0) = sum_n^vir C_µn(k=0) e^(-|(ϵ_nk=0-ϵ_F)τ|) C_λn(k=0)
@@ -778,16 +783,15 @@ CONTAINS
       NULLIFY (mat_V_kp)
       ALLOCATE (mat_V_kp(ikp_start:ikp_end, 2))
 
-      DO ikp = ikp_start, ikp_end
-         DO re_im = 1, 2
+      DO re_im = 1, 2
+         DO ikp = ikp_start, ikp_end
             NULLIFY (mat_V_kp(ikp, re_im)%matrix)
             ALLOCATE (mat_V_kp(ikp, re_im)%matrix)
             CALL dbcsr_create(mat_V_kp(ikp, re_im)%matrix, template=bs_env%mat_RI_RI%matrix)
             CALL dbcsr_reserve_all_blocks(mat_V_kp(ikp, re_im)%matrix)
             CALL dbcsr_set(mat_V_kp(ikp, re_im)%matrix, 0.0_dp)
-
-         END DO ! re_im
-      END DO ! ikp
+         END DO ! ikp
+      END DO ! re_im
 
       CALL get_qs_env(qs_env=qs_env, &
                       particle_set=particle_set, &
@@ -795,13 +799,13 @@ CONTAINS
                       qs_kind_set=qs_kind_set, &
                       atomic_kind_set=atomic_kind_set)
 
-      IF (ikp_end .LE. bs_env%nkp_chi_eps_W_orig) THEN
+      IF (ikp_end <= bs_env%nkp_chi_eps_W_orig) THEN
 
          ! 1. 2c Coulomb integrals for the first "original" k-point grid
          bs_env%kpoints_chi_eps_W%nkp_grid = bs_env%nkp_grid_chi_eps_W_orig
 
       ELSE IF (ikp_start > bs_env%nkp_chi_eps_W_orig .AND. &
-               ikp_end .LE. bs_env%nkp_chi_eps_W_orig_plus_extra) THEN
+               ikp_end <= bs_env%nkp_chi_eps_W_orig_plus_extra) THEN
 
          ! 2. 2c Coulomb integrals for the second "extrapolation" k-point grid
          bs_env%kpoints_chi_eps_W%nkp_grid = bs_env%nkp_grid_chi_eps_W_extra
@@ -827,8 +831,8 @@ CONTAINS
       bs_env%kpoints_chi_eps_W%nkp_grid = bs_env%nkp_grid_chi_eps_W_orig
 
       ALLOCATE (fm_V_kp(ikp_start:ikp_end, 2))
-      DO ikp = ikp_start, ikp_end
-         DO re_im = 1, 2
+      DO re_im = 1, 2
+         DO ikp = ikp_start, ikp_end
             CALL cp_fm_create(fm_V_kp(ikp, re_im), bs_env%fm_RI_RI%matrix_struct)
             CALL copy_dbcsr_to_fm(mat_V_kp(ikp, re_im)%matrix, fm_V_kp(ikp, re_im))
             CALL dbcsr_deallocate_matrix(mat_V_kp(ikp, re_im)%matrix)
@@ -894,7 +898,7 @@ CONTAINS
          ! successful Cholesky decomposition
          CALL cp_cfm_cholesky_invert(cfm_M_inv_ikp)
          ! symmetrize the result
-         CALL cp_cfm_upper_to_full(cfm_M_inv_ikp)
+         CALL cp_cfm_uplo_to_full(cfm_M_inv_ikp)
       ELSE
          ! Cholesky decomposition not successful: use expensive diagonalization
          CALL cp_cfm_power(cfm_work, threshold=bs_env%eps_eigval_mat_RI, exponent=-1.0_dp)
@@ -968,8 +972,8 @@ CONTAINS
          t1 = m_walltime()
          CALL fm_read(bs_env%fm_W_MIC_freq_zero, bs_env, "W_freq_rtp", 0)
          IF (bs_env%unit_nr > 0) THEN
-            WRITE (bs_env%unit_nr, '(T2,A,I5,A,I3,A,F7.1,A)') &
-               'Read W^MIC(w=0) from file for frequency point  ', 1, ' /', 1, &
+            WRITE (bs_env%unit_nr, '(T2,A,I3,A,I3,A,F7.1,A)') &
+               'Read W^MIC(f=0) from file for freq. point  ', 1, ' /', 1, &
                ',    Execution time', m_walltime() - t1, ' s'
          END IF
       END IF
@@ -1020,6 +1024,8 @@ CONTAINS
                                          cfm_V_sqrt_ikp, cfm_M_inv_V_sqrt_ikp, ikp)
 
             CALL bs_env%para_env%sync()
+            CALL cp_fm_release(fm_V_kp(ikp, 1))
+            CALL cp_fm_release(fm_V_kp(ikp, 2))
 
             DO j_w = 1, bs_env%num_time_freq_points
 
@@ -1035,9 +1041,6 @@ CONTAINS
                CALL Fourier_transform_w_to_t(bs_env, fm_W_MIC_time, bs_env%fm_W_MIC_freq, j_w)
 
             END DO ! ω_j
-
-            CALL cp_fm_release(fm_V_kp(ikp, 1))
-            CALL cp_fm_release(fm_V_kp(ikp, 2))
 
          END DO ! ikp_in_batch
 
@@ -1068,9 +1071,8 @@ CONTAINS
       CALL dbcsr_deallocate_matrix_set(mat_chi_Gamma_tau)
 
       ! Marek : Fourier transform W^MIC(itau) back to get it at a specific im.frequency point - iomega = 0
-      ! TODO : Should this be activeted here or somewhere else? Maybe directly in the main (gw) routine?
-      ! Create the matrix TODO: Add release statement in some well understood place - at destruction of bs_env?
       IF (bs_env%rtp_method == rtp_method_bse) THEN
+         t1 = m_walltime()
          CALL cp_fm_create(bs_env%fm_W_MIC_freq_zero, bs_env%fm_W_MIC_freq%matrix_struct)
          ! Set to zero
          CALL cp_fm_set_all(bs_env%fm_W_MIC_freq_zero, 0.0_dp)
@@ -1082,6 +1084,13 @@ CONTAINS
          END DO
          ! Done, save to file
          CALL fm_write(bs_env%fm_W_MIC_freq_zero, 0, "W_freq_rtp", qs_env)
+         ! Report calculation
+         IF (bs_env%unit_nr > 0) THEN
+            WRITE (bs_env%unit_nr, '(T2,A,I11,A,I3,A,F7.1,A)') &
+               'Computed W(f=0,k) for k-point batch', &
+               1, ' /', 1, &
+               ',    Execution time', m_walltime() - t1, ' s'
+         END IF
       END IF
 
       IF (bs_env%unit_nr > 0) WRITE (bs_env%unit_nr, '(A)') ' '
@@ -1153,7 +1162,7 @@ CONTAINS
                                            cfm_W_ikp_freq_j, ikp, bs_env%kpoints_chi_eps_W, &
                                            "RI_AUX")
             ! non-kpoint extrapolated
-            IF (ikp .LE. bs_env%nkp_chi_eps_W_orig) THEN
+            IF (ikp <= bs_env%nkp_chi_eps_W_orig) THEN
                CALL MIC_contribution_from_ikp(bs_env, qs_env, bs_env%fm_W_MIC_freq_1_no_extra, &
                                               cfm_W_ikp_freq_j, ikp, bs_env%kpoints_chi_eps_W, &
                                               "RI_AUX", wkp_ext=bs_env%wkp_orig)
@@ -1162,7 +1171,7 @@ CONTAINS
          END IF
 
          ! for all ω_j, we need to compute W^MIC without k-point extrpolation
-         IF (ikp .LE. bs_env%nkp_chi_eps_W_orig) THEN
+         IF (ikp <= bs_env%nkp_chi_eps_W_orig) THEN
             CALL MIC_contribution_from_ikp(bs_env, qs_env, fm_W_MIC_freq_j, cfm_W_ikp_freq_j, &
                                            ikp, bs_env%kpoints_chi_eps_W, "RI_AUX", &
                                            wkp_ext=bs_env%wkp_orig)
@@ -1184,8 +1193,8 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'clean_lower_part'
 
-      INTEGER                                            :: handle, i_global, i_row, j_col, &
-                                                            j_global, ncol_local, nrow_local
+      INTEGER                                            :: handle, i_row, j_col, j_global, &
+                                                            ncol_local, nrow_local
       INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
 
       CALL timeset(routineN, handle)
@@ -1194,11 +1203,10 @@ CONTAINS
                            nrow_local=nrow_local, ncol_local=ncol_local, &
                            row_indices=row_indices, col_indices=col_indices)
 
-      DO i_row = 1, nrow_local
-         DO j_col = 1, ncol_local
-            i_global = row_indices(i_row)
-            j_global = col_indices(j_col)
-            IF (j_global < i_global) cfm_mat%local_data(i_row, j_col) = z_zero
+      DO j_col = 1, ncol_local
+         j_global = col_indices(j_col)
+         DO i_row = 1, nrow_local
+            IF (j_global < row_indices(i_row)) cfm_mat%local_data(i_row, j_col) = z_zero
          END DO
       END DO
 
@@ -1225,20 +1233,20 @@ CONTAINS
       CALL cp_fm_get_info(matrix=fm_W_MIC_time(1), nrow_local=nrow_local, ncol_local=ncol_local)
 
       DO i_t = 1, bs_env%num_time_freq_points
-         DO i = 1, nrow_local
-            DO j = 1, ncol_local
+         DO j = 1, ncol_local
+            DO i = 1, nrow_local
 
                W_extra_1 = bs_env%fm_W_MIC_freq_1_extra%local_data(i, j)
                W_no_extra_1 = bs_env%fm_W_MIC_freq_1_no_extra%local_data(i, j)
 
                IF (ABS(W_no_extra_1) > 1.0E-13) THEN
-                  extrapol_factor = W_extra_1/W_no_extra_1
+                  extrapol_factor = ABS(W_extra_1/W_no_extra_1)
                ELSE
                   extrapol_factor = 1.0_dp
                END IF
 
                ! reset extrapolation factor if it is very large
-               IF (ABS(extrapol_factor) > 10.0_dp) extrapol_factor = 1.0_dp
+               IF (extrapol_factor > 10.0_dp) extrapol_factor = 1.0_dp
 
                fm_W_MIC_time(i_t)%local_data(i, j) = fm_W_MIC_time(i_t)%local_data(i, j) &
                                                      *extrapol_factor
@@ -1434,7 +1442,7 @@ CONTAINS
 
       ! 2. b) Inversion of ε(iω_j,k) using its Cholesky decomposition
       CALL cp_cfm_cholesky_invert(cfm_eps_ikp_freq_j)
-      CALL cp_cfm_upper_to_full(cfm_eps_ikp_freq_j)
+      CALL cp_cfm_uplo_to_full(cfm_eps_ikp_freq_j)
 
       ! 2. c) ε^-1(iω_j,k)-Id
       CALL cfm_add_on_diag(cfm_eps_ikp_freq_j, -z_one)
@@ -1467,8 +1475,8 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'cfm_add_on_diag'
 
-      INTEGER                                            :: handle, i_global, i_row, j_col, &
-                                                            j_global, ncol_local, nrow_local
+      INTEGER                                            :: handle, i_row, j_col, j_global, &
+                                                            ncol_local, nrow_local
       INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
 
       CALL timeset(routineN, handle)
@@ -1483,8 +1491,7 @@ CONTAINS
       DO j_col = 1, ncol_local
          j_global = col_indices(j_col)
          DO i_row = 1, nrow_local
-            i_global = row_indices(i_row)
-            IF (j_global == i_global) THEN
+            IF (j_global == row_indices(i_row)) THEN
                cfm%local_data(i_row, j_col) = cfm%local_data(i_row, j_col) + alpha
             END IF
          END DO
@@ -1511,7 +1518,7 @@ CONTAINS
 
       ALLOCATE (fm_W_MIC_time(bs_env%num_time_freq_points))
       DO i_t = 1, bs_env%num_time_freq_points
-         CALL cp_fm_create(fm_W_MIC_time(i_t), bs_env%fm_RI_RI%matrix_struct)
+         CALL cp_fm_create(fm_W_MIC_time(i_t), bs_env%fm_RI_RI%matrix_struct, set_zero=.TRUE.)
       END DO
 
       CALL timestop(handle)
@@ -1910,8 +1917,8 @@ CONTAINS
       ALLOCATE (mat_Sigma_neg_tau(bs_env%num_time_freq_points, bs_env%n_spin))
       ALLOCATE (mat_Sigma_pos_tau(bs_env%num_time_freq_points, bs_env%n_spin))
 
-      DO i_t = 1, bs_env%num_time_freq_points
-         DO ispin = 1, bs_env%n_spin
+      DO ispin = 1, bs_env%n_spin
+         DO i_t = 1, bs_env%num_time_freq_points
             ALLOCATE (mat_Sigma_neg_tau(i_t, ispin)%matrix)
             ALLOCATE (mat_Sigma_pos_tau(i_t, ispin)%matrix)
             CALL dbcsr_create(mat_Sigma_neg_tau(i_t, ispin)%matrix, template=bs_env%mat_ao_ao%matrix)
@@ -2089,8 +2096,8 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       ALLOCATE (fm_Sigma_c_Gamma_time(bs_env%num_time_freq_points, 2, bs_env%n_spin))
-      DO i_t = 1, bs_env%num_time_freq_points
-         DO ispin = 1, bs_env%n_spin
+      DO ispin = 1, bs_env%n_spin
+         DO i_t = 1, bs_env%num_time_freq_points
             DO pos_neg = 1, 2
                CALL cp_fm_create(fm_Sigma_c_Gamma_time(i_t, pos_neg, ispin), &
                                  bs_env%fm_s_Gamma%matrix_struct)

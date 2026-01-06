@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -47,7 +47,7 @@ MODULE rpa_sigma_functional
       TYPE(cp_fm_type)                                   :: fm_evec = cp_fm_type()
       REAL(KIND=dp), DIMENSION(:), ALLOCATABLE           :: sigma_eigenvalue
       INTEGER                                            :: dimen_RI_red = 0
-   END TYPE
+   END TYPE rpa_sigma_type
 
 CONTAINS
 

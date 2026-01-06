@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -63,6 +63,7 @@ MODULE qs_energy_init
    USE ri_environment_methods,          ONLY: build_ri_matrices
    USE se_core_core,                    ONLY: se_core_core_interaction
    USE se_core_matrix,                  ONLY: build_se_core_matrix
+   USE tblite_interface,                ONLY: build_tblite_matrices
    USE xtb_matrices,                    ONLY: build_xtb_matrices
 #include "./base/base_uses.f90"
 
@@ -306,7 +307,11 @@ CONTAINS
                                         calculate_forces=.FALSE.)
          CALL qs_env_update_s_mstruct(qs_env)
       ELSEIF (dft_control%qs_control%xtb) THEN
-         CALL build_xtb_matrices(qs_env=qs_env, calculate_forces=.FALSE.)
+         IF (dft_control%qs_control%xtb_control%do_tblite) THEN
+            CALL build_tblite_matrices(qs_env=qs_env, calculate_forces=.FALSE.)
+         ELSE
+            CALL build_xtb_matrices(qs_env=qs_env, calculate_forces=.FALSE.)
+         END IF
          CALL qs_env_update_s_mstruct(qs_env)
       ELSE
          CALL build_core_hamiltonian_matrix(qs_env=qs_env, calculate_forces=.FALSE.)

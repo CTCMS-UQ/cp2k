@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -144,7 +144,7 @@ CONTAINS
          DO i_row = 1, nrow_local
             i_global = row_indices(i_row)
             IF (j_global == i_global) THEN
-               IF (i_global .LE. nao) THEN
+               IF (i_global <= nao) THEN
                   cfm%local_data(i_row, j_col) = cfm%local_data(i_row, j_col) + &
                                                  alpha(i_global)*z_one
                ELSE

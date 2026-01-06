@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -258,7 +258,7 @@ CONTAINS
 !$OMP PRIVATE (ikind, jkind, iatom, jatom, cell_b, &
 !$OMP          iab, irow, icol, blocks_rv, &
 !$OMP          found, iac, ibc, alist_ac, alist_bc, &
-!$OMP          na, np, nb, kkind, kac, kbc, i, &
+!$OMP          na, np, nb, kkind, kac, kbc, i, lock_num, &
 !$OMP          hash, natom, acint, bcint, achint, bchint)
 
 !$OMP SINGLE
@@ -453,7 +453,7 @@ CONTAINS
 !$OMP PRIVATE (kx_block,ky_block,kz_block,kab,qab,tab,ikind,jkind,iatom,jatom,rab,rac,rbc,cell, &
 !$OMP          basis_set_a, basis_set_b, nseta, ncoa, ncob, ltab, nsetb, tkab, &
 !$OMP          irow, icol, found, trans, sgfa, sgfb, iset, jset, &
-!$OMP          hash, hash1, hash2, iatom8, slot) &
+!$OMP          hash, hash1, hash2, iatom8, slot, lock_num) &
 !$OMP PRIVATE (first_sgfa, la_max, la_min, npgfa, nsgfa, rpgfa, set_radius_a, zeta, scon_a) &
 !$OMP PRIVATE (first_sgfb, lb_max, lb_min, npgfb, nsgfb, rpgfb, set_radius_b, zetb, scon_b) &
 !$OMP SHARED(particle_set, direction_or) &
@@ -1258,7 +1258,7 @@ CONTAINS
             CPASSERT(img == 1)
 
             ! At the start of a block of tasks, get atom data (and kind data, if needed)
-            IF (itask .EQ. task_list%taskstart(ipair, igrid_level)) THEN
+            IF (itask == task_list%taskstart(ipair, igrid_level)) THEN
 
                ikind = particle_set(iatom)%atomic_kind%kind_number
                jkind = particle_set(jatom)%atomic_kind%kind_number
@@ -1271,7 +1271,7 @@ CONTAINS
                   bcol = iatom
                END IF
 
-               IF (ikind .NE. ikind_old) THEN
+               IF (ikind /= ikind_old) THEN
                   CALL get_qs_kind(qs_kind_set(ikind), &
                                    basis_set=orb_basis_set, basis_type=my_basis_type)
 
@@ -1288,7 +1288,7 @@ CONTAINS
                                          zet=zeta)
                END IF
 
-               IF (jkind .NE. jkind_old) THEN
+               IF (jkind /= jkind_old) THEN
                   CALL get_qs_kind(qs_kind_set(jkind), &
                                    basis_set=orb_basis_set, basis_type=my_basis_type)
                   CALL get_gto_basis_set(gto_basis_set=orb_basis_set, &
@@ -1322,7 +1322,7 @@ CONTAINS
 
             END IF
 
-            IF (atom_pair_changed .OR. iset_old .NE. iset .OR. jset_old .NE. jset) THEN
+            IF (atom_pair_changed .OR. iset_old /= iset .OR. jset_old /= jset) THEN
                ! We reuse the hab(:, :) array to put the new integrals in.
 
                ncoa = npgfa(iset)*ncoset(la_max(iset))
@@ -1397,7 +1397,7 @@ CONTAINS
                jset_new = tasks(itask + 1)%jset
                ipgf_new = tasks(itask + 1)%ipgf
                jpgf_new = tasks(itask + 1)%jpgf
-               IF (iset_new .NE. iset .OR. jset_new .NE. jset) THEN
+               IF (iset_new /= iset .OR. jset_new /= jset) THEN
                   new_set_pair_coming = .TRUE.
                END IF
             ELSE
@@ -1624,7 +1624,7 @@ CONTAINS
 !$OMP SHARED  (basis_set, matrix_rv, direction_Or, &
 !$OMP          sap_int, nkind, eps_ppnl, locks, sab_all) &
 !$OMP PRIVATE (ikind, jkind, iatom, jatom, cell_b, rab, &
-!$OMP          iab, irow, icol, blocks_rvr, &
+!$OMP          iab, irow, icol, blocks_rvr, lock_num, &
 !$OMP          found, iac, ibc, alist_ac, alist_bc, &
 !$OMP          na, np, nb, kkind, kac, kbc, i, j, &
 !$OMP          hash, natom, acint, bcint, achint, bchint)
@@ -1922,7 +1922,7 @@ CONTAINS
 !$OMP SHARED  (basis_set, matrix_rv, &
 !$OMP          sap_int, nkind, eps_ppnl, locks, sab_orb) &
 !$OMP PRIVATE (ikind, jkind, iatom, jatom, cell_b, rab, &
-!$OMP          iab, irow, icol, blocks_rv, &
+!$OMP          iab, irow, icol, blocks_rv, lock_num, &
 !$OMP          found, iac, ibc, alist_ac, alist_bc, &
 !$OMP          na, np, nb, kkind, kac, kbc, i, j, &
 !$OMP          hash, natom, acint, bcint, achint, bchint)
@@ -2336,7 +2336,7 @@ CONTAINS
 !$OMP SHARED  (basis_set, matrix_rv, &
 !$OMP          sap_int, nkind, eps_ppnl, locks, sab_all) &
 !$OMP PRIVATE (ikind, jkind, iatom, jatom, cell_b, rab, &
-!$OMP          iab, irow, icol, blocks_rv, &
+!$OMP          iab, irow, icol, blocks_rv, lock_num, &
 !$OMP          found, iac, ibc, alist_ac, alist_bc, &
 !$OMP          na, np, nb, kkind, kac, kbc, i, &
 !$OMP          hash, natom, acint, bcint, achint, bchint)

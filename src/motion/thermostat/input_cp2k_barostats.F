@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -99,7 +99,7 @@ CONTAINS
                           " to relax the cell only along specific cartesian axis", &
                           usage="VIRIAL (XYZ | X | Y | Z | XY| XZ | YZ)", &
                           enum_c_vals=s2a("XYZ", "X", "Y", "Z", "XY", "XZ", "YZ"), &
-                          enum_i_vals=(/do_clv_xyz, do_clv_x, do_clv_y, do_clv_z, do_clv_xy, do_clv_xz, do_clv_yz/), &
+                          enum_i_vals=[do_clv_xyz, do_clv_x, do_clv_y, do_clv_z, do_clv_xy, do_clv_xz, do_clv_yz], &
                           default_i_val=do_clv_xyz)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)

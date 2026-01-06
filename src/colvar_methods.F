@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -1273,7 +1273,7 @@ CONTAINS
             CALL create_colvar_xyz_d_section(section)
             keyword => section_get_keyword(section, "COMPONENT")
             CALL keyword_get(keyword, enum=enum)
-            tag_comp = enum_i2c(enum, colvar%xyz_diag_param%component)
+            tag_comp = TRIM(enum_i2c(enum, colvar%xyz_diag_param%component))
             CALL section_release(section)
 
             WRITE (iw, '( A,T57,3I8)') ' COLVARS| POSITION ('//TRIM(tag_comp) &
@@ -1283,10 +1283,10 @@ CONTAINS
             CALL create_colvar_xyz_od_section(section)
             keyword => section_get_keyword(section, "COMPONENT_A")
             CALL keyword_get(keyword, enum=enum)
-            tag_comp1 = enum_i2c(enum, colvar%xyz_outerdiag_param%components(1))
+            tag_comp1 = TRIM(enum_i2c(enum, colvar%xyz_outerdiag_param%components(1)))
             keyword => section_get_keyword(section, "COMPONENT_B")
             CALL keyword_get(keyword, enum=enum)
-            tag_comp2 = enum_i2c(enum, colvar%xyz_outerdiag_param%components(2))
+            tag_comp2 = TRIM(enum_i2c(enum, colvar%xyz_outerdiag_param%components(2)))
             CALL section_release(section)
 
             WRITE (iw, '( A,T57,3I8)') ' COLVARS| CROSS TERM POSITION ('//TRIM(tag_comp1) &
@@ -2507,7 +2507,7 @@ CONTAINS
       t = MIN(1.0_dp, ABS(t))*SIGN(1.0_dp, t)
       colvar%ss = ACOS(t)
 
-      IF ((ABS(colvar%ss) .LT. tolerance_acos) .OR. (ABS(colvar%ss - pi) .LT. tolerance_acos)) THEN
+      IF ((ABS(colvar%ss) < tolerance_acos) .OR. (ABS(colvar%ss - pi) < tolerance_acos)) THEN
          fmod = 0.0_dp
       ELSE
          fmod = -1.0_dp/SIN(colvar%ss)
@@ -2675,7 +2675,7 @@ CONTAINS
       t2 = 1.0_dp/(a*b**3.0_dp)
       t3 = DOT_PRODUCT(xij, xkj)
       colvar%ss = ACOS(t3*t0)
-      IF ((ABS(colvar%ss) .LT. tolerance_acos) .OR. (ABS(colvar%ss - pi) .LT. tolerance_acos)) THEN
+      IF ((ABS(colvar%ss) < tolerance_acos) .OR. (ABS(colvar%ss - pi) < tolerance_acos)) THEN
          fmod = 0.0_dp
       ELSE
          fmod = -1.0_dp/SIN(colvar%ss)
@@ -2826,7 +2826,7 @@ CONTAINS
       t2 = 1.0_dp/(a*b**3.0_dp)
       t3 = DOT_PRODUCT(xij, xkj)
       colvar%ss = ACOS(t3*t0)
-      IF ((ABS(colvar%ss) .LT. tolerance_acos) .OR. (ABS(colvar%ss - pi) .LT. tolerance_acos)) THEN
+      IF ((ABS(colvar%ss) < tolerance_acos) .OR. (ABS(colvar%ss - pi) < tolerance_acos)) THEN
          fmod = 0.0_dp
       ELSE
          fmod = -1.0_dp/SIN(colvar%ss)
@@ -3005,17 +3005,17 @@ CONTAINS
       rt2 = xt*xt + yt*yt + zt*zt
       ru2 = xu*xu + yu*yu + zu*zu
       rtru = SQRT(rt2*ru2)
-      IF (rtru .NE. 0.0_dp) THEN
+      IF (rtru /= 0.0_dp) THEN
          rcb = SQRT(xcb*xcb + ycb*ycb + zcb*zcb)
          cosine = (xt*xu + yt*yu + zt*zu)/rtru
          sine = (xcb*xtu + ycb*ytu + zcb*ztu)/(rcb*rtru)
          cosine = MIN(1.0_dp, MAX(-1.0_dp, cosine))
          angle = ACOS(cosine)
-         IF (sine .LT. 0.0_dp) angle = -angle
+         IF (sine < 0.0_dp) angle = -angle
          !
          dt = angle ! [rad]
          dt = MOD(2.0E4_dp*pi + dt - o0, 2.0_dp*pi)
-         IF (dt .GT. pi) dt = dt - 2.0_dp*pi
+         IF (dt > pi) dt = dt - 2.0_dp*pi
          dt = o0 + dt
          colvar%torsion_param%o0 = dt
          !
@@ -3141,7 +3141,7 @@ CONTAINS
          CALL cp_subsys_get(subsys, particles=particles_i)
          my_particles => particles_i%els
       END IF
-      CPASSERT(r1cut .LT. rcut)
+      CPASSERT(r1cut < rcut)
       denominator_tolerance = 1.0E-8_dp
 
       !ri_step=0.1
@@ -3195,16 +3195,16 @@ CONTAINS
                      DO bb = -ncells(2), ncells(2)
                         DO cc = -ncells(3), ncells(3)
                            ! do not include the central atom
-                           IF (i == j .AND. aa .EQ. 0 .AND. bb .EQ. 0 .AND. cc .EQ. 0) CYCLE
+                           IF (i == j .AND. aa == 0 .AND. bb == 0 .AND. cc == 0) CYCLE
                            shift(1) = REAL(aa, KIND=dp)
                            shift(2) = REAL(bb, KIND=dp)
                            shift(3) = REAL(cc, KIND=dp)
                            xij = MATMUL(cell%hmat, ss0(:) + shift(:))
                            rij = SQRT(DOT_PRODUCT(xij, xij))
                            !IF (rij > rcut) THEN
-                           !   IF (mm.EQ.0) WRITE(*,'(A8,4F10.5)') " --", shift, rij
+                           !   IF (mm==0) WRITE(*,'(A8,4F10.5)') " --", shift, rij
                            !ELSE
-                           !   IF (mm.EQ.0) WRITE(*,'(A8,4F10.5)') " ++", shift, rij
+                           !   IF (mm==0) WRITE(*,'(A8,4F10.5)') " ++", shift, rij
                            !ENDIF
                            IF (rij > rcut) CYCLE
 
@@ -3222,7 +3222,7 @@ CONTAINS
                   IF (i == j) CYCLE jloop
                   xij(:) = xpj(:) - xpi(:)
                   rij = SQRT(DOT_PRODUCT(xij, xij))
-                  IF (rij > rcut) CYCLE
+                  IF (rij > rcut) CYCLE jloop
 
                   ! update qlm
                   CALL accumulate_qlm_over_neigbors(xij, rij, rcut, r1cut, &
@@ -3236,13 +3236,13 @@ CONTAINS
             ! this factor is necessary if one whishes to sum over m=0,L
             ! instead of m=-L,+L. This is off now because it is cheap and safe
             fact = 1.0_dp
-            !IF (ABS(mm) .GT. 0) THEN
+            !IF (ABS(mm) > 0) THEN
             !   fact = 2.0_dp
             !ELSE
             !   fact = 1.0_dp
             !ENDIF
 
-            IF (nbond .LT. denominator_tolerance) THEN
+            IF (nbond < denominator_tolerance) THEN
                CPWARN("QPARM: number of neighbors is very close to zero!")
             END IF
 
@@ -3311,12 +3311,12 @@ CONTAINS
       !bond = 1.0_dp/(1.0_dp+EXP(alpha*(rij-rcut)))
       ! RZK: infinitely differentiable smooth cutoff function
       ! that is precisely 1.0 below r1cut and precisely 0.0 above rcut
-      IF (rij .GT. rcut) THEN
+      IF (rij > rcut) THEN
          !bond = 0.0_dp
          !exp_fac = 0.0_dp
          RETURN
       ELSE
-         IF (rij .LT. r1cut) THEN
+         IF (rij < r1cut) THEN
             bond = 1.0_dp
             exp_fac = 0.0_dp
          ELSE
@@ -3330,8 +3330,8 @@ CONTAINS
       END IF
       ! compute continuous bond order
       nbond = nbond + bond
-      IF (ABS(xij(1)) .LT. denominator_tolerance &
-          .AND. ABS(xij(2)) .LT. denominator_tolerance) THEN
+      IF (ABS(xij(1)) < denominator_tolerance &
+          .AND. ABS(xij(2)) < denominator_tolerance) THEN
          fi = 0.0_dp
       ELSE
          fi = ATAN2(xij(2), xij(1))
@@ -4225,7 +4225,7 @@ CONTAINS
             j = colvar%coord_param%i_at_to(jj)
             CALL get_coordinates(colvar, j, xpj, my_particles)
             ! define coordination of atom A with itself to be 0. also fixes rij==0 for the force calculation
-            IF (i .EQ. j) CYCLE
+            IF (i == j) CYCLE
             ss = MATMUL(cell%h_inv, xpi(:) - xpj(:))
             ss = ss - NINT(ss)
             xij = MATMUL(cell%hmat, ss)
@@ -4252,7 +4252,7 @@ CONTAINS
                func_k = 0.0_dp
                DO kk = 1, n_atoms_to_b
                   k = colvar%coord_param%i_at_to_b(kk)
-                  IF (k .EQ. j) CYCLE
+                  IF (k == j) CYCLE
                   CALL get_coordinates(colvar, k, xpk, my_particles)
                   ss = MATMUL(cell%h_inv, xpj(:) - xpk(:))
                   ss = ss - NINT(ss)
@@ -5756,7 +5756,7 @@ CONTAINS
       INTEGER                                            :: count1, i
 
       k = 1
-      IF (v_count .LT. ncol) THEN
+      IF (v_count < ncol) THEN
          count1 = v_count + 1
          DO i = p_bounds(1, count1), p_bounds(2, count1)
             gp(count1) = REAL(i, KIND=dp)*grid_sp(count1)

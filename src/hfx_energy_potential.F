@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -31,10 +31,10 @@ MODULE hfx_energy_potential
                                  cp_print_key_unit_nr
    USE message_passing, ONLY: mp_para_env_type
    USE cp_dbcsr_api, ONLY: dbcsr_copy, &
-                           dbcsr_dot, &
                            dbcsr_get_matrix_type, &
                            dbcsr_p_type, &
-                           dbcsr_type_antisymmetric
+                           dbcsr_type_antisymmetric, &
+                           dbcsr_dot_threadsafe
    USE gamma, ONLY: init_md_ftable
    USE hfx_communication, ONLY: distribute_ks_matrix, &
                                 get_atomic_block_maps, &
@@ -133,7 +133,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE integrate_four_center(qs_env, x_data, ks_matrix, ehfx, rho_ao, hfx_section, para_env, &
                                     geometry_did_change, irep, distribute_fock_matrix, &
-                                    ispin)
+                                    ispin, nspins)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(hfx_type), DIMENSION(:, :), POINTER           :: x_data
@@ -146,6 +146,7 @@ CONTAINS
       INTEGER                                            :: irep
       LOGICAL, INTENT(IN)                                :: distribute_fock_matrix
       INTEGER, INTENT(IN)                                :: ispin
+      INTEGER, INTENT(IN), OPTIONAL                      :: nspins
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'integrate_four_center'
 
@@ -161,7 +162,7 @@ CONTAINS
       INTEGER :: katom_start, kind_kind_idx, kkind, kset, l_max, latom, latom_block, latom_end, &
                  latom_start, lkind, lset, ma, max_am, max_pgf, max_set, mb, my_bin_id, my_bin_size, &
                  my_thread_id, n_threads, natom, nbits, ncob, ncos_max, nints, nkimages, nkind, &
-                 nneighbors, nseta, nsetb, nsgf_max, nspins, pa, sgfb, shm_task_counter, shm_total_bins, &
+                 nneighbors, nseta, nsetb, nsgf_max, my_nspins, pa, sgfb, shm_task_counter, shm_total_bins, &
                  sphi_a_u1, sphi_a_u2, sphi_a_u3, sphi_b_u1, sphi_b_u2, sphi_b_u3, sphi_c_u1, sphi_c_u2, &
                  sphi_c_u3, sphi_d_u1, sphi_d_u2, sphi_d_u3, swap_id, tmp_i4, unit_id
       INTEGER(int_8) :: atom_block, counter, estimate_to_store_int, max_val_memory, &
@@ -261,7 +262,7 @@ CONTAINS
 
       logger => cp_get_default_logger()
 
-      is_anti_symmetric = dbcsr_get_matrix_type(rho_ao(1, 1)%matrix) .EQ. dbcsr_type_antisymmetric
+      is_anti_symmetric = dbcsr_get_matrix_type(rho_ao(1, 1)%matrix) == dbcsr_type_antisymmetric
 
       IF (my_geo_change) THEN
          CALL m_memory(memsize_before)
@@ -312,6 +313,10 @@ CONTAINS
 
       n_threads = 1
 !$    n_threads = omp_get_max_threads()
+
+      ! This initialization is needed to prevent a segmentation fault. The correct assigment is done below
+      my_nspins = 0
+      IF (PRESENT(nspins)) my_nspins = nspins
 
       shm_neris_total = 0
       shm_nprim_ints = 0
@@ -374,7 +379,8 @@ CONTAINS
 !$OMP                                  shm_pmax_block,&
 !$OMP                                  shm_atomic_pair_list,&
 !$OMP                                  shm_mem_compression_counter,&
-!$OMP                                  do_print_load_balance_info) &
+!$OMP                                  do_print_load_balance_info,&
+!$OMP                                  my_nspins) &
 !$OMP PRIVATE(ln_10,i_thread,actual_x_data,do_periodic,screening_parameter,potential_parameter,&
 !$OMP         general_parameter,load_balance_parameter,memory_parameter,cache_size,bits_max_val,&
 !$OMP         basis_parameter,basis_info,treat_lsd_in_core,ncpu,n_processes,neris_total,neris_incore,&
@@ -382,7 +388,7 @@ CONTAINS
 !$OMP         compression_factor_disk,nprim_ints,neris_tmp,max_val_memory,max_am,do_p_screening,&
 !$OMP         max_set,particle_set,atomic_kind_set,natom,kind_of,ncos_max,nsgf_max,ikind,&
 !$OMP         nseta,npgfa,la_max,nsgfa,primitive_integrals,pbd_buf,pbc_buf,pad_buf,pac_buf,kbd_buf,kbc_buf,&
-!$OMP         kad_buf,kac_buf,ee_work,ee_work2,ee_buffer1,ee_buffer2,ee_primitives_tmp,nspins,max_contraction,&
+!$OMP         kad_buf,kac_buf,ee_work,ee_work2,ee_buffer1,ee_buffer2,ee_primitives_tmp,max_contraction,&
 !$OMP         max_pgf,jkind,lb_max,nsetb,npgfb,first_sgfb,sphi_b,nsgfb,ncob,sgfb,nneighbors,pgf_list_ij,pgf_list_kl,&
 !$OMP         pgf_product_list,nimages,ks_fully_occ,subtr_size_mb,use_disk_storage,counter,do_disk_storage,&
 !$OMP         maxval_container_disk,maxval_cache_disk,integral_containers_disk,integral_caches_disk,eps_schwarz,&
@@ -517,7 +523,7 @@ CONTAINS
       ALLOCATE (ee_buffer2(ncos_max**4))
       ALLOCATE (ee_primitives_tmp(nsgf_max**4))
 
-      nspins = dft_control%nspins
+      IF (my_nspins == 0) my_nspins = dft_control%nspins
 
       ALLOCATE (max_contraction(max_set, natom))
 
@@ -537,7 +543,7 @@ CONTAINS
             sgfb = first_sgfb(1, jset)
             ! if the primitives are assumed to be all of max_val2, max_val2*p2s_b becomes
             ! the maximum value after multiplication with sphi_b
-            max_contraction(jset, jatom) = MAXVAL((/(SUM(ABS(sphi_b(1:ncob, i))), i=sgfb, sgfb + nsgfb(jset) - 1)/))
+            max_contraction(jset, jatom) = MAXVAL([(SUM(ABS(sphi_b(1:ncob, i))), i=sgfb, sgfb + nsgfb(jset) - 1)])
             max_pgf = MAX(max_pgf, npgfb(jset))
          END DO
       END DO
@@ -607,7 +613,7 @@ CONTAINS
       subtr_size_mb = 2_int_8*shm_block_offset(ncpu + 1)
       ! ** if non restricted ==> alpha/beta spin
       IF (.NOT. treat_lsd_in_core) THEN
-         IF (nspins == 2) subtr_size_mb = subtr_size_mb*2_int_8
+         IF (my_nspins == 2) subtr_size_mb = subtr_size_mb*2_int_8
       END IF
       ! ** Initial P only MAX(alpha,beta) (shared)
       IF (do_p_screening .OR. screening_parameter%do_p_screening_forces) THEN
@@ -719,7 +725,7 @@ CONTAINS
       !! Get the full density from all the processors
       NULLIFY (full_density_alpha, full_density_beta)
       ALLOCATE (full_density_alpha(shm_block_offset(ncpu + 1), nkimages))
-      IF (.NOT. treat_lsd_in_core .OR. nspins == 1) THEN
+      IF (.NOT. treat_lsd_in_core .OR. my_nspins == 1) THEN
          CALL timeset(routineN//"_getP", handle_getP)
          DO img = 1, nkimages
             CALL get_full_density(para_env, full_density_alpha(:, img), rho_ao(ispin, img)%matrix, shm_number_of_p_entries, &
@@ -727,7 +733,7 @@ CONTAINS
                                   kind_of, basis_parameter, get_max_vals_spin=.FALSE., antisymmetric=is_anti_symmetric)
          END DO
 
-         IF (nspins == 2) THEN
+         IF (my_nspins == 2) THEN
             ALLOCATE (full_density_beta(shm_block_offset(ncpu + 1), nkimages))
             DO img = 1, nkimages
                CALL get_full_density(para_env, full_density_beta(:, img), rho_ao(2, img)%matrix, shm_number_of_p_entries, &
@@ -798,7 +804,7 @@ CONTAINS
       full_ks_alpha = 0.0_dp
 
       IF (.NOT. treat_lsd_in_core) THEN
-         IF (nspins == 2) THEN
+         IF (my_nspins == 2) THEN
             ALLOCATE (shm_master_x_data%full_ks_beta(shm_block_offset(ncpu + 1), nkimages))
             full_ks_beta => shm_master_x_data%full_ks_beta
             full_ks_beta = 0.0_dp
@@ -840,7 +846,7 @@ CONTAINS
 !$OMP BARRIER
 
       !! Initialize a prefactor depending on the fraction and the number of spins
-      IF (nspins == 1) THEN
+      IF (my_nspins == 1) THEN
          fac = 0.5_dp*hf_fraction
       ELSE
          fac = 1.0_dp*hf_fraction
@@ -891,7 +897,7 @@ CONTAINS
       !! is taken into account by the following criterion:
       !!
       !! IF(katom+latom<=iatom+jatom)  THEN
-      !!   IF( ((iatom+jatom).EQ.(katom+latom) ) .AND.(katom<iatom)) CYCLE
+      !!   IF( ((iatom+jatom)==(katom+latom) ) .AND.(katom<iatom)) CYCLE
       !!
       !! Depending on the degeneracy of an integral the exchange contribution is multiplied by a corresponding
       !! factor ( symm_fac ).
@@ -1132,12 +1138,12 @@ CONTAINS
             latom_block = INT(MODULO(atom_block, nblocks)) + 1
             tmp_block = atom_block/nblocks
             katom_block = INT(MODULO(tmp_block, nblocks)) + 1
-            IF (latom_block < katom_block) CYCLE
+            IF (latom_block < katom_block) CYCLE atomic_blocks
             tmp_block = tmp_block/nblocks
             jatom_block = INT(MODULO(tmp_block, nblocks)) + 1
             tmp_block = tmp_block/nblocks
             iatom_block = INT(MODULO(tmp_block, nblocks)) + 1
-            IF (jatom_block < iatom_block) CYCLE
+            IF (jatom_block < iatom_block) CYCLE atomic_blocks
             my_current_counter = my_current_counter + 1
             IF (my_current_counter > distribution_energy%number_of_atom_quartets) EXIT atomic_blocks
 
@@ -1155,7 +1161,7 @@ CONTAINS
                               shm_pmax_block(latom_block, iatom_block), &
                               shm_pmax_block(katom_block, jatom_block))
 
-            IF (2.0_dp*coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) CYCLE
+            IF (2.0_dp*coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) CYCLE atomic_blocks
 
             CALL build_pair_list(natom, list_ij, set_list_ij, iatom_start, iatom_end, &
                                  jatom_start, jatom_end, &
@@ -1212,7 +1218,7 @@ CONTAINS
                   latom = list_kl%elements(i_list_kl)%pair(2)
 
                   IF (.NOT. (katom + latom <= iatom + jatom)) CYCLE
-                  IF (((iatom + jatom) .EQ. (katom + latom)) .AND. (katom < iatom)) CYCLE
+                  IF (((iatom + jatom) == (katom + latom)) .AND. (katom < iatom)) CYCLE
                   i_set_list_kl_start = list_kl%elements(i_list_kl)%set_bounds(1)
                   i_set_list_kl_stop = list_kl%elements(i_list_kl)%set_bounds(2)
                   kkind = list_kl%elements(i_list_kl)%kind_pair(1)
@@ -1679,7 +1685,7 @@ CONTAINS
                               iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, offset_ac_set, &
                               atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, atomic_offset_ac)
                            IF (.NOT. treat_lsd_in_core) THEN
-                              IF (nspins == 2) THEN
+                              IF (my_nspins == 2) THEN
                                  CALL update_fock_matrix( &
                                     nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                     fac, symm_fac, full_density_beta(:, 1), full_ks_beta(:, 1), &
@@ -1699,7 +1705,7 @@ CONTAINS
                               iset, jset, kset, lset, offset_bd_set, offset_bc_set, offset_ad_set, offset_ac_set, &
                               atomic_offset_bd, atomic_offset_bc, atomic_offset_ad, atomic_offset_ac)
                            IF (.NOT. treat_lsd_in_core) THEN
-                              IF (nspins == 2) THEN
+                              IF (my_nspins == 2) THEN
                                  CALL update_fock_matrix_as( &
                                     nsgfa(iset), nsgfb(jset), nsgfc(kset), nsgfd(lset), &
                                     fac, symm_fac, full_density_beta(:, 1), full_ks_beta(:, 1), &
@@ -1807,7 +1813,7 @@ CONTAINS
       mb_size_p = shm_block_offset(ncpu + 1)/1024/128
       mb_size_f = shm_block_offset(ncpu + 1)/1024/128
       IF (.NOT. treat_lsd_in_core) THEN
-         IF (nspins == 2) THEN
+         IF (my_nspins == 2) THEN
             mb_size_f = mb_size_f*2
             mb_size_p = mb_size_p*2
          END IF
@@ -1872,7 +1878,7 @@ CONTAINS
                         IF (i > j) THEN
                            full_ks_alpha(i, img) = (full_ks_alpha(i, img) + full_ks_alpha(j, img)*afac)
                            full_ks_alpha(j, img) = full_ks_alpha(i, img)*afac
-                           IF (.NOT. treat_lsd_in_core .AND. nspins == 2) THEN
+                           IF (.NOT. treat_lsd_in_core .AND. my_nspins == 2) THEN
                               full_ks_beta(i, img) = (full_ks_beta(i, img) + full_ks_beta(j, img)*afac)
                               full_ks_beta(j, img) = full_ks_beta(i, img)*afac
                            END IF
@@ -1880,7 +1886,7 @@ CONTAINS
                         ! ** For adiabatically rescaled functionals we need the energy coming from the diagonal elements
                         IF (i == j) THEN
                            ene_x_aa_diag = ene_x_aa_diag + full_ks_alpha(i, img)*full_density_alpha(i, img)
-                           IF (.NOT. treat_lsd_in_core .AND. nspins == 2) THEN
+                           IF (.NOT. treat_lsd_in_core .AND. my_nspins == 2) THEN
                               ene_x_bb_diag = ene_x_bb_diag + full_ks_beta(i, img)*full_density_beta(i, img)
                            END IF
                         END IF
@@ -1908,7 +1914,7 @@ CONTAINS
          NULLIFY (full_ks_alpha)
          DEALLOCATE (shm_master_x_data%full_ks_alpha)
          IF (.NOT. treat_lsd_in_core) THEN
-            IF (nspins == 2) THEN
+            IF (my_nspins == 2) THEN
                DO img = 1, nkimages
                   CALL distribute_ks_matrix(para_env, full_ks_beta(:, img), ks_matrix(2, img)%matrix, shm_number_of_p_entries, &
                                             shm_block_offset, kind_of, basis_parameter, &
@@ -1925,8 +1931,7 @@ CONTAINS
          !! ** Calculate the exchange energy
          ene_x_aa = 0.0_dp
          DO img = 1, nkimages
-            CALL dbcsr_dot(ks_matrix(ispin, img)%matrix, rho_ao(ispin, img)%matrix, &
-                           etmp)
+            CALL dbcsr_dot_threadsafe(ks_matrix(ispin, img)%matrix, rho_ao(ispin, img)%matrix, etmp)
             ene_x_aa = ene_x_aa + etmp
          END DO
          !for ADMMS, we need the exchange matrix k(d) for both spins
@@ -1937,10 +1942,9 @@ CONTAINS
          END IF
 
          ene_x_bb = 0.0_dp
-         IF (nspins == 2 .AND. .NOT. treat_lsd_in_core) THEN
+         IF (my_nspins == 2 .AND. .NOT. treat_lsd_in_core) THEN
             DO img = 1, nkimages
-               CALL dbcsr_dot(ks_matrix(2, img)%matrix, rho_ao(2, img)%matrix, &
-                              etmp)
+               CALL dbcsr_dot_threadsafe(ks_matrix(2, img)%matrix, rho_ao(2, img)%matrix, etmp)
                ene_x_bb = ene_x_bb + etmp
             END DO
             !for ADMMS, we need the exchange matrix k(d) for both spins
@@ -1963,7 +1967,7 @@ CONTAINS
          END DO
          ! ** Now correct
          ene_x_aa = (ene_x_aa + ene_x_aa_diag)*0.5_dp
-         IF (nspins == 2) THEN
+         IF (my_nspins == 2) THEN
             DO img = 1, nkimages
                DO pa = 1, SIZE(full_ks_beta, 1)
                   ene_x_bb = ene_x_bb + full_ks_beta(pa, img)*full_density_beta(pa, img)
@@ -1973,14 +1977,14 @@ CONTAINS
             ene_x_bb = (ene_x_bb + ene_x_bb_diag)*0.5_dp
          END IF
          CALL para_env%sum(ene_x_aa)
-         IF (nspins == 2) CALL para_env%sum(ene_x_bb)
+         IF (my_nspins == 2) CALL para_env%sum(ene_x_bb)
          ehfx = 0.5_dp*(ene_x_aa + ene_x_bb)
       END IF
 
       !! Print some memeory information if this is the first step
       IF (my_geo_change) THEN
-         tmp_i8(1:8) = (/shm_storage_counter_integrals, shm_neris_onthefly, shm_neris_incore, shm_neris_disk, &
-                         shm_neris_total, shm_stor_count_int_disk, shm_nprim_ints, shm_stor_count_max_val/)
+         tmp_i8(1:8) = [shm_storage_counter_integrals, shm_neris_onthefly, shm_neris_incore, shm_neris_disk, &
+                        shm_neris_total, shm_stor_count_int_disk, shm_nprim_ints, shm_stor_count_max_val]
          CALL para_env%sum(tmp_i8)
          shm_storage_counter_integrals = tmp_i8(1)
          shm_neris_onthefly = tmp_i8(2)
@@ -2128,7 +2132,7 @@ CONTAINS
 !$OMP MASTER
       DEALLOCATE (full_density_alpha)
       IF (.NOT. treat_lsd_in_core) THEN
-         IF (nspins == 2) THEN
+         IF (my_nspins == 2) THEN
             DEALLOCATE (full_density_beta)
          END IF
       END IF
@@ -2958,7 +2962,7 @@ CONTAINS
             DO mb = 1, mb_max
                DO ma = 1, ma_max
                   iint = iint + 1
-                  IF (ABS(prim(iint)) .GT. 0.0000000000001) &
+                  IF (ABS(prim(iint)) > 0.0000000000001) &
                      WRITE (99, *) atom_offsets(i, 1) + ma + set_offsets(iset, 1, i, 1) - 1, &
                      atom_offsets(j, 1) + ma + set_offsets(jset, 1, j, 1) - 1, &
                      atom_offsets(k, 1) + ma + set_offsets(kset, 1, k, 1) - 1, &

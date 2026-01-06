@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -12,20 +12,25 @@ MODULE qs_tddfpt2_methods
    USE atomic_kind_types,               ONLY: atomic_kind_type
    USE bibliography,                    ONLY: Grimme2013,&
                                               Grimme2016,&
+                                              Hernandez2025,&
                                               Iannuzzi2005,&
                                               cite_reference
    USE cell_types,                      ONLY: cell_type
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_control_types,                ONLY: dft_control_type,&
+                                              rixs_control_type,&
                                               tddfpt2_control_type
    USE cp_dbcsr_api,                    ONLY: dbcsr_p_type
    USE cp_dbcsr_operations,             ONLY: dbcsr_deallocate_matrix_set
    USE cp_fm_pool_types,                ONLY: fm_pool_create_fm
-   USE cp_fm_struct,                    ONLY: cp_fm_struct_type
+   USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
+                                              cp_fm_struct_release,&
+                                              cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_get_info,&
                                               cp_fm_release,&
                                               cp_fm_to_fm,&
+                                              cp_fm_to_fm_submat,&
                                               cp_fm_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
@@ -43,8 +48,8 @@ MODULE qs_tddfpt2_methods
                                               hfx_create
    USE input_constants,                 ONLY: &
         do_admm_aux_exch_func_none, do_admm_basis_projection, do_admm_exch_scaling_none, &
-        do_admm_purify_none, do_potential_truncated, tddfpt_dipole_velocity, tddfpt_kernel_full, &
-        tddfpt_kernel_none, tddfpt_kernel_stda
+        do_admm_purify_none, do_potential_truncated, no_sf_tddfpt, tddfpt_dipole_velocity, &
+        tddfpt_kernel_full, tddfpt_kernel_none, tddfpt_kernel_stda, tddfpt_sf_col, tddfpt_sf_noncol
    USE input_section_types,             ONLY: section_vals_get,&
                                               section_vals_get_subs_vals,&
                                               section_vals_type,&
@@ -81,6 +86,7 @@ MODULE qs_tddfpt2_methods
    USE qs_tddfpt2_lri_utils,            ONLY: tddfpt2_lri_init
    USE qs_tddfpt2_properties,           ONLY: tddfpt_dipole_operator,&
                                               tddfpt_print_excitation_analysis,&
+                                              tddfpt_print_exciton_descriptors,&
                                               tddfpt_print_nto_analysis,&
                                               tddfpt_print_summary
    USE qs_tddfpt2_restart,              ONLY: tddfpt_read_restart,&
@@ -107,6 +113,8 @@ MODULE qs_tddfpt2_methods
                                               tddfpt_init_mos,&
                                               tddfpt_oecorr,&
                                               tddfpt_release_ground_state_mos
+   USE rixs_types,                      ONLY: rixs_env_type,&
+                                              tddfpt2_valence_type
    USE string_utilities,                ONLY: integer_to_string
    USE xc_write_output,                 ONLY: xc_write
 #include "./base/base_uses.f90"
@@ -129,18 +137,21 @@ MODULE qs_tddfpt2_methods
 CONTAINS
 
 ! **************************************************************************************************
-!> \brief Perform TDDFPT calculation.
+!> \brief Perform TDDFPT calculation. If calc_forces then it also builds the response vector for the
+!>        Z-vector method and calculates some contributions to the force
 !> \param qs_env  Quickstep environment
 !> \param calc_forces ...
+!> \param rixs_env ...
 !> \par History
 !>    * 05.2016 created [Sergey Chulkov]
 !>    * 06.2016 refactored to be used with Davidson eigensolver [Sergey Chulkov]
 !>    * 03.2017 cleaned and refactored [Sergey Chulkov]
 !> \note Based on the subroutines tddfpt_env_init(), and tddfpt_env_deallocate().
 ! **************************************************************************************************
-   SUBROUTINE tddfpt(qs_env, calc_forces)
+   SUBROUTINE tddfpt(qs_env, calc_forces, rixs_env)
       TYPE(qs_environment_type), POINTER                 :: qs_env
       LOGICAL, INTENT(IN)                                :: calc_forces
+      TYPE(rixs_env_type), OPTIONAL, POINTER             :: rixs_env
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'tddfpt'
 
@@ -149,15 +160,15 @@ CONTAINS
                                                             nstate_max, nstates, nvirt, old_state
       INTEGER, DIMENSION(maxspins)                       :: nactive
       LOGICAL                                            :: do_admm, do_exck, do_hfx, do_hfxlr, &
-                                                            do_hfxsr, do_soc, lmult_tmp, &
-                                                            state_change
+                                                            do_hfxsr, do_rixs, do_sf, do_soc, &
+                                                            lmult_tmp, state_change
       REAL(kind=dp)                                      :: gsmin, gsval, xsval
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals, ostrength
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: matrix_struct
-      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: my_mos
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: my_active, my_mos
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: dipole_op_mos_occ, evects, S_evects
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks, matrix_ks_oep, matrix_s, &
@@ -172,12 +183,14 @@ CONTAINS
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_scf_env_type), POINTER                     :: scf_env
+      TYPE(rixs_control_type), POINTER                   :: rixs_control
       TYPE(section_vals_type), POINTER                   :: hfxsr_section, kernel_section, &
                                                             lri_section, soc_section, &
                                                             tddfpt_print_section, tddfpt_section, &
                                                             xc_section
       TYPE(stda_env_type), TARGET                        :: stda_kernel
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
+      TYPE(tddfpt2_valence_type), POINTER                :: valence_state
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          POINTER                                         :: gs_mos
       TYPE(tddfpt_subgroup_env_type)                     :: sub_env
@@ -189,8 +202,7 @@ CONTAINS
       logger => cp_get_default_logger()
 
       ! input section print/xc
-      NULLIFY (tddfpt_section)
-      tddfpt_section => section_vals_get_subs_vals(qs_env%input, "PROPERTIES%TDDFPT")
+      NULLIFY (tddfpt_section, tddfpt_control)
 
       CALL tddfpt_input(qs_env, do_hfx, do_admm, do_exck, &
                         do_hfxsr, do_hfxlr, xc_section, tddfpt_print_section, &
@@ -206,8 +218,20 @@ CONTAINS
                       matrix_ks=matrix_ks, &
                       matrix_s=matrix_s, &
                       mos=mos, &
-                      scf_env=scf_env)
-      tddfpt_control => dft_control%tddfpt2_control
+                      scf_env=scf_env, &
+                      do_rixs=do_rixs)
+
+      IF (do_rixs) THEN
+         tddfpt_section => section_vals_get_subs_vals(qs_env%input, "PROPERTIES%RIXS%TDDFPT")
+         NULLIFY (rixs_control, valence_state)
+         rixs_control => dft_control%rixs_control
+         tddfpt_control => rixs_control%tddfpt2_control
+         valence_state => rixs_env%valence_state
+      ELSE
+         tddfpt_section => section_vals_get_subs_vals(qs_env%input, "PROPERTIES%TDDFPT")
+         tddfpt_control => dft_control%tddfpt2_control
+      END IF
+
       tddfpt_control%do_hfx = do_hfx
       tddfpt_control%do_admm = do_admm
       tddfpt_control%do_hfxsr = do_hfxsr
@@ -215,6 +239,8 @@ CONTAINS
       tddfpt_control%hfxsr_re_int = .TRUE.
       tddfpt_control%do_hfxlr = do_hfxlr
       tddfpt_control%do_exck = do_exck
+      do_sf = tddfpt_control%spinflip /= no_sf_tddfpt
+      IF (do_sf) CALL cite_reference(Hernandez2025)
       IF (tddfpt_control%do_hfxlr) THEN
          kernel_section => section_vals_get_subs_vals(tddfpt_section, "XC%HFX_KERNEL%HFXLR")
          CALL section_vals_val_get(kernel_section, "RCUT", r_val=tddfpt_control%hfxlr_rcut)
@@ -239,9 +265,9 @@ CONTAINS
 
       CALL tddfpt_header(log_unit)
       CALL kernel_info(log_unit, dft_control, tddfpt_control, xc_section)
+
       ! obtain occupied and virtual (unoccupied) ground-state Kohn-Sham orbitals
       NULLIFY (gs_mos)
-
       CALL tddfpt_init_mos(qs_env, gs_mos, log_unit)
 
       ! obtain smeared occupation numbers
@@ -258,6 +284,10 @@ CONTAINS
       END IF
 
       IF (ASSOCIATED(matrix_ks_oep)) matrix_ks => matrix_ks_oep
+
+      ! determine active orbitals
+      ! default is all occupied MOs
+      CALL init_res_method(qs_env, gs_mos, tddfpt_control, tddfpt_section, log_unit)
 
       ! components of the dipole operator
       CALL tddfpt_dipole_operator(dipole_op_mos_occ, &
@@ -280,13 +310,15 @@ CONTAINS
       END IF
 
       ! split mpi communicator
-      ALLOCATE (my_mos(nspins))
+      ALLOCATE (my_mos(nspins), my_active(nspins))
       DO ispin = 1, nspins
          my_mos(ispin) = gs_mos(ispin)%mos_occ
+         my_active(ispin) = gs_mos(ispin)%mos_active
       END DO
-      CALL tddfpt_sub_env_init(sub_env, qs_env, mos_occ=my_mos(:), &
+      CALL tddfpt_sub_env_init(sub_env, qs_env, &
+                               mos_occ=my_mos(:), mos_active=my_active(:), &
                                kernel=tddfpt_control%kernel)
-      DEALLOCATE (my_mos)
+      DEALLOCATE (my_mos, my_active)
 
       IF (tddfpt_control%kernel == tddfpt_kernel_full) THEN
          ! create environment for Full Kernel
@@ -329,9 +361,13 @@ CONTAINS
          nstates = tddfpt_control%nstates
          !! Too many states can lead to Problems
          !! You should be warned if there are more states
-         !! then occ-virt Combinations!!
+         !! than occ-virt Combinations!!
          CALL cp_fm_get_info(gs_mos(1)%mos_occ, ncol_global=nocc)
-         CALL cp_fm_get_info(gs_mos(1)%mos_virt, ncol_global=nvirt)
+         IF (tddfpt_control%spinflip == no_sf_tddfpt) THEN
+            CALL cp_fm_get_info(gs_mos(1)%mos_virt, ncol_global=nvirt)
+         ELSE
+            CALL cp_fm_get_info(gs_mos(2)%mos_virt, ncol_global=nvirt)
+         END IF
          nstate_max = nocc*nvirt
          IF (nstates > nstate_max) THEN
             CPWARN("NUMBER OF EXCITED STATES COULD LEAD TO PROBLEMS!")
@@ -339,8 +375,8 @@ CONTAINS
             nstates = nstate_max
             tddfpt_control%nstates = nstate_max
          END IF
-         CALL tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, do_hfx, do_admm, &
-                                          do_hfxlr, do_exck, qs_env, sub_env)
+         CALL tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, &
+                                          do_hfx, do_admm, do_hfxlr, do_exck, do_sf, qs_env, sub_env)
 
          ! create full_kernel and admm_kernel within tddfpt_energies
          kernel_env%full_kernel => full_kernel_env
@@ -356,19 +392,14 @@ CONTAINS
          END IF
       ELSE IF (tddfpt_control%kernel == tddfpt_kernel_stda) THEN
          ! setup for kernel_stda outside tddfpt_energies
-         nactive = 0
          CALL cp_fm_get_info(gs_mos(1)%mos_occ, nrow_global=nao)
-         DO ispin = 1, SIZE(gs_mos)
-            CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, &
-                                ncol_global=nactive(ispin))
-         END DO
+         nactive = tddfpt_control%nactive
          CALL allocate_stda_env(qs_env, stda_kernel, nao, nactive)
          ! sTDA parameters
          CALL stda_init_param(qs_env, stda_kernel, tddfpt_control%stda_control)
          ! allocate pools and work matrices
          nstates = tddfpt_control%nstates
-         CALL stda_create_work_matrices(work_matrices, gs_mos, nstates, &
-                                        qs_env, sub_env)
+         CALL stda_create_work_matrices(work_matrices, gs_mos, nstates, qs_env, sub_env)
          !
          CALL stda_init_matrices(qs_env, stda_kernel, sub_env, &
                                  work_matrices, tddfpt_control)
@@ -379,28 +410,32 @@ CONTAINS
       ELSE IF (tddfpt_control%kernel == tddfpt_kernel_none) THEN
          ! allocate pools and work matrices
          nstates = tddfpt_control%nstates
-         CALL stda_create_work_matrices(work_matrices, gs_mos, nstates, &
-                                        qs_env, sub_env)
+         CALL stda_create_work_matrices(work_matrices, gs_mos, nstates, qs_env, sub_env)
          NULLIFY (kernel_env%full_kernel)
          NULLIFY (kernel_env%admm_kernel)
          NULLIFY (kernel_env%stda_kernel)
       END IF
 
-      ALLOCATE (evects(nspins, nstates))
+      IF (do_sf) THEN
+         ! only alpha -> beta excitations are considered in spin-flip TDDFT
+         ALLOCATE (evects(1, nstates))
+      ELSE
+         ALLOCATE (evects(nspins, nstates))
+      END IF
       ALLOCATE (evals(nstates))
+      ALLOCATE (S_evects(SIZE(evects, 1), nstates))
 
-      ALLOCATE (S_evects(nspins, nstates))
       DO istate = 1, nstates
-         DO ispin = 1, nspins
+         DO ispin = 1, SIZE(evects, 1)
             CALL fm_pool_create_fm( &
-               work_matrices%fm_pool_ao_mo_occ(ispin)%pool, &
+               work_matrices%fm_pool_ao_mo_active(ispin)%pool, &
                S_evects(ispin, istate))
          END DO
       END DO
 
       IF (.NOT. do_soc) THEN
          ! compute tddfpt excitation energies of multiplicity mult
-         CALL tddfpt_energies(qs_env, nstates, work_matrices, &
+         CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
                               tddfpt_control, logger, tddfpt_print_section, evects, evals, &
                               gs_mos, tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
                               sub_env, ostrength, dipole_op_mos_occ, mult, xc_section, full_kernel_env, &
@@ -464,8 +499,8 @@ CONTAINS
          ex_env%evalue = evals(my_state)
          ! excitation vector
          CALL cp_fm_release(ex_env%evect)
-         ALLOCATE (ex_env%evect(nspins))
-         DO ispin = 1, nspins
+         ALLOCATE (ex_env%evect(SIZE(evects, 1)))
+         DO ispin = 1, SIZE(evects, 1)
             CALL cp_fm_get_info(matrix=evects(ispin, 1), &
                                 matrix_struct=matrix_struct)
             CALL cp_fm_create(ex_env%evect(ispin), matrix_struct)
@@ -488,10 +523,36 @@ CONTAINS
                my_state, "      with excitation energy ", ex_env%evalue*evolt, " eV"
          END IF
 
+         ! Calculate response vector
          IF (calc_forces) THEN
             CALL tddfpt_forces_main(qs_env, gs_mos, ex_env, kernel_env, &
                                     sub_env, work_matrices)
          END IF
+      END IF
+
+      ! share evals, evects and mo_coefs with rixs
+      IF (do_rixs) THEN
+         ! copy evals
+         valence_state%nstates = nstates
+         ALLOCATE (valence_state%evals(SIZE(evals)))
+         valence_state%evals(:) = evals(:)
+
+         ALLOCATE (valence_state%evects(nspins, nstates))
+         ALLOCATE (valence_state%mos_active(nspins))
+         DO ispin = 1, nspins
+            ! copy evects
+            DO istate = 1, nstates
+               CALL cp_fm_get_info(matrix=evects(ispin, istate), &
+                                   matrix_struct=matrix_struct)
+               CALL cp_fm_create(valence_state%evects(ispin, istate), matrix_struct)
+               CALL cp_fm_to_fm(evects(ispin, istate), valence_state%evects(ispin, istate))
+            END DO
+            ! copy mos_occ
+            CALL cp_fm_get_info(matrix=gs_mos(ispin)%mos_active, &
+                                matrix_struct=matrix_struct)
+            CALL cp_fm_create(valence_state%mos_active(ispin), matrix_struct)
+            CALL cp_fm_to_fm(gs_mos(ispin)%mos_active, valence_state%mos_active(ispin))
+         END DO
       END IF
 
       ! clean up
@@ -574,7 +635,7 @@ CONTAINS
       tddfpt_control => dft_control%tddfpt2_control
 
       ! no k-points
-      CPASSERT(dft_control%nimages <= 1)
+      IF (dft_control%nimages > 1) CPABORT("k-points not implemented for TDDFPT")
 
       IF (tddfpt_control%nstates <= 0) THEN
          CALL integer_to_string(tddfpt_control%nstates, nstates_str)
@@ -823,7 +884,16 @@ CONTAINS
          IF (tddfpt_control%rks_triplets) THEN
             WRITE (log_unit, "(T2,A,T74,A7)") "KERNEL| Spin symmetry of excitations", "Triplet"
          ELSE IF (lsd) THEN
-            WRITE (log_unit, "(T2,A,T69,A12)") "KERNEL| Spin symmetry of excitations", "Unrestricted"
+            ! Spin-conserving excitations where requested
+            IF (tddfpt_control%spinflip == no_sf_tddfpt) THEN
+               WRITE (log_unit, "(T2,A,T69,A12)") "KERNEL| Spin symmetry of excitations", "Unrestricted"
+               ! Spin-flip excitations with collinear exchange-correlation kernel requested
+            ELSE IF (tddfpt_control%spinflip == tddfpt_sf_col) THEN
+               WRITE (log_unit, "(T2,A,T72,A9)") "KERNEL| Spin flip", "Collinear"
+               ! Spin-flip excitations with noncollinear exchange-correlation kernel requested
+            ELSE IF (tddfpt_control%spinflip == tddfpt_sf_noncol) THEN
+               WRITE (log_unit, "(T2,A,T69,A12)") "KERNEL| Spin flip", "Noncollinear"
+            END IF
          ELSE
             WRITE (log_unit, "(T2,A,T74,A7)") "KERNEL| Spin symmetry of excitations", "Singlet"
          END IF
@@ -839,6 +909,7 @@ CONTAINS
 !> \brief The energy calculation has been moved to its own subroutine
 !> \param qs_env ...
 !> \param nstates ...
+!> \param nspins ...
 !> \param work_matrices ...
 !> \param tddfpt_control ...
 !> \param logger ...
@@ -859,14 +930,14 @@ CONTAINS
 !> \param full_kernel_env ...
 !> \param kernel_env_admm_aux ...
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_energies(qs_env, nstates, work_matrices, &
+   SUBROUTINE tddfpt_energies(qs_env, nstates, nspins, work_matrices, &
                               tddfpt_control, logger, tddfpt_print_section, evects, evals, &
                               gs_mos, tddfpt_section, S_evects, matrix_s, kernel_env, matrix_ks, &
                               sub_env, ostrength, dipole_op_mos_occ, mult, xc_section, full_kernel_env, &
                               kernel_env_admm_aux)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      INTEGER                                            :: nstates
+      INTEGER                                            :: nstates, nspins
       TYPE(tddfpt_work_matrices)                         :: work_matrices
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
       TYPE(cp_logger_type), POINTER                      :: logger
@@ -976,12 +1047,21 @@ CONTAINS
                                tddfpt_print_section)
       END IF
 
-      !! Too many states can lead to problems
+      !! Too many states can lead to Problems
       !! You should be warned if there are more states
-      !! then occ-virt combinations!!
+      !! than occ-virt Combinations!!
       CALL cp_fm_get_info(gs_mos(1)%mos_occ, ncol_global=nocc)
-      CALL cp_fm_get_info(gs_mos(1)%mos_virt, ncol_global=nvirt)
+      IF (tddfpt_control%spinflip == no_sf_tddfpt) THEN
+         CALL cp_fm_get_info(gs_mos(1)%mos_virt, ncol_global=nvirt)
+      ELSE
+         CALL cp_fm_get_info(gs_mos(2)%mos_virt, ncol_global=nvirt)
+      END IF
       nstate_max = nocc*nvirt
+      IF ((SIZE(gs_mos, 1) == 2) .AND. (tddfpt_control%spinflip == no_sf_tddfpt)) THEN
+         CALL cp_fm_get_info(gs_mos(2)%mos_occ, ncol_global=nocc)
+         CALL cp_fm_get_info(gs_mos(2)%mos_virt, ncol_global=nvirt)
+         nstate_max = nocc*nvirt + nstate_max
+      END IF
       IF (nstates > nstate_max) THEN
          CPWARN("NUMBER OF EXCITED STATES COULD LEAD TO PROBLEMS!")
          CPWARN("Experimental: CHANGED NSTATES TO ITS MAXIMUM VALUE!")
@@ -1002,7 +1082,7 @@ CONTAINS
                         logger=logger, &
                         tddfpt_section=tddfpt_section, &
                         tddfpt_print_section=tddfpt_print_section, &
-                        fm_pool_ao_mo_occ=work_matrices%fm_pool_ao_mo_occ, &
+                        fm_pool_ao_mo_active=work_matrices%fm_pool_ao_mo_active, &
                         blacs_env_global=blacs_env)
       ELSE
          nstates_read = 0
@@ -1013,16 +1093,15 @@ CONTAINS
       log_unit = cp_print_key_unit_nr(logger, tddfpt_print_section, &
                                       "GUESS_VECTORS", extension=".tddfptLog")
       CALL tddfpt_guess_vectors(evects=evects, evals=evals, &
-                                gs_mos=gs_mos, log_unit=log_unit)
+                                gs_mos=gs_mos, log_unit=log_unit, tddfpt_control=tddfpt_control, &
+                                fm_pool_ao_mo_active=work_matrices%fm_pool_ao_mo_active, &
+                                qs_env=qs_env, nspins=nspins)
       CALL cp_print_key_finished_output(log_unit, logger, &
                                         tddfpt_print_section, "GUESS_VECTORS")
 
       CALL tddfpt_orthogonalize_psi1_psi0(evects, work_matrices%S_C0_C0T, qs_env, &
                                           gs_mos, evals, tddfpt_control, work_matrices%S_C0)
-      CALL tddfpt_orthonormalize_psi1_psi1(evects, &
-                                           nstates, &
-                                           S_evects, &
-                                           matrix_s(1)%matrix)
+      CALL tddfpt_orthonormalize_psi1_psi1(evects, nstates, S_evects, matrix_s(1)%matrix)
 
       niters = tddfpt_control%niters
       IF (niters > 0) THEN
@@ -1146,6 +1225,7 @@ CONTAINS
       CALL tddfpt_print_summary(log_unit, &
                                 evects, &
                                 evals, &
+                                gs_mos, &
                                 ostrength, &
                                 mult, &
                                 dipole_op_mos_occ, &
@@ -1156,6 +1236,7 @@ CONTAINS
          evals, &
          gs_mos, &
          matrix_s(1)%matrix, &
+         tddfpt_control%spinflip, &
          min_amplitude=tddfpt_control%min_excitation_amplitude)
       CALL tddfpt_print_nto_analysis(qs_env, &
                                      evects, evals, &
@@ -1163,6 +1244,15 @@ CONTAINS
                                      gs_mos, &
                                      matrix_s(1)%matrix, &
                                      tddfpt_print_section)
+      IF (tddfpt_control%do_exciton_descriptors) THEN
+         CALL tddfpt_print_exciton_descriptors( &
+            log_unit, &
+            evects, &
+            gs_mos, &
+            matrix_s(1)%matrix, &
+            tddfpt_control%do_directional_exciton_descriptors, &
+            qs_env)
+      END IF
 
       IF (tddfpt_control%do_lrigpw) THEN
          CALL lri_print_stat(qs_env, &
@@ -1234,6 +1324,7 @@ CONTAINS
 
       INTEGER                                            :: handle, ispin, istate, log_unit, mult, &
                                                             nspins
+      LOGICAL                                            :: do_sf
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals_mult, ostrength_mult
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:, :)     :: evects_mult
 
@@ -1247,6 +1338,7 @@ CONTAINS
       nspins = SIZE(gs_mos)
       ALLOCATE (evects_mult(nspins, nstates))
       ALLOCATE (evals_mult(nstates))
+      do_sf = tddfpt_control%spinflip /= no_sf_tddfpt
 
       ! First multiplicity
       IF (lmult_tmp) THEN
@@ -1267,7 +1359,7 @@ CONTAINS
          mult = 3
       END IF
 
-      CALL tddfpt_energies(qs_env, nstates, work_matrices, tddfpt_control, logger, &
+      CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, tddfpt_control, logger, &
                            tddfpt_print_section, evects_mult, evals_mult, &
                            gs_mos, tddfpt_section, S_evects, matrix_s, &
                            kernel_env, matrix_ks, sub_env, ostrength_mult, &
@@ -1279,9 +1371,10 @@ CONTAINS
          IF (tddfpt_control%do_admm) CALL release_kernel_env(kernel_env%admm_kernel)
          CALL release_kernel_env(kernel_env%full_kernel)
          CALL tddfpt_release_work_matrices(work_matrices, sub_env)
-         CALL tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, tddfpt_control%do_hfx, &
+         CALL tddfpt_create_work_matrices(work_matrices, gs_mos, nstates, &
+                                          tddfpt_control%do_hfx, &
                                           tddfpt_control%do_admm, tddfpt_control%do_hfxlr, &
-                                          tddfpt_control%do_exck, qs_env, sub_env)
+                                          tddfpt_control%do_exck, do_sf, qs_env, sub_env)
       END IF
 
       DO istate = 1, nstates
@@ -1293,7 +1386,7 @@ CONTAINS
       DO istate = 1, nstates
          DO ispin = 1, nspins
             CALL fm_pool_create_fm( &
-               work_matrices%fm_pool_ao_mo_occ(ispin)%pool, &
+               work_matrices%fm_pool_ao_mo_active(ispin)%pool, &
                S_evects(ispin, istate))
          END DO
       END DO
@@ -1323,7 +1416,7 @@ CONTAINS
          mult = 1
       END IF
 
-      CALL tddfpt_energies(qs_env, nstates, work_matrices, tddfpt_control, logger, &
+      CALL tddfpt_energies(qs_env, nstates, nspins, work_matrices, tddfpt_control, logger, &
                            tddfpt_print_section, evects, evals, &
                            gs_mos, tddfpt_section, S_evects, matrix_s, &
                            kernel_env, matrix_ks, sub_env, ostrength, &
@@ -1349,5 +1442,209 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE tddfpt_soc_energies
+
+! **************************************************************************************************
+!> \brief ...
+!> \param qs_env ...
+!> \param gs_mos ...
+!> \param tddfpt_control ...
+!> \param tddfpt_section ...
+!> \param iounit ...
+! **************************************************************************************************
+   SUBROUTINE init_res_method(qs_env, gs_mos, tddfpt_control, tddfpt_section, iounit)
+
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
+         POINTER                                         :: gs_mos
+      TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
+      TYPE(section_vals_type), POINTER                   :: tddfpt_section
+      INTEGER, INTENT(IN)                                :: iounit
+
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'init_res_method'
+
+      INTEGER                                            :: handle, i, io, ispin, nao, nmo, nmol, &
+                                                            nspins
+      INTEGER, ALLOCATABLE, DIMENSION(:, :)              :: orblist
+      INTEGER, DIMENSION(:), POINTER                     :: mollist
+      LOGICAL                                            :: do_res, do_sf, ew1, ew2, ew3, ewcut, lms
+      REAL(KIND=dp)                                      :: eclow, ecup, eint, emo
+      REAL(KIND=dp), DIMENSION(:), POINTER               :: rvint
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
+      TYPE(section_vals_type), POINTER                   :: res_section
+
+      CALL timeset(routineN, handle)
+
+      res_section => section_vals_get_subs_vals(tddfpt_section, "REDUCED_EXCITATION_SPACE")
+      CALL section_vals_val_get(res_section, "_SECTION_PARAMETERS_", l_val=do_res)
+
+      ! spin flip TDA
+      IF (tddfpt_control%spinflip == no_sf_tddfpt) THEN
+         do_sf = .FALSE.
+      ELSE
+         do_sf = .TRUE.
+      END IF
+
+      nspins = SIZE(gs_mos)
+      IF (.NOT. do_res) THEN
+         DO ispin = 1, nspins
+            nmo = gs_mos(ispin)%nmo_occ
+            tddfpt_control%nactive(ispin) = nmo
+            gs_mos(ispin)%nmo_active = nmo
+            ALLOCATE (gs_mos(ispin)%index_active(nmo))
+            DO i = 1, nmo
+               gs_mos(ispin)%index_active(i) = i
+            END DO
+         END DO
+      ELSE
+         IF (iounit > 0) THEN
+            WRITE (iounit, "(/,1X,27('='),A,26('='))") ' REDUCED EXCITATION SPACE '
+         END IF
+         CALL section_vals_val_get(res_section, "ENERGY_WINDOW", explicit=ew1)
+         CALL section_vals_val_get(res_section, "UPPER_ENERGY_CUTOFF", explicit=ew2)
+         CALL section_vals_val_get(res_section, "LOWER_ENERGY_CUTOFF", explicit=ew3)
+         ewcut = (ew1 .OR. ew2 .OR. ew3)
+         CALL section_vals_val_get(res_section, "MOLECULE_LIST", explicit=lms)
+
+         CALL section_vals_val_get(res_section, "ENERGY_WINDOW", r_vals=rvint)
+         CPASSERT(SIZE(rvint) == 2)
+         eclow = rvint(1)
+         ecup = rvint(2)
+         CALL section_vals_val_get(res_section, "UPPER_ENERGY_CUTOFF", r_val=eint)
+         ecup = MIN(ecup, eint)
+         CALL section_vals_val_get(res_section, "LOWER_ENERGY_CUTOFF", r_val=eint)
+         eclow = MAX(eclow, eint)
+         IF (ewcut .AND. (iounit > 0)) THEN
+            IF (eclow < -1.E8_dp .AND. ecup > 1.E8_dp) THEN
+               WRITE (iounit, "(1X,A,T51,A10,T71,A10)") &
+                  'Orbital Energy Window [eV]', "      -Inf", "       Inf"
+            ELSE IF (eclow < -1.E8_dp) THEN
+               WRITE (iounit, "(1X,A,T51,A10,T71,F10.4)") &
+                  'Orbital Energy Window [eV]', "      -Inf", evolt*ecup
+            ELSE IF (ecup > 1.E8_dp) THEN
+               WRITE (iounit, "(1X,A,T51,F10.4,T71,A10)") &
+                  'Orbital Energy Window [eV]', evolt*eclow, "       Inf"
+            ELSE
+               WRITE (iounit, "(1X,A,T51,F10.4,T71,F10.4)") &
+                  'Orbital Energy Window [eV]', evolt*eclow, evolt*ecup
+            END IF
+         END IF
+
+         nmol = 0
+         IF (lms) THEN
+            CALL section_vals_val_get(res_section, "MOLECULE_LIST", i_vals=mollist)
+            nmol = SIZE(mollist)
+            WRITE (iounit, "(1X,A)") 'List of Selected Molecules'
+            WRITE (iounit, "(1X,15(I5))") mollist(1:nmol)
+         END IF
+
+         DO ispin = 1, nspins
+            tddfpt_control%nactive(ispin) = gs_mos(ispin)%nmo_occ
+         END DO
+         nmo = MAXVAL(tddfpt_control%nactive)
+         ALLOCATE (orblist(nmo, nspins))
+         orblist = 0
+
+         IF (lms) THEN
+            ! ignore for now
+            orblist = 1
+            DO ispin = 1, nspins
+               CPASSERT(.NOT. ASSOCIATED(gs_mos(ispin)%evals_occ_matrix))
+            END DO
+         ELSEIF (ewcut) THEN
+            ! Filter orbitals wrt energy window
+            DO ispin = 1, nspins
+               DO i = 1, gs_mos(ispin)%nmo_occ
+                  emo = gs_mos(ispin)%evals_occ(i)
+                  IF (emo > eclow .AND. emo < ecup) orblist(i, ispin) = 1
+               END DO
+            END DO
+         ELSE
+            orblist = 1
+         END IF
+
+         ! count active orbitals
+         nmo = SUM(orblist)
+         IF (nmo == 0) THEN
+            CPABORT("RSE TDA: no active orbitals selected.")
+         END IF
+         DO ispin = 1, nspins
+            nmo = SUM(orblist(:, ispin))
+            tddfpt_control%nactive(ispin) = nmo
+            gs_mos(ispin)%nmo_active = nmo
+            ALLOCATE (gs_mos(ispin)%index_active(nmo))
+            io = 0
+            DO i = 1, SIZE(ORBLIST, 1)
+               IF (orblist(i, ispin) == 1) THEN
+                  io = io + 1
+                  gs_mos(ispin)%index_active(io) = i
+               END IF
+            END DO
+         END DO
+         DEALLOCATE (orblist)
+
+         IF (lms) THEN
+            ! output information
+         ELSE
+            IF (iounit > 0) THEN
+               WRITE (iounit, "(1X,A)") 'List of Selected States'
+               IF (nspins == 1) THEN
+                  WRITE (iounit, "(A,T67,A)") ' Active State      Orbital', 'Orbital Energy'
+                  DO i = 1, gs_mos(1)%nmo_active
+                     io = gs_mos(1)%index_active(i)
+                     WRITE (iounit, "(T8,I6,T21,I6,T61,F20.4)") i, io, gs_mos(1)%evals_occ(io)*evolt
+                  END DO
+               ELSE
+                  DO ispin = 1, nspins
+                     WRITE (iounit, "(1X,A,I2)") 'Spin ', ispin
+                     WRITE (iounit, "(A,T67,A)") ' Active State      Orbital', 'Orbital Energy'
+                     DO i = 1, gs_mos(ispin)%nmo_active
+                        io = gs_mos(ispin)%index_active(i)
+                        WRITE (iounit, "(T8,I6,T21,I6,T61,F20.4)") i, io, gs_mos(ispin)%evals_occ(io)*evolt
+                     END DO
+                  END DO
+               END IF
+            END IF
+         END IF
+
+         IF (do_sf) THEN
+            CPABORT("Restricted Active Space with spin flip TDA NYA")
+         END IF
+
+         IF (iounit > 0) THEN
+            WRITE (iounit, "(1X,79('='))")
+         END IF
+      END IF
+
+      ! Allocate mos_active
+      DO ispin = 1, nspins
+         CALL get_qs_env(qs_env, blacs_env=blacs_env)
+         CALL cp_fm_get_info(gs_mos(ispin)%mos_occ, nrow_global=nao)
+         nmo = gs_mos(ispin)%nmo_active
+         CALL cp_fm_struct_create(fm_struct, template_fmstruct=gs_mos(ispin)%mos_occ%matrix_struct, &
+                                  ncol_global=nmo, context=blacs_env)
+         NULLIFY (gs_mos(ispin)%mos_active)
+         ALLOCATE (gs_mos(ispin)%mos_active)
+         CALL cp_fm_create(gs_mos(ispin)%mos_active, fm_struct)
+         CALL cp_fm_struct_release(fm_struct)
+         ! copy the active orbitals
+         IF (gs_mos(ispin)%nmo_active == gs_mos(ispin)%nmo_occ) THEN
+            DO i = 1, gs_mos(ispin)%nmo_active
+               CPASSERT(i == gs_mos(ispin)%index_active(i))
+            END DO
+            CALL cp_fm_to_fm_submat(gs_mos(ispin)%mos_occ, gs_mos(ispin)%mos_active, &
+                                    nao, nmo, 1, 1, 1, 1)
+         ELSE
+            DO i = 1, gs_mos(ispin)%nmo_active
+               io = gs_mos(ispin)%index_active(i)
+               CALL cp_fm_to_fm_submat(gs_mos(ispin)%mos_occ, gs_mos(ispin)%mos_active, &
+                                       nao, 1, 1, io, 1, i)
+            END DO
+         END IF
+      END DO
+
+      CALL timestop(handle)
+
+   END SUBROUTINE init_res_method
 
 END MODULE qs_tddfpt2_methods

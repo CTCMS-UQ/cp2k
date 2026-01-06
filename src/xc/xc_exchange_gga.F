@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -92,7 +92,7 @@ CONTAINS
          CASE (xgga_pbe)
             reference = "J.P. Perdew, K. Burke, M Ernzerhof, Phys. Rev. Lett, 77, 3865 (1996)"
          CASE (xgga_revpbe)
-            reference = "Y. Zang et al., PRL, 80, 890 (1998) (Revised PBEX)"
+            reference = "Y. Zhang et al., PRL, 80, 890 (1998) (Revised PBEX)"
          CASE (xgga_opt)
             reference = "Wee-Meng Hoe, A.J. Cohen, N.C. Handy, CPL, 341, 319 (2001)"
          CASE (xgga_ev93)
@@ -117,7 +117,7 @@ CONTAINS
          CASE (xgga_pbe)
             shortform = "PBE exchange energy functional"
          CASE (xgga_revpbe)
-            shortform = "Revised PBEX by Zang et al."
+            shortform = "Revised PBEX by Zhang et al."
          CASE (xgga_opt)
             shortform = "OPTX exchange energy functional"
          CASE (xgga_ev93)

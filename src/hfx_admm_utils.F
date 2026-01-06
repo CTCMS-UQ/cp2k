@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -159,11 +159,13 @@ CONTAINS
 !> \brief ...
 !> \param qs_env ...
 !> \param calculate_forces ...
+!> \param ext_xc_section ...
 ! **************************************************************************************************
-   SUBROUTINE hfx_admm_init(qs_env, calculate_forces)
+   SUBROUTINE hfx_admm_init(qs_env, calculate_forces, ext_xc_section)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       LOGICAL, INTENT(IN), OPTIONAL                      :: calculate_forces
+      TYPE(section_vals_type), OPTIONAL, POINTER         :: ext_xc_section
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'hfx_admm_init'
 
@@ -208,6 +210,7 @@ CONTAINS
       IF (PRESENT(calculate_forces)) calc_forces = .TRUE.
 
       hfx_sections => section_vals_get_subs_vals(input, "DFT%XC%HF")
+      IF (PRESENT(ext_xc_section)) hfx_sections => section_vals_get_subs_vals(ext_xc_section, "HF")
 
       CALL section_vals_get(hfx_sections, n_repetition=n_rep_hf)
       IF (n_rep_hf > 1) &
@@ -220,6 +223,7 @@ CONTAINS
          CALL admm_env_create(admm_env, dft_control%admm_control, mos, para_env, natoms, nao_aux_fit)
          CALL set_qs_env(qs_env, admm_env=admm_env)
          xc_section => section_vals_get_subs_vals(input, "DFT%XC")
+         IF (PRESENT(ext_xc_section)) xc_section => ext_xc_section
          CALL create_admm_xc_section(x_data=qs_env%x_data, xc_section=xc_section, &
                                      admm_env=admm_env)
 
@@ -682,6 +686,8 @@ CONTAINS
             roperator = 0.0_dp
          CASE (do_potential_truncated)
             CALL section_vals_val_get(hfx_sections, "INTERACTION_POTENTIAL%CUTOFF_RADIUS", r_val=roperator)
+         CASE (do_potential_mix_cl_trunc)
+            CALL section_vals_val_get(hfx_sections, "INTERACTION_POTENTIAL%CUTOFF_RADIUS", r_val=roperator)
          CASE (do_potential_short)
             CALL section_vals_val_get(hfx_sections, "INTERACTION_POTENTIAL%OMEGA", r_val=omega)
             CALL section_vals_val_get(hfx_sections, "SCREENING%EPS_SCHWARZ", r_val=eps_schwarz)
@@ -761,9 +767,8 @@ CONTAINS
       skip_load_balance_distributed = dft_control%qs_control%skip_load_balance_distributed
       IF (ASSOCIATED(admm_env%task_list_aux_fit)) CALL deallocate_task_list(admm_env%task_list_aux_fit)
       CALL allocate_task_list(admm_env%task_list_aux_fit)
-      CALL generate_qs_task_list(ks_env, admm_env%task_list_aux_fit, &
-                                 reorder_rs_grid_ranks=.FALSE., soft_valid=.FALSE., &
-                                 basis_type=aux_basis_type, &
+      CALL generate_qs_task_list(ks_env, admm_env%task_list_aux_fit, basis_type=aux_basis_type, &
+                                 reorder_rs_grid_ranks=.FALSE., &
                                  skip_load_balance_distributed=skip_load_balance_distributed, &
                                  sab_orb_external=admm_env%sab_aux_fit)
 
@@ -825,8 +830,8 @@ CONTAINS
       CALL allocate_task_list(admm_gapw_env%task_list)
 
       !note: we set soft_valid to .FALSE. want to use AUX_FIT_SOFT and not the normal ORB SOFT basis
-      CALL generate_qs_task_list(ks_env, admm_gapw_env%task_list, reorder_rs_grid_ranks=.FALSE., &
-                                 soft_valid=.FALSE., basis_type="AUX_FIT_SOFT", &
+      CALL generate_qs_task_list(ks_env, admm_gapw_env%task_list, basis_type="AUX_FIT_SOFT", &
+                                 reorder_rs_grid_ranks=.FALSE., &
                                  skip_load_balance_distributed=dft_control%qs_control%skip_load_balance_distributed, &
                                  sab_orb_external=admm_env%sab_aux_fit)
 
@@ -1127,12 +1132,13 @@ CONTAINS
 !> \param just_energy ...
 !> \param v_rspace_new ...
 !> \param v_tau_rspace ...
+!> \param ext_xc_section ...
 !> \par History
 !>     refactoring 03-2011 [MI]
 ! **************************************************************************************************
 
    SUBROUTINE hfx_ks_matrix(qs_env, matrix_ks, rho, energy, calculate_forces, &
-                            just_energy, v_rspace_new, v_tau_rspace)
+                            just_energy, v_rspace_new, v_tau_rspace, ext_xc_section)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_ks
@@ -1140,6 +1146,7 @@ CONTAINS
       TYPE(qs_energy_type), POINTER                      :: energy
       LOGICAL, INTENT(in)                                :: calculate_forces, just_energy
       TYPE(pw_r3d_rs_type), DIMENSION(:), POINTER        :: v_rspace_new, v_tau_rspace
+      TYPE(section_vals_type), OPTIONAL, POINTER         :: ext_xc_section
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'hfx_ks_matrix'
 
@@ -1202,6 +1209,8 @@ CONTAINS
       IF (use_virial .AND. calculate_forces) virial%pv_fock_4c = 0.0_dp
 
       hfx_sections => section_vals_get_subs_vals(input, "DFT%XC%HF")
+      IF (PRESENT(ext_xc_section)) hfx_sections => section_vals_get_subs_vals(ext_xc_section, "HF")
+
       CALL section_vals_get(hfx_sections, n_repetition=n_rep_hf)
       CALL section_vals_val_get(hfx_sections, "TREAT_LSD_IN_CORE", l_val=hfx_treat_lsd_in_core, &
                                 i_rep_section=1)

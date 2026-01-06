@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -129,9 +129,8 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'sccs'
       REAL(KIND=dp), PARAMETER                           :: epstol = 1.0E-8_dp
 
-      CHARACTER(LEN=4*default_string_length)             :: message
-      CHARACTER(LEN=default_path_length)                 :: mpi_filename
-      CHARACTER(LEN=default_string_length)               :: cube_path, filename, my_pos_cube, &
+      CHARACTER(LEN=4*default_string_length)             :: message, my_pos_cube
+      CHARACTER(LEN=default_path_length)                 :: cube_path, filename, mpi_filename, &
                                                             print_path
       INTEGER                                            :: cube_unit, handle, i, ispin, iter, j, k, &
                                                             nspin, output_unit, print_level
@@ -991,7 +990,7 @@ CONTAINS
             border_points = 3
          END SELECT
          CALL init_input_type(input_settings, 2*border_points + 1, rs_grid_section, &
-                              1, (/-1, -1, -1/))
+                              1, [-1, -1, -1])
          CALL rs_grid_create_descriptor(rs_desc, f%pw_grid, input_settings, &
                                         border_points=border_points)
          ALLOCATE (rs_grid)

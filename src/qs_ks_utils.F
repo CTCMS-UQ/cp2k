@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -26,9 +26,10 @@ MODULE qs_ks_utils
    USE cell_types,                      ONLY: cell_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add, dbcsr_copy, dbcsr_deallocate_matrix, dbcsr_dot, dbcsr_get_info, dbcsr_init_p, &
-        dbcsr_multiply, dbcsr_p_type, dbcsr_release_p, dbcsr_scale, dbcsr_scale_by_vector, &
-        dbcsr_set, dbcsr_type
+        dbcsr_add, dbcsr_copy, dbcsr_deallocate_matrix, dbcsr_get_info, dbcsr_init_p, &
+        dbcsr_multiply, dbcsr_p_type, dbcsr_release_p, dbcsr_scale, dbcsr_set, dbcsr_type
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_dot,&
+                                              dbcsr_scale_by_vector
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
                                               cp_dbcsr_plus_fm_fm_t,&
@@ -499,7 +500,7 @@ CONTAINS
       TYPE(section_vals_type), POINTER                   :: input, xc_section
       TYPE(virial_type), POINTER                         :: virial
 
-      IF (dft_control%sic_method_id .NE. sic_eo) RETURN
+      IF (dft_control%sic_method_id /= sic_eo) RETURN
 
       CALL timeset(routineN, handle)
 
@@ -930,7 +931,9 @@ CONTAINS
             REAL(n_electrons, dp), &
             "Core density on regular grids:", &
             qs_charges%total_rho_core_rspace, &
-            qs_charges%total_rho_core_rspace - REAL(n_electrons + dft_control%charge, dp)
+            qs_charges%total_rho_core_rspace + &
+            qs_charges%total_rho1_hard_nuc - &
+            REAL(n_electrons + dft_control%charge, dp)
       END IF
       IF (dft_control%qs_control%gapw) THEN
          tot1_h = qs_charges%total_rho1_hard(1)
@@ -948,12 +951,28 @@ CONTAINS
                tot_rho_r + tot1_h - tot1_s, &
                "Total charge density (r-space):      ", &
                tot_rho_r + tot1_h - tot1_s &
-               + qs_charges%total_rho_core_rspace, &
-               "Total Rho_soft + Rho0_soft (g-space):", &
-               qs_charges%total_rho_gspace
+               + qs_charges%total_rho_core_rspace &
+               + qs_charges%total_rho1_hard_nuc
+            IF (qs_charges%total_rho1_hard_nuc /= 0.0_dp) THEN
+               WRITE (UNIT=output_unit, FMT="(T3,A,T41,F20.10)") &
+                  "Total CNEO nuc. char. den. (Lebedev): ", &
+                  qs_charges%total_rho1_hard_nuc, &
+                  "Total CNEO soft char. den. (Lebedev): ", &
+                  qs_charges%total_rho1_soft_nuc_lebedev, &
+                  "Total CNEO soft char. den. (r-space): ", &
+                  qs_charges%total_rho1_soft_nuc_rspace, &
+                  "Total soft Rho_e+n+0 (g-space):", &
+                  qs_charges%total_rho_gspace
+            ELSE
+               WRITE (UNIT=output_unit, FMT="(T3,A,T41,F20.10)") &
+                  "Total Rho_soft + Rho0_soft (g-space):", &
+                  qs_charges%total_rho_gspace
+            END IF
          END IF
          qs_charges%background = tot_rho_r + tot1_h - tot1_s + &
-                                 qs_charges%total_rho_core_rspace
+                                 qs_charges%total_rho_core_rspace + &
+                                 qs_charges%total_rho1_hard_nuc
+         ! only add total_rho1_hard_nuc for gapw as cneo requires gapw
       ELSE IF (dft_control%qs_control%gapw_xc) THEN
          tot1_h = qs_charges%total_rho1_hard(1)
          tot1_s = qs_charges%total_rho1_soft(1)
@@ -1035,7 +1054,7 @@ CONTAINS
             END IF
          END IF
          IF (dft_control%do_admm) THEN
-            IF (psolver .EQ. pw_poisson_implicit) THEN
+            IF (psolver == pw_poisson_implicit) THEN
                implicit_ps_ehartree = pw_env%poisson_env%implicit_env%ehartree
                bc = pw_env%poisson_env%parameters%ps_implicit_params%boundary_condition
                SELECT CASE (bc)
@@ -1072,7 +1091,7 @@ CONTAINS
                   "Core Hamiltonian energy:                       ", energy%core, &
                   "Hartree energy:                                ", energy%hartree
             ELSE
-               IF (psolver .EQ. pw_poisson_implicit) THEN
+               IF (psolver == pw_poisson_implicit) THEN
                   implicit_ps_ehartree = pw_env%poisson_env%implicit_env%ehartree
                   bc = pw_env%poisson_env%parameters%ps_implicit_params%boundary_condition
                   SELECT CASE (bc)
@@ -1151,6 +1170,10 @@ CONTAINS
             s2_order_p = dft_control%qs_control%s2_restraint_control%s2_order_p
             WRITE (UNIT=output_unit, FMT="(T3,A,T41,2F20.10)") &
                "S2 restraint (order_p,energy) : ", s2_order_p, energy%s2_restraint
+         END IF
+         IF (energy%core_cneo /= 0.0_dp) THEN
+            WRITE (UNIT=output_unit, FMT="(T3,A,T61,F20.10)") &
+               "CNEO| quantum nuclear core energy: ", energy%core_cneo
          END IF
 
       END IF ! output_unit
@@ -1380,7 +1403,7 @@ CONTAINS
             ! functional derivative of the Hartree energy wrt the density in the presence of dielectric
             ! (vhartree + v_eps); v_eps is nonzero only if the dielectric constant is defind as a function
             ! of the charge density
-            IF (poisson_env%parameters%solver .EQ. pw_poisson_implicit) THEN
+            IF (poisson_env%parameters%solver == pw_poisson_implicit) THEN
                dvol = poisson_env%implicit_env%v_eps%pw_grid%dvol
                CALL pw_axpy(poisson_env%implicit_env%v_eps, v_rspace_new(ispin), dvol)
             END IF
@@ -1475,7 +1498,7 @@ CONTAINS
          CPASSERT(.NOT. dft_control%qs_control%ddapc_restraint_is_spin)
          DO ispin = 1, nspins
             ! extra contribution attributed to the dependency of the dielectric constant to the charge density
-            IF (poisson_env%parameters%solver .EQ. pw_poisson_implicit) THEN
+            IF (poisson_env%parameters%solver == pw_poisson_implicit) THEN
                dvol = poisson_env%implicit_env%v_eps%pw_grid%dvol
                CALL pw_axpy(poisson_env%implicit_env%v_eps, v_rspace, dvol)
             END IF
@@ -1596,7 +1619,7 @@ CONTAINS
 
                ! Add potential to ks_matrix aux_fit, skip integration if no DFT correction
 
-               IF (admm_env%aux_exch_func .NE. do_admm_aux_exch_func_none) THEN
+               IF (admm_env%aux_exch_func /= do_admm_aux_exch_func_none) THEN
 
                   !GPW by default. IF GAPW, then take relevant task list and basis
                   CALL get_admm_env(admm_env, task_list_aux_fit=task_list)
@@ -1817,9 +1840,9 @@ CONTAINS
          embed_corr_local = 0.0_dp
 
          ! Spin embedding potential in open-shell case
-         IF (dft_control%nspins .EQ. 2) THEN
-            IF (ispin .EQ. 1) CALL pw_axpy(qs_env%spin_embed_pot, v_rspace_embed(ispin), 1.0_dp)
-            IF (ispin .EQ. 2) CALL pw_axpy(qs_env%spin_embed_pot, v_rspace_embed(ispin), -1.0_dp)
+         IF (dft_control%nspins == 2) THEN
+            IF (ispin == 1) CALL pw_axpy(qs_env%spin_embed_pot, v_rspace_embed(ispin), 1.0_dp)
+            IF (ispin == 2) CALL pw_axpy(qs_env%spin_embed_pot, v_rspace_embed(ispin), -1.0_dp)
          END IF
          ! Integrate the density*potential
          embed_corr_local = pw_integral_ab(v_rspace_embed(ispin), rho_r(ispin))

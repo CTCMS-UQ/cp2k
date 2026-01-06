@@ -6,8 +6,8 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-dftd4_ver="3.6.0"
-dftd4_sha256="0e3e8d5f9e9e5414b9979967c074c953706053832e551d922c27599e7324bace"
+dftd4_ver="3.7.0"
+dftd4_sha256="2e0d3504038358b8a82fdd21912b7765d416a58ebedbdd44f2ca8d2e88339ad7"
 
 source "${SCRIPT_DIR}"/common_vars.sh
 source "${SCRIPT_DIR}"/tool_kit.sh
@@ -28,7 +28,7 @@ case "$with_dftd4" in
   __DONTUSE__) ;;
 
   __INSTALL__)
-    echo "==================== Installing GRIMME D4 ===================="
+    echo "==================== Installing DFTD4 ===================="
     require_env OPENBLAS_ROOT
     require_env MATH_LIBS
 
@@ -47,7 +47,7 @@ case "$with_dftd4" in
       echo "Installing from scratch into ${pkg_install_dir}"
       [ -d dftd4-${dftd4_ver} ] && rm -rf dftd4-${dftd4_ver}
       tar -xzf dftd4-${dftd4_ver}.tar.gz
-      cd dftd4-${dftd4_ver}
+      cd dftd4-${dftd4_ver}/subprojects/dftd4
 
       rm -Rf build
       mkdir build
@@ -56,8 +56,7 @@ case "$with_dftd4" in
       CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}:${OPENBLAS_ROOT}" cmake \
         -B . -G Ninja \
         -DCMAKE_INSTALL_PREFIX="${pkg_install_dir}" \
-        -DCMAKE_C_COMPILER="${MPICC}" \
-        -DCMAKE_Fortran_COMPILER="${MPIFC}" \
+        -DCMAKE_INSTALL_LIBDIR=lib \
         -DCMAKE_VERBOSE_MAKEFILE=ON \
         .. \
         > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
@@ -65,13 +64,12 @@ case "$with_dftd4" in
       cmake --install . >> install.log 2>&1 || tail -n ${LOG_LINES} install.log
 
       cd ..
-      echo "==================== Linking Grimme_D4 to user paths ===================="
     fi
     write_checksums "${install_lock_file}" "${SCRIPT_DIR}/stage8/$(basename ${SCRIPT_NAME})"
     ;;
 
   __SYSTEM__)
-    echo "==================== Finding dftd4 from system paths ===================="
+    echo "==================== Finding DFTD4 from system paths ===================="
     check_command pkg-config --modversion dftd4
     add_include_from_paths DFTD4_CFLAGS "dftd4.h" $INCLUDE_PATHS
     add_include_from_paths DFTD4_CFLAGS "dftd4.mod" $INCLUDE_PATHS
@@ -80,7 +78,7 @@ case "$with_dftd4" in
     ;;
 
   *)
-    echo "==================== Linking dftd4 to user paths ===================="
+    echo "==================== Linking DFTD4 to user paths ===================="
     pkg_install_dir="$with_dftd4"
     check_dir "${pkg_install_dir}/include"
     ;;
@@ -97,36 +95,38 @@ export DFTD4_VER="${dftd4_ver}"
 EOF
 
   if [ "$with_dftd4" != "__SYSTEM__" ]; then
-    DFTD4_LOC=$(find ${pkg_install_dir}/include -name "multicharge.mod")
-    DFTD4_MCHARGE=${DFTD4_LOC%/*}
-    DFTD4_LOC=$(find ${pkg_install_dir}/include -name "mstore.mod")
-    DFTD4_STORE=${DFTD4_LOC%/*}
-    DFTD4_LOC=$(find ${pkg_install_dir}/include -name "mctc_io.mod")
-    DFTD4_MCTC=${DFTD4_LOC%/*}
-    DFTD4_LOC=$(find ${pkg_install_dir}/include -name "dftd4.mod")
-    DFTD4_DFTD4=${DFTD4_LOC%/*}
-    # use the lib64 directory if present
-    DFTD4_LIBDIR="${pkg_install_dir}/lib"
-    [ -d "${pkg_install_dir}/lib64" ] && DFTD4_LIBDIR="${pkg_install_dir}/lib64"
+    TEMP_LOC=$(find ${pkg_install_dir}/include -name "multicharge.mod")
+    MCHARGE=${TEMP_LOC%/*}
+    TEMP_LOC=$(find ${pkg_install_dir}/include -name "mstore.mod")
+    MSTORE=${TEMP_LOC%/*}
+    TEMP_LOC=$(find ${pkg_install_dir}/include -name "mctc_io.mod")
+    MCTC=${TEMP_LOC%/*}
+    TEMP_LOC=$(find ${pkg_install_dir}/include -name "dftd4.mod")
+    DFTD4=${TEMP_LOC%/*}
 
-    DFTD4_CFLAGS="-I'${pkg_install_dir}/include' -I'${DFTD4_DFTD4}' -I'${DFTD4_MCTC}'"
-    DFTD4_LDFLAGS="-L'${DFTD4_LIBDIR}' -Wl,-rpath,'${DFTD4_LIBDIR}'"
+    DFTD4_INCLUDE_DIRS="$pkg_install_dir/include"
+    DFTD4_LINK_LIBRARIES="${pkg_install_dir}/lib"
+
+    DFTD4_CFLAGS="-I'${MCHARGE}' -I'${MCTC}' -I'${DFTD4}'"
+    DFTD4_LDFLAGS="-L'${DFTD4_LINK_LIBRARIES}' -Wl,-rpath,'${DFTD4_LINK_LIBRARIES}'"
 
     cat << EOF >> "${BUILDDIR}/setup_dftd4"
-prepend_path LD_LIBRARY_PATH "${DFTD4_LIBDIR}"
-prepend_path LD_RUN_PATH "${DFTD4_LIBDIR}"
-prepend_path LIBRARY_PATH "${DFTD4_LIBDIR}"
-prepend_path CPATH "$pkg_install_dir/include"
-prepend_path PKG_CONFIG_PATH "${DFTD4_LIBDIR}/pkgconfig"
+prepend_path LD_LIBRARY_PATH "${DFTD4_LINK_LIBRARIES}"
+prepend_path LD_RUN_PATH "${DFTD4_LINK_LIBRARIES}"
+prepend_path LIBRARY_PATH "${DFTD4_LINK_LIBRARIES}"
+prepend_path CPATH "${DFTD4_INCLUDE_DIRS}"
+prepend_path PKG_CONFIG_PATH "${DFTD4_LINK_LIBRARIES}/pkgconfig"
 prepend_path CMAKE_PREFIX_PATH "${pkg_install_dir}"
 EOF
   fi
 
   cat << EOF >> "${BUILDDIR}/setup_dftd4"
-export DFTD4_DFTD4="${DFTD4_DFTD4}"
-export DFTD4_MCTC="${DFTD4_MCTC}"
-export DFTD4_LIBDIR="${DFTD4_LIBDIR}"
-export DFTD4_INCLUDE_DIR="$pkg_install_dir/include"
+export MCHARGE="${MCHARGE}"
+export MSTORE="${MSTORE}"
+export MCTC="${MCTC}"
+export DFTD4="${DFTD4}"
+export DFTD4_INCLUDE_DIRS="${DFTD4_INCLUDE_DIRS}"
+export DFTD4_LINK_LIBRARIES="${DFTD4_LINK_LIBRARIES}"
 export DFTD4_ROOT="${pkg_install_dir}"
 export DFTD4_DFLAGS="${DFTD4_DFLAGS}" 
 export DFTD4_CFLAGS="${DFTD4_CFLAGS}"

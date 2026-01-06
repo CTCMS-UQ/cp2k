@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -548,7 +548,7 @@ CONTAINS
          DO I2 = L2, U2
 
             ! cycling through the CPUs, check if the current ray (I1,I2) is local to that CPU
-            IF (rspace_pw%pw_grid%para%mode .NE. PW_MODE_LOCAL) THEN
+            IF (rspace_pw%pw_grid%para%mode /= PW_MODE_LOCAL) THEN
                DO ip = 0, num_pe - 1
                   IF (rspace_pw%pw_grid%para%bo(1, 1, ip, 1) <= I1 - L1 + 1 &
                       .AND. rspace_pw%pw_grid%para%bo(2, 1, ip, 1) >= I1 - L1 + 1 .AND. &
@@ -814,7 +814,7 @@ CONTAINS
       INTEGER(KIND=C_INT) :: ret
       ret = libvori_finalize()
 #endif
-   END SUBROUTINE
+   END SUBROUTINE finalize_libvori
 
 ! **************************************************************************************************
 !> \brief ...

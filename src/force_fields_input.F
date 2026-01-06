@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -18,6 +18,8 @@
 !> \author CJM
 ! **************************************************************************************************
 MODULE force_fields_input
+   USE ace_wrapper,                     ONLY: ace_model_initialize,&
+                                              ace_model_type
    USE bibliography,                    ONLY: Clabaut2020,&
                                               Clabaut2021,&
                                               Siepmann1995,&
@@ -65,12 +67,12 @@ MODULE force_fields_input
    USE memory_utilities,                ONLY: reallocate
    USE message_passing,                 ONLY: mp_para_env_type
    USE pair_potential_types,            ONLY: &
-        allegro_pot_type, allegro_type, b4_type, bm_type, deepmd_type, &
+        ace_type, allegro_pot_type, allegro_type, b4_type, bm_type, deepmd_type, &
         do_potential_single_allocation, ea_type, eam_pot_type, ft_pot_type, ft_type, ftd_type, &
         gal21_type, gal_type, gp_type, gw_type, ip_type, ipbv_pot_type, lj_charmm_type, &
         nequip_pot_type, nequip_type, no_potential_single_allocation, pair_potential_p_type, &
-        pair_potential_reallocate, potential_single_allocation, quip_type, siepmann_type, &
-        tab_pot_type, tab_type, tersoff_type, wl_type
+        pair_potential_reallocate, potential_single_allocation, siepmann_type, tab_pot_type, &
+        tab_type, tersoff_type, wl_type
    USE shell_potential_types,           ONLY: shell_p_create,&
                                               shell_p_type
    USE string_utilities,                ONLY: uppercase
@@ -107,8 +109,8 @@ CONTAINS
 
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: atm_names
-      INTEGER :: nallegro, nb4, nbends, nbm, nbmhft, nbmhftd, nbonds, nchg, ndeepmd, neam, ngal, &
-         ngal21, ngd, ngp, nimpr, nipbv, nlj, nnequip, nopbend, nquip, nshell, nsiepmann, ntab, &
+      INTEGER :: nace, nallegro, nb4, nbends, nbm, nbmhft, nbmhftd, nbonds, nchg, ndeepmd, neam, &
+         ngal, ngal21, ngd, ngp, nimpr, nipbv, nlj, nnequip, nopbend, nshell, nsiepmann, ntab, &
          ntersoff, ntors, ntot, nubs, nwl
       LOGICAL                                            :: explicit, unique_spline
       REAL(KIND=dp)                                      :: min_eps_spline_allowed
@@ -279,18 +281,10 @@ CONTAINS
             CALL read_siepmann_section(inp_info%nonbonded, tmp_section2, ntot, tmp_section2)
          END IF
 
-         tmp_section2 => section_vals_get_subs_vals(tmp_section, "quip")
-         CALL section_vals_get(tmp_section2, explicit=explicit, n_repetition=nquip)
-         ntot = nlj + nwl + neam + ngd + nipbv + nbmhft + nbmhftd + nb4 + nbm + ngp + ntersoff + ngal + ngal21 + nsiepmann
-         IF (explicit) THEN
-            CALL pair_potential_reallocate(inp_info%nonbonded, 1, ntot + nquip, quip=.TRUE.)
-            CALL read_quip_section(inp_info%nonbonded, tmp_section2, ntot)
-         END IF
-
          tmp_section2 => section_vals_get_subs_vals(tmp_section, "nequip")
          CALL section_vals_get(tmp_section2, explicit=explicit, n_repetition=nnequip)
-         ntot = nlj + nwl + neam + ngd + nipbv + nbmhft + nbmhftd + nb4 + nbm + ngp + ntersoff + ngal + ngal21 + nsiepmann + &
-                nquip
+         ntot = nlj + nwl + neam + ngd + nipbv + nbmhft + nbmhftd + nb4 + nbm + ngp + ntersoff + &
+                ngal + ngal21 + nsiepmann
          IF (explicit) THEN
             ! avoid repeating the nequip section for each pair
             CALL section_vals_val_get(tmp_section2, "ATOMS", c_vals=atm_names)
@@ -301,8 +295,8 @@ CONTAINS
 
          tmp_section2 => section_vals_get_subs_vals(tmp_section, "allegro")
          CALL section_vals_get(tmp_section2, explicit=explicit, n_repetition=nallegro)
-         ntot = nlj + nwl + neam + ngd + nipbv + nbmhft + nbmhftd + nb4 + nbm + ngp + ntersoff + ngal + ngal21 + nsiepmann + &
-                nquip + nnequip
+         ntot = nlj + nwl + neam + ngd + nipbv + nbmhft + nbmhftd + nb4 + nbm + ngp + ntersoff + &
+                ngal + ngal21 + nsiepmann + nnequip
          IF (explicit) THEN
             ! avoid repeating the allegro section for each pair
             CALL section_vals_val_get(tmp_section2, "ATOMS", c_vals=atm_names)
@@ -313,8 +307,8 @@ CONTAINS
 
          tmp_section2 => section_vals_get_subs_vals(tmp_section, "TABPOT")
          CALL section_vals_get(tmp_section2, explicit=explicit, n_repetition=ntab)
-         ntot = nlj + nwl + neam + ngd + nipbv + nbmhft + nbmhftd + nb4 + nbm + ngp + ntersoff + ngal + ngal21 + nsiepmann + &
-                nquip + nnequip + nallegro
+         ntot = nlj + nwl + neam + ngd + nipbv + nbmhft + nbmhftd + nb4 + nbm + ngp + ntersoff + &
+                ngal + ngal21 + nsiepmann + nnequip + nallegro
          IF (explicit) THEN
             CALL pair_potential_reallocate(inp_info%nonbonded, 1, ntot + ntab, tab=.TRUE.)
             CALL read_tabpot_section(inp_info%nonbonded, tmp_section2, ntot, para_env, mm_section)
@@ -322,14 +316,26 @@ CONTAINS
 
          tmp_section2 => section_vals_get_subs_vals(tmp_section, "DEEPMD")
          CALL section_vals_get(tmp_section2, explicit=explicit, n_repetition=ndeepmd)
-         ntot = nlj + nwl + neam + ngd + nipbv + nbmhft + nbmhftd + nb4 + nbm + ngp + ntersoff + ngal + ngal21 + nsiepmann + &
-                nquip + nnequip + nallegro + ntab
+         ntot = nlj + nwl + neam + ngd + nipbv + nbmhft + nbmhftd + nb4 + nbm + ngp + ntersoff + &
+                ngal + ngal21 + nsiepmann + nnequip + nallegro + ntab
          IF (explicit) THEN
             ! avoid repeating the deepmd section for each pair
             CALL section_vals_val_get(tmp_section2, "ATOMS", c_vals=atm_names)
             ndeepmd = ndeepmd - 1 + SIZE(atm_names) + (SIZE(atm_names)*SIZE(atm_names) - SIZE(atm_names))/2
             CALL pair_potential_reallocate(inp_info%nonbonded, 1, ntot + ndeepmd, deepmd=.TRUE.)
             CALL read_deepmd_section(inp_info%nonbonded, tmp_section2, ntot)
+         END IF
+
+         tmp_section2 => section_vals_get_subs_vals(tmp_section, "ACE")
+         CALL section_vals_get(tmp_section2, explicit=explicit, n_repetition=nace)
+         ntot = nlj + nwl + neam + ngd + nipbv + nbmhft + nbmhftd + nb4 + nbm + ngp + ntersoff + &
+                ngal + ngal21 + nsiepmann + nnequip + nallegro + ntab + ndeepmd
+         IF (explicit) THEN
+            ! avoid repeating the ace section for each pair
+            CALL section_vals_val_get(tmp_section2, "ATOMS", c_vals=atm_names)
+            nace = nace - 1 + SIZE(atm_names) + (SIZE(atm_names)*SIZE(atm_names) - SIZE(atm_names))/2
+            CALL pair_potential_reallocate(inp_info%nonbonded, 1, ntot + nace, ace=.TRUE.)
+            CALL read_ace_section(inp_info%nonbonded, tmp_section2, ntot)
          END IF
 
       END IF
@@ -667,7 +673,70 @@ CONTAINS
       END DO
    END SUBROUTINE read_eam_section
 
+! **************************************************************************************
+!> \brief Reads the ACE section
+!> \param nonbonded ...
+!> \param section ...
+!> \param start ...
 ! **************************************************************************************************
+   SUBROUTINE read_ace_section(nonbonded, section, start)
+      TYPE(pair_potential_p_type), POINTER               :: nonbonded
+      TYPE(section_vals_type), POINTER                   :: section
+      INTEGER, INTENT(IN)                                :: start
+
+      CHARACTER(LEN=2), ALLOCATABLE, DIMENSION(:)        :: ace_atype_symbol
+      CHARACTER(LEN=default_path_length)                 :: ace_filename
+      CHARACTER(LEN=default_string_length)               :: ace_file_name
+      CHARACTER(LEN=default_string_length), &
+         DIMENSION(:), POINTER                           :: atm_names
+      INTEGER                                            :: ace_ntype, isec, jsec, n_items
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: rcutall
+      TYPE(ace_model_type)                               :: model
+
+      n_items = 1
+      isec = 1
+      n_items = isec*n_items
+      CALL section_vals_val_get(section, "ATOMS", c_vals=atm_names)
+
+      ace_ntype = SIZE(atm_names)
+      ALLOCATE (ace_atype_symbol(ace_ntype), rcutall(ace_ntype, ace_ntype))
+      DO isec = 1, ace_ntype
+         ace_atype_symbol(isec) = atm_names(isec) (1:2)
+      END DO
+      CALL section_vals_val_get(section, "POT_FILE_NAME", c_val=ace_file_name)
+
+      ace_filename = discover_file(ace_file_name)
+
+#if defined(__ACE)
+      ! need ace_model_initialize()  here somewhere to get rcut
+      CALL ace_model_initialize(ntypec=ace_ntype, symbolc=ace_atype_symbol, &
+                                fname=TRIM(ace_filename), rcutc=rcutall, model=model)
+#else
+      CPABORT("CP2K was compiled without ACE library.")
+#endif
+
+      DO isec = 1, SIZE(atm_names)
+         DO jsec = isec, SIZE(atm_names)
+            nonbonded%pot(start + n_items)%pot%type = ace_type
+            nonbonded%pot(start + n_items)%pot%at1 = atm_names(isec)
+            nonbonded%pot(start + n_items)%pot%at2 = atm_names(jsec)
+            CALL uppercase(nonbonded%pot(start + n_items)%pot%at1)
+            CALL uppercase(nonbonded%pot(start + n_items)%pot%at2)
+
+            nonbonded%pot(start + n_items)%pot%set(1)%ace%ace_file_name = ace_filename
+            nonbonded%pot(start + n_items)%pot%set(1)%ace%atom_ace_type = isec
+            nonbonded%pot(start + n_items)%pot%set(1)%ace%model = model
+
+            !using rcutall(isec,jsec) instead of maxval(rcutall) TODO check that
+            !it shouldn't be jsec,isec?
+            nonbonded%pot(start + n_items)%pot%rcutsq = cp_unit_to_cp2k(rcutall(isec, jsec), "angstrom")**2
+
+            n_items = n_items + 1
+         END DO
+      END DO
+   END SUBROUTINE read_ace_section
+
+! **************************************************************************************
 !> \brief Reads the DEEPMD section
 !> \param nonbonded ...
 !> \param section ...
@@ -709,56 +778,6 @@ CONTAINS
    END SUBROUTINE read_deepmd_section
 
 ! **************************************************************************************************
-!> \brief Reads the QUIP section
-!> \param nonbonded ...
-!> \param section ...
-!> \param start ...
-!> \author teo
-! **************************************************************************************************
-   SUBROUTINE read_quip_section(nonbonded, section, start)
-      TYPE(pair_potential_p_type), POINTER               :: nonbonded
-      TYPE(section_vals_type), POINTER                   :: section
-      INTEGER, INTENT(IN)                                :: start
-
-      CHARACTER(LEN=default_string_length), &
-         DIMENSION(:), POINTER                           :: args_str, atm_names
-      INTEGER                                            :: is, isec, n_calc_args, n_items
-
-      CALL section_vals_get(section, n_repetition=n_items)
-      DO isec = 1, n_items
-         CALL section_vals_val_get(section, "ATOMS", i_rep_section=isec, c_vals=atm_names)
-
-         nonbonded%pot(start + isec)%pot%type = quip_type
-         nonbonded%pot(start + isec)%pot%at1 = atm_names(1)
-         nonbonded%pot(start + isec)%pot%at2 = atm_names(2)
-         CALL uppercase(nonbonded%pot(start + isec)%pot%at1)
-         CALL uppercase(nonbonded%pot(start + isec)%pot%at2)
-         CALL section_vals_val_get(section, "PARM_FILE_NAME", i_rep_section=isec, &
-                                   c_val=nonbonded%pot(start + isec)%pot%set(1)%quip%quip_file_name)
-         CALL section_vals_val_get(section, "INIT_ARGS", i_rep_section=isec, &
-                                   c_vals=args_str)
-         nonbonded%pot(start + isec)%pot%set(1)%quip%init_args = ""
-         DO is = 1, SIZE(args_str)
-            nonbonded%pot(start + isec)%pot%set(1)%quip%init_args = &
-               TRIM(nonbonded%pot(start + isec)%pot%set(1)%quip%init_args)// &
-               " "//TRIM(args_str(is))
-         END DO ! is
-         CALL section_vals_val_get(section, "CALC_ARGS", i_rep_section=isec, &
-                                   n_rep_val=n_calc_args)
-         IF (n_calc_args > 0) THEN
-            CALL section_vals_val_get(section, "CALC_ARGS", i_rep_section=isec, &
-                                      c_vals=args_str)
-            DO is = 1, SIZE(args_str)
-               nonbonded%pot(start + isec)%pot%set(1)%quip%calc_args = &
-                  TRIM(nonbonded%pot(start + isec)%pot%set(1)%quip%calc_args)// &
-                  " "//TRIM(args_str(is))
-            END DO ! is
-         END IF
-         nonbonded%pot(start + isec)%pot%rcutsq = 0.0_dp
-      END DO
-   END SUBROUTINE read_quip_section
-
-! **************************************************************************************************
 !> \brief Reads the NEQUIP section
 !> \param nonbonded ...
 !> \param section ...
@@ -775,6 +794,7 @@ CONTAINS
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: atm_names
       INTEGER                                            :: isec, jsec, n_items
+      TYPE(nequip_pot_type)                              :: nequip
 
       n_items = 1
       isec = 1
@@ -786,6 +806,15 @@ CONTAINS
       CALL section_vals_val_get(section, "UNIT_FORCES", c_val=unit_forces)
       CALL section_vals_val_get(section, "UNIT_CELL", c_val=unit_cell)
 
+      ! Since reading nequip metadata is expensive we do it only once.
+      nequip%nequip_file_name = discover_file(nequip_file_name)
+      nequip%unit_coords = unit_coords
+      nequip%unit_forces = unit_forces
+      nequip%unit_energy = unit_energy
+      nequip%unit_cell = unit_cell
+      CALL read_nequip_data(nequip)
+      CALL check_cp2k_atom_names_in_torch(atm_names, nequip%type_names_torch)
+
       DO isec = 1, SIZE(atm_names)
          DO jsec = isec, SIZE(atm_names)
             nonbonded%pot(start + n_items)%pot%type = nequip_type
@@ -793,14 +822,8 @@ CONTAINS
             nonbonded%pot(start + n_items)%pot%at2 = atm_names(jsec)
             CALL uppercase(nonbonded%pot(start + n_items)%pot%at1)
             CALL uppercase(nonbonded%pot(start + n_items)%pot%at2)
-            nonbonded%pot(start + n_items)%pot%set(1)%nequip%nequip_file_name = discover_file(nequip_file_name)
-            nonbonded%pot(start + n_items)%pot%set(1)%nequip%unit_coords = unit_coords
-            nonbonded%pot(start + n_items)%pot%set(1)%nequip%unit_forces = unit_forces
-            nonbonded%pot(start + n_items)%pot%set(1)%nequip%unit_energy = unit_energy
-            nonbonded%pot(start + n_items)%pot%set(1)%nequip%unit_cell = unit_cell
-            CALL read_nequip_data(nonbonded%pot(start + n_items)%pot%set(1)%nequip)
-            CALL check_cp2k_atom_names_in_torch(atm_names, nonbonded%pot(start + n_items)%pot%set(1)%nequip%type_names_torch)
-            nonbonded%pot(start + n_items)%pot%rcutsq = nonbonded%pot(start + n_items)%pot%set(1)%nequip%rcutsq
+            nonbonded%pot(start + n_items)%pot%set(1)%nequip = nequip
+            nonbonded%pot(start + n_items)%pot%rcutsq = nequip%rcutsq
             n_items = n_items + 1
          END DO
       END DO
@@ -824,6 +847,7 @@ CONTAINS
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: atm_names
       INTEGER                                            :: isec, jsec, n_items
+      TYPE(allegro_pot_type)                             :: allegro
 
       n_items = 1
       isec = 1
@@ -835,6 +859,15 @@ CONTAINS
       CALL section_vals_val_get(section, "UNIT_FORCES", c_val=unit_forces)
       CALL section_vals_val_get(section, "UNIT_CELL", c_val=unit_cell)
 
+      ! Since reading allegro metadata is expensive we do it only once.
+      allegro%allegro_file_name = discover_file(allegro_file_name)
+      allegro%unit_coords = unit_coords
+      allegro%unit_forces = unit_forces
+      allegro%unit_energy = unit_energy
+      allegro%unit_cell = unit_cell
+      CALL read_allegro_data(allegro)
+      CALL check_cp2k_atom_names_in_torch(atm_names, allegro%type_names_torch)
+
       DO isec = 1, SIZE(atm_names)
          DO jsec = isec, SIZE(atm_names)
             nonbonded%pot(start + n_items)%pot%type = allegro_type
@@ -842,14 +875,8 @@ CONTAINS
             nonbonded%pot(start + n_items)%pot%at2 = atm_names(jsec)
             CALL uppercase(nonbonded%pot(start + n_items)%pot%at1)
             CALL uppercase(nonbonded%pot(start + n_items)%pot%at2)
-            nonbonded%pot(start + n_items)%pot%set(1)%allegro%allegro_file_name = discover_file(allegro_file_name)
-            nonbonded%pot(start + n_items)%pot%set(1)%allegro%unit_coords = unit_coords
-            nonbonded%pot(start + n_items)%pot%set(1)%allegro%unit_forces = unit_forces
-            nonbonded%pot(start + n_items)%pot%set(1)%allegro%unit_energy = unit_energy
-            nonbonded%pot(start + n_items)%pot%set(1)%allegro%unit_cell = unit_cell
-            CALL read_allegro_data(nonbonded%pot(start + n_items)%pot%set(1)%allegro)
-            CALL check_cp2k_atom_names_in_torch(atm_names, nonbonded%pot(start + n_items)%pot%set(1)%allegro%type_names_torch)
-            nonbonded%pot(start + n_items)%pot%rcutsq = nonbonded%pot(start + n_items)%pot%set(1)%allegro%rcutsq
+            nonbonded%pot(start + n_items)%pot%set(1)%allegro = allegro
+            nonbonded%pot(start + n_items)%pot%rcutsq = allegro%rcutsq
             n_items = n_items + 1
          END DO
       END DO
@@ -1507,8 +1534,11 @@ CONTAINS
          CALL uppercase(nonbonded%pot(start + isec)%pot%at2)
 
          CALL section_vals_val_get(section, "METALS", i_rep_section=isec, c_vals=atm_names)
-         nonbonded%pot(start + isec)%pot%set(1)%gal%met1 = atm_names(1)
-         nonbonded%pot(start + isec)%pot%set(1)%gal%met2 = atm_names(2)
+         IF (ANY(LEN_TRIM(atm_names(:)) > 2)) THEN
+            CPWARN("The atom name will be truncated.")
+         END IF
+         nonbonded%pot(start + isec)%pot%set(1)%gal%met1 = TRIM(atm_names(1))
+         nonbonded%pot(start + isec)%pot%set(1)%gal%met2 = TRIM(atm_names(2))
 
          CALL section_vals_val_get(gal_section, "epsilon", i_rep_section=isec, &
                                    r_val=nonbonded%pot(start + isec)%pot%set(1)%gal%epsilon)
@@ -1597,8 +1627,11 @@ CONTAINS
          CALL uppercase(nonbonded%pot(start + isec)%pot%at2)
 
          CALL section_vals_val_get(section, "METALS", i_rep_section=isec, c_vals=atm_names)
-         nonbonded%pot(start + isec)%pot%set(1)%gal21%met1 = atm_names(1)
-         nonbonded%pot(start + isec)%pot%set(1)%gal21%met2 = atm_names(2)
+         IF (ANY(LEN_TRIM(atm_names(:)) > 2)) THEN
+            CPWARN("The atom name will be truncated.")
+         END IF
+         nonbonded%pot(start + isec)%pot%set(1)%gal21%met1 = TRIM(atm_names(1))
+         nonbonded%pot(start + isec)%pot%set(1)%gal21%met2 = TRIM(atm_names(2))
 
          CALL section_vals_val_get(gal21_section, "epsilon", i_rep_section=isec, r_vals=rvalues)
          nonbonded%pot(start + isec)%pot%set(1)%gal21%epsilon1 = rvalues(1)
@@ -2229,12 +2262,12 @@ CONTAINS
          CALL section_vals_val_get(section, "PHI0", i_rep_section=isec, r_val=torsion_phi0(start + isec))
          CALL section_vals_val_get(section, "M", i_rep_section=isec, i_val=torsion_m(start + isec))
          ! Modify parameterisation for OPLS case
-         IF (torsion_kind(start + isec) .EQ. do_ff_opls) THEN
-            IF (torsion_phi0(start + isec) .NE. 0.0_dp) THEN
+         IF (torsion_kind(start + isec) == do_ff_opls) THEN
+            IF (torsion_phi0(start + isec) /= 0.0_dp) THEN
                CALL cp_warn(__LOCATION__, "PHI0 parameter was non-zero "// &
                             "for an OPLS-type TORSION.  It will be ignored.")
             END IF
-            IF (MODULO(torsion_m(start + isec), 2) .EQ. 0) THEN
+            IF (MODULO(torsion_m(start + isec), 2) == 0) THEN
                ! For even M, negate the cosine using a Pi phase factor
                torsion_phi0(start + isec) = pi
             END IF
@@ -2431,13 +2464,14 @@ CONTAINS
 !> \author Gabriele Tocci
 ! **************************************************************************************************
    SUBROUTINE read_nequip_data(nequip)
-      TYPE(nequip_pot_type), POINTER                     :: nequip
+      TYPE(nequip_pot_type)                              :: nequip
 
-      CHARACTER(len=*), PARAMETER                        :: routineN = 'read_nequip_data'
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'read_nequip_data'
       CHARACTER(LEN=1), PARAMETER                        :: delimiter = ' '
 
       CHARACTER(LEN=100), ALLOCATABLE, DIMENSION(:)      :: tokenized_string
-      CHARACTER(LEN=default_path_length)                 :: allow_tf32_str, cutoff_str, types_str
+      CHARACTER(LEN=default_path_length)                 :: allow_tf32_str, cutoff_str, &
+                                                            default_dtype, model_dtype, types_str
       INTEGER                                            :: handle
       LOGICAL                                            :: allow_tf32, found
 
@@ -2470,17 +2504,16 @@ CONTAINS
       nequip%unit_energy_val = cp_unit_to_cp2k(nequip%unit_energy_val, nequip%unit_energy)
       nequip%unit_cell_val = cp_unit_to_cp2k(nequip%unit_cell_val, nequip%unit_cell)
 
-      IF (torch_model_read_metadata(nequip%nequip_file_name, "default_dtype") == "float32" .AND. &
-          torch_model_read_metadata(nequip%nequip_file_name, "model_dtype") == "float32") THEN
+      default_dtype = torch_model_read_metadata(nequip%nequip_file_name, "default_dtype")
+      model_dtype = torch_model_read_metadata(nequip%nequip_file_name, "model_dtype")
+      IF (TRIM(default_dtype) == "float32" .AND. TRIM(model_dtype) == "float32") THEN
          nequip%do_nequip_sp = .TRUE.
-      ELSE IF (torch_model_read_metadata(nequip%nequip_file_name, "default_dtype") == "float64" .AND. &
-               torch_model_read_metadata(nequip%nequip_file_name, "model_dtype") == "float64") THEN
+      ELSE IF (TRIM(default_dtype) == "float64" .AND. TRIM(model_dtype) == "float64") THEN
          nequip%do_nequip_sp = .FALSE.
       ELSE
          CALL cp_abort(__LOCATION__, &
                        "Both default_dtype and model_dtype should be either float32 or float64. Currently, default_dtype is <"// &
-                       torch_model_read_metadata(nequip%nequip_file_name, "default_dtype")//"> and model_dtype is <"// &
-                       torch_model_read_metadata(nequip%nequip_file_name, "model_dtype")//">.")
+                       TRIM(default_dtype)//"> and model_dtype is <"//TRIM(model_dtype)//">.")
       END IF
 
       allow_tf32_str = torch_model_read_metadata(nequip%nequip_file_name, "allow_tf32")
@@ -2501,13 +2534,14 @@ CONTAINS
 !> \author Gabriele Tocci
 ! **************************************************************************************************
    SUBROUTINE read_allegro_data(allegro)
-      TYPE(allegro_pot_type), POINTER                    :: allegro
+      TYPE(allegro_pot_type)                             :: allegro
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'read_allegro_data'
       CHARACTER(LEN=1), PARAMETER                        :: delimiter = ' '
 
       CHARACTER(LEN=100), ALLOCATABLE, DIMENSION(:)      :: tokenized_string
-      CHARACTER(LEN=default_path_length)                 :: allow_tf32_str, cutoff_str, types_str
+      CHARACTER(LEN=default_path_length)                 :: allow_tf32_str, cutoff_str, &
+                                                            default_dtype, model_dtype, types_str
       INTEGER                                            :: handle
       LOGICAL                                            :: allow_tf32, found
 
@@ -2544,17 +2578,16 @@ CONTAINS
       allegro%unit_energy_val = cp_unit_to_cp2k(allegro%unit_energy_val, allegro%unit_energy)
       allegro%unit_cell_val = cp_unit_to_cp2k(allegro%unit_cell_val, allegro%unit_cell)
 
-      IF (torch_model_read_metadata(allegro%allegro_file_name, "default_dtype") == "float32" .AND. &
-          torch_model_read_metadata(allegro%allegro_file_name, "model_dtype") == "float32") THEN
+      default_dtype = torch_model_read_metadata(allegro%allegro_file_name, "default_dtype")
+      model_dtype = torch_model_read_metadata(allegro%allegro_file_name, "model_dtype")
+      IF (TRIM(default_dtype) == "float32" .AND. TRIM(model_dtype) == "float32") THEN
          allegro%do_allegro_sp = .TRUE.
-      ELSE IF (torch_model_read_metadata(allegro%allegro_file_name, "default_dtype") == "float64" .AND. &
-               torch_model_read_metadata(allegro%allegro_file_name, "model_dtype") == "float64") THEN
+      ELSE IF (TRIM(default_dtype) == "float64" .AND. TRIM(model_dtype) == "float64") THEN
          allegro%do_allegro_sp = .FALSE.
       ELSE
          CALL cp_abort(__LOCATION__, &
                        "Both default_dtype and model_dtype should be either float32 or float64. Currently, default_dtype is <"// &
-                       torch_model_read_metadata(allegro%allegro_file_name, "default_dtype")//"> and model_dtype is <"// &
-                       torch_model_read_metadata(allegro%allegro_file_name, "model_dtype")//">.")
+                       TRIM(default_dtype)//"> and model_dtype is <"//TRIM(model_dtype)//">.")
       END IF
 
       allow_tf32_str = torch_model_read_metadata(allegro%allegro_file_name, "allow_tf32")

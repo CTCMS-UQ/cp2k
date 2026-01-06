@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -101,7 +101,7 @@ CONTAINS
       Loop_on_all_values: DO I = 2, SIZE(mm_el_pot_radius)
          Found = .FALSE.
          Loop_on_found_values: DO J = 1, SIZE(radius)
-            IF (mm_el_pot_radius(i) .EQ. radius(j)) THEN
+            IF (mm_el_pot_radius(i) == radius(j)) THEN
                Found = .TRUE.
                EXIT Loop_on_found_values
             END IF
@@ -213,7 +213,7 @@ CONTAINS
          ALLOCATE (mm_atom_index(1))
          ! Build mm_atom_index List
          DO J = 1, SIZE(mm_el_pot_radius)
-            IF (rc .EQ. mm_el_pot_radius(J)) THEN
+            IF (rc == mm_el_pot_radius(J)) THEN
                Ndim = SIZE(mm_atom_index)
                mm_atom_index(Ndim) = J
                CALL reallocate(mm_atom_index, 1, Ndim + 1)

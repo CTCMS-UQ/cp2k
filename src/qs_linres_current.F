@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -25,9 +25,9 @@ MODULE qs_linres_current
                                               cp_2d_r_p_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add_block_node, dbcsr_convert_offsets_to_sizes, dbcsr_copy, dbcsr_create, &
-        dbcsr_deallocate_matrix, dbcsr_distribution_type, dbcsr_finalize, dbcsr_get_block_p, &
-        dbcsr_p_type, dbcsr_set, dbcsr_type, dbcsr_type_antisymmetric, dbcsr_type_no_symmetry
+        dbcsr_convert_offsets_to_sizes, dbcsr_copy, dbcsr_create, dbcsr_deallocate_matrix, &
+        dbcsr_distribution_type, dbcsr_finalize, dbcsr_get_block_p, dbcsr_p_type, dbcsr_put_block, &
+        dbcsr_set, dbcsr_type, dbcsr_type_antisymmetric, dbcsr_type_no_symmetry
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_alloc_block_from_nbl
    USE cp_dbcsr_operations,             ONLY: cp_dbcsr_plus_fm_fm_t,&
                                               cp_dbcsr_sm_fm_multiply,&
@@ -144,10 +144,10 @@ MODULE qs_linres_current
       INTEGER :: n = -1
       REAL(dp), POINTER, DIMENSION(:, :) :: r => NULL()
    END TYPE box_type
-   REAL(dp), DIMENSION(3, 3, 3), PARAMETER  :: Levi_Civita = RESHAPE((/ &
+   REAL(dp), DIMENSION(3, 3, 3), PARAMETER  :: Levi_Civita = RESHAPE([ &
                                                           0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, -1.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, &
                                                           0.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, -1.0_dp, 0.0_dp, 0.0_dp, &
-                                             0.0_dp, -1.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp/), (/3, 3, 3/))
+                                                0.0_dp, -1.0_dp, 0.0_dp, 1.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp], [3, 3, 3])
 
 CONTAINS
 
@@ -299,7 +299,7 @@ CONTAINS
                            name="density_matrix0", &
                            dist=dbcsr_dist, matrix_type=dbcsr_type_no_symmetry, &
                            row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                           nze=0, mutable_work=.TRUE.)
+                           mutable_work=.TRUE.)
          CALL cp_dbcsr_alloc_block_from_nbl(density_matrix0(ispin)%matrix, sab_all)
          !
          !density_matrix_a
@@ -606,8 +606,7 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(3)                        :: ra, rab, rb, rp
       REAL(KIND=dp), DIMENSION(:), POINTER               :: set_radius_a, set_radius_b
       REAL(KIND=dp), DIMENSION(:, :), POINTER :: jp_block_a, jp_block_b, jp_block_c, jp_block_d, &
-         jpab_a, jpab_b, jpab_c, jpab_d, jpblock_a, jpblock_b, jpblock_c, jpblock_d, rpgfa, rpgfb, &
-         sphi_a, sphi_b, work, zeta, zetb
+         jpab_a, jpab_b, jpab_c, jpab_d, rpgfa, rpgfb, sphi_a, sphi_b, work, zeta, zetb
       REAL(KIND=dp), DIMENSION(:, :, :), POINTER         :: jpabt_a, jpabt_b, jpabt_c, jpabt_d, workt
       TYPE(atom_pair_type), DIMENSION(:), POINTER        :: atom_pair_recv, atom_pair_send
       TYPE(cell_type), POINTER                           :: cell
@@ -643,7 +642,6 @@ CONTAINS
                workt, mat_a, mat_b, mat_c, mat_d, rs_gauge)
       NULLIFY (deltajp_a, deltajp_b, deltajp_c, deltajp_d)
       NULLIFY (jp_block_a, jp_block_b, jp_block_c, jp_block_d)
-      NULLIFY (jpblock_a, jpblock_b, jpblock_c, jpblock_d)
       NULLIFY (jpabt_a, jpabt_b, jpabt_c, jpabt_d)
       NULLIFY (atom_pair_send, atom_pair_recv)
 
@@ -652,7 +650,7 @@ CONTAINS
       !
       ! Set pointers for the different gauge
       ! If do_igaim is False the current_env is never needed
-      do_igaim = current_env%gauge .EQ. current_gauge_atom
+      do_igaim = current_env%gauge == current_gauge_atom
 
       mat_a => mat_jp
       mat_b => mat_jp_rii
@@ -679,7 +677,7 @@ CONTAINS
       !
       scale2 = 0.0_dp
       idir2 = 1
-      IF (idir .NE. iB) THEN
+      IF (idir /= iB) THEN
          CALL set_vecp_rev(idir, iB, idir2)
          scale2 = fac_vecp(idir, iB, idir2)
       END IF
@@ -839,22 +837,12 @@ CONTAINS
          IF (.NOT. ASSOCIATED(jp_block_a)) CYCLE
 
          IF (distributed_rs_grids) THEN
-            NULLIFY (jpblock_a, jpblock_b, jpblock_c, jpblock_d)
-            CALL dbcsr_add_block_node(deltajp_a(1)%matrix, brow, bcol, jpblock_a)
-            jpblock_a = jp_block_a
-            CALL dbcsr_add_block_node(deltajp_b(1)%matrix, brow, bcol, jpblock_b)
-            jpblock_b = jp_block_b
-            CALL dbcsr_add_block_node(deltajp_c(1)%matrix, brow, bcol, jpblock_c)
-            jpblock_c = jp_block_c
+            CALL dbcsr_put_block(deltajp_a(1)%matrix, brow, bcol, jp_block_a)
+            CALL dbcsr_put_block(deltajp_b(1)%matrix, brow, bcol, jp_block_b)
+            CALL dbcsr_put_block(deltajp_c(1)%matrix, brow, bcol, jp_block_c)
             IF (do_igaim) THEN
-               CALL dbcsr_add_block_node(deltajp_d(1)%matrix, brow, bcol, jpblock_d)
-               jpblock_d = jp_block_d
+               CALL dbcsr_put_block(deltajp_d(1)%matrix, brow, bcol, jp_block_d)
             END IF
-         ELSE
-            jpblock_a => jp_block_a
-            jpblock_b => jp_block_b
-            jpblock_c => jp_block_c
-            IF (do_igaim) jpblock_d => jp_block_d
          END IF
 
          CALL task_list_inner_loop(tasks, ntasks, curr_tasks, rs_descs, &
@@ -907,12 +895,12 @@ CONTAINS
          DO igrid_level = 1, gridlevel_info%ngrid_levels
             my_rho => rs_rho(igrid_level)%r
             my_current => rs_current(igrid_level)%r
-            IF (LBOUND(my_rho, 3) .NE. LBOUND(my_current, 3) .OR. &
-                LBOUND(my_rho, 2) .NE. LBOUND(my_current, 2) .OR. &
-                LBOUND(my_rho, 1) .NE. LBOUND(my_current, 1) .OR. &
-                UBOUND(my_rho, 3) .NE. UBOUND(my_current, 3) .OR. &
-                UBOUND(my_rho, 2) .NE. UBOUND(my_current, 2) .OR. &
-                UBOUND(my_rho, 1) .NE. UBOUND(my_current, 1)) THEN
+            IF (LBOUND(my_rho, 3) /= LBOUND(my_current, 3) .OR. &
+                LBOUND(my_rho, 2) /= LBOUND(my_current, 2) .OR. &
+                LBOUND(my_rho, 1) /= LBOUND(my_current, 1) .OR. &
+                UBOUND(my_rho, 3) /= UBOUND(my_current, 3) .OR. &
+                UBOUND(my_rho, 2) /= UBOUND(my_current, 2) .OR. &
+                UBOUND(my_rho, 1) /= UBOUND(my_current, 1)) THEN
                WRITE (*, *) 'LBOUND(my_rho,3),LBOUND(my_current,3)', LBOUND(my_rho, 3), LBOUND(my_current, 3)
                WRITE (*, *) 'LBOUND(my_rho,2),LBOUND(my_current,2)', LBOUND(my_rho, 2), LBOUND(my_current, 2)
                WRITE (*, *) 'LBOUND(my_rho,1),LBOUND(my_current,1)', LBOUND(my_rho, 1), LBOUND(my_current, 1)
@@ -923,12 +911,12 @@ CONTAINS
             END IF
 
             my_gauge => rs_gauge(1, igrid_level)%r
-            IF (LBOUND(my_rho, 3) .NE. LBOUND(my_gauge, 3) .OR. &
-                LBOUND(my_rho, 2) .NE. LBOUND(my_gauge, 2) .OR. &
-                LBOUND(my_rho, 1) .NE. LBOUND(my_gauge, 1) .OR. &
-                UBOUND(my_rho, 3) .NE. UBOUND(my_gauge, 3) .OR. &
-                UBOUND(my_rho, 2) .NE. UBOUND(my_gauge, 2) .OR. &
-                UBOUND(my_rho, 1) .NE. UBOUND(my_gauge, 1)) THEN
+            IF (LBOUND(my_rho, 3) /= LBOUND(my_gauge, 3) .OR. &
+                LBOUND(my_rho, 2) /= LBOUND(my_gauge, 2) .OR. &
+                LBOUND(my_rho, 1) /= LBOUND(my_gauge, 1) .OR. &
+                UBOUND(my_rho, 3) /= UBOUND(my_gauge, 3) .OR. &
+                UBOUND(my_rho, 2) /= UBOUND(my_gauge, 2) .OR. &
+                UBOUND(my_rho, 1) /= UBOUND(my_gauge, 1)) THEN
                WRITE (*, *) 'LBOUND(my_rho,3),LBOUND(my_gauge,3)', LBOUND(my_rho, 3), LBOUND(my_gauge, 3)
                WRITE (*, *) 'LBOUND(my_rho,2),LBOUND(my_gauge,2)', LBOUND(my_rho, 2), LBOUND(my_gauge, 2)
                WRITE (*, *) 'LBOUND(my_rho,1),LBOUND(my_gauge,1)', LBOUND(my_rho, 1), LBOUND(my_gauge, 1)
@@ -978,19 +966,19 @@ CONTAINS
          jpgf = tasks(itask)%jpgf
 
          ! apparently generalised collocation not implemented correctly yet
-         CPASSERT(tasks(itask)%dist_type .NE. 2)
+         CPASSERT(tasks(itask)%dist_type /= 2)
 
-         IF (iatom .NE. iatom_old .OR. jatom .NE. jatom_old) THEN
+         IF (iatom /= iatom_old .OR. jatom /= jatom_old) THEN
 
             ikind = particle_set(iatom)%atomic_kind%kind_number
             jkind = particle_set(jatom)%atomic_kind%kind_number
 
-            IF (iatom .NE. iatom_old) ra(:) = pbc(particle_set(iatom)%r, cell)
+            IF (iatom /= iatom_old) ra(:) = pbc(particle_set(iatom)%r, cell)
 
             brow = iatom
             bcol = jatom
 
-            IF (ikind .NE. ikind_old) THEN
+            IF (ikind /= ikind_old) THEN
                CALL get_qs_kind(qs_kind_set(ikind), basis_set=orb_basis_set, &
                                 basis_type=basis_type)
 
@@ -1007,7 +995,7 @@ CONTAINS
                                       zet=zeta)
             END IF
 
-            IF (jkind .NE. jkind_old) THEN
+            IF (jkind /= jkind_old) THEN
 
                CALL get_qs_kind(qs_kind_set(jkind), &
                                 basis_set=orb_basis_set, basis_type=basis_type)
@@ -1052,7 +1040,7 @@ CONTAINS
 
          END IF
 
-         IF (atom_pair_changed .OR. iset_old .NE. iset .OR. jset_old .NE. jset) THEN
+         IF (atom_pair_changed .OR. iset_old /= iset .OR. jset_old /= jset) THEN
 
             ncoa = npgfa(iset)*ncoset(la_max(iset))
             sgfa = first_sgfa(1, iset)
@@ -1146,7 +1134,7 @@ CONTAINS
          IF (do_igaim) THEN
             ! here the decontracted mat_jb_{ab} is multiplied by
             !     f_{ab} = g_{a} * g_{b} ! THIS GOES OUTSIDE THE LOOP !
-            IF (scale2 .NE. 0.0_dp) THEN
+            IF (scale2 /= 0.0_dp) THEN
                CALL collocate_pgf_product(la_max(iset), zeta(ipgf, iset), &
                                           la_min(iset), lb_max(jset), zetb(jpgf, jset), lb_min(jset), &
                                           ra, rab, scale2, jpab_d, na1 - 1, nb1 - 1, &
@@ -1367,7 +1355,7 @@ CONTAINS
                DO ig = start, start + length
                   map(ig, i) = ig + offset
                END DO
-               IF (start + length .GE. ub_cube(i)) EXIT
+               IF (start + length >= ub_cube(i)) EXIT
                start = start + length + 1
             END DO
          ELSE
@@ -1460,7 +1448,7 @@ CONTAINS
                            rs_gauge=rs_gauge, &
                            gauge=gauge)
 
-      IF (gauge .EQ. current_gauge_atom) THEN
+      IF (gauge == current_gauge_atom) THEN
          CALL get_qs_env(qs_env=qs_env, &
                          pw_env=pw_env)
          CALL pw_env_get(pw_env=pw_env, &
@@ -1559,9 +1547,9 @@ CONTAINS
             DO ibox = 0, nbox(1) - 1
                ii = 0
                DO iatom = 1, natms
-                  IF (INT(ratom(1, iatom)/dbox(1)) .EQ. ibox .AND. &
-                      INT(ratom(2, iatom)/dbox(2)) .EQ. jbox .AND. &
-                      INT(ratom(3, iatom)/dbox(3)) .EQ. kbox) THEN
+                  IF (INT(ratom(1, iatom)/dbox(1)) == ibox .AND. &
+                      INT(ratom(2, iatom)/dbox(2)) == jbox .AND. &
+                      INT(ratom(3, iatom)/dbox(3)) == kbox) THEN
                      box_data(:, i) = ratom(:, iatom) - offset(:)
                      i = i + 1
                      ii = ii + 1
@@ -1657,21 +1645,21 @@ CONTAINS
                   natms_local = 0
                   kmin = INT((point(3) + offset(3) - gauge_atom_radius)/dbox(3))
                   kmax = INT((point(3) + offset(3) + gauge_atom_radius)/dbox(3))
-                  IF (kmax - kmin + 1 .GT. nbox(3)) THEN
+                  IF (kmax - kmin + 1 > nbox(3)) THEN
                      kmin = 0
                      kmax = nbox(3) - 1
                   END IF
                   DO kbox = kmin, kmax
                      jmin = INT((point(2) + offset(2) - gauge_atom_radius)/dbox(2))
                      jmax = INT((point(2) + offset(2) + gauge_atom_radius)/dbox(2))
-                     IF (jmax - jmin + 1 .GT. nbox(2)) THEN
+                     IF (jmax - jmin + 1 > nbox(2)) THEN
                         jmin = 0
                         jmax = nbox(2) - 1
                      END IF
                      DO jbox = jmin, jmax
                         imin = INT((point(1) + offset(1) - gauge_atom_radius)/dbox(1))
                         imax = INT((point(1) + offset(1) + gauge_atom_radius)/dbox(1))
-                        IF (imax - imin + 1 .GT. nbox(1)) THEN
+                        IF (imax - imin + 1 > nbox(1)) THEN
                            imin = 0
                            imax = nbox(1) - 1
                         END IF
@@ -1681,7 +1669,7 @@ CONTAINS
                            DO iatom = ibeg, iend
                               r(:) = pbc(box_data(:, iatom) - point(:), cell) + point(:)
                               dist = (r(1) - point(1))**2 + (r(2) - point(2))**2 + (r(3) - point(3))**2
-                              IF (dist .LT. gauge_atom_radius**2) THEN
+                              IF (dist < gauge_atom_radius**2) THEN
                                  natms_local = natms_local + 1
                                  ratom(:, natms_local) = r(:)
                                  !
@@ -1699,7 +1687,7 @@ CONTAINS
                      END DO
                   END DO
                   !
-                  IF (natms_local .GT. 0) THEN
+                  IF (natms_local > 0) THEN
                      !
                      !
                      DO iatom = 1, natms_local
@@ -1709,7 +1697,7 @@ CONTAINS
                         pra(3) = atms_pnt(3, iatom)
                         pa = nrm_atms_pnt(iatom)
                         DO jatom = 1, natms_local
-                           IF (iatom .EQ. jatom) CYCLE
+                           IF (iatom == jatom) CYCLE
                            pb = nrm_atms_pnt(jatom)
                            x = pra(1) - atms_pnt(1, jatom)
                            y = pra(2) - atms_pnt(2, jatom)
@@ -1822,9 +1810,9 @@ CONTAINS
             DO ibox = 0, nbox(1) - 1
                ii = 0
                DO iatom = 1, natms
-                  IF (MODULO(FLOOR(ratom(1, iatom)/dbox(1)), nbox(1)) .EQ. ibox .AND. &
-                      MODULO(FLOOR(ratom(2, iatom)/dbox(2)), nbox(2)) .EQ. jbox .AND. &
-                      MODULO(FLOOR(ratom(3, iatom)/dbox(3)), nbox(3)) .EQ. kbox) THEN
+                  IF (MODULO(FLOOR(ratom(1, iatom)/dbox(1)), nbox(1)) == ibox .AND. &
+                      MODULO(FLOOR(ratom(2, iatom)/dbox(2)), nbox(2)) == jbox .AND. &
+                      MODULO(FLOOR(ratom(3, iatom)/dbox(3)), nbox(3)) == kbox) THEN
                      box_data(:, i) = ratom(:, iatom)
                      i = i + 1
                      ii = ii + 1
@@ -1839,7 +1827,7 @@ CONTAINS
             DO kbox = 0, nbox(3) - 1
             DO jbox = 0, nbox(2) - 1
             DO ibox = 0, nbox(1) - 1
-               IF (box_ptr(ibox + 1, jbox, kbox) - box_ptr(ibox, jbox, kbox) .GT. 0) THEN
+               IF (box_ptr(ibox + 1, jbox, kbox) - box_ptr(ibox, jbox, kbox) > 0) THEN
                   WRITE (*, *) 'box=', ibox, jbox, kbox
                   WRITE (*, *) 'nbr atom=', box_ptr(ibox + 1, jbox, kbox) - box_ptr(ibox, jbox, kbox)
                   DO iatom = box_ptr(ibox, jbox, kbox), box_ptr(ibox + 1, jbox, kbox) - 1
@@ -1868,21 +1856,21 @@ CONTAINS
             natms_local = 0
             kmin = FLOOR((box_center(3) - gauge_atom_radius)/dbox(3))
             kmax = FLOOR((box_center(3) + gauge_atom_radius)/dbox(3))
-            IF (kmax - kmin + 1 .GT. nbox(3)) THEN
+            IF (kmax - kmin + 1 > nbox(3)) THEN
                kmin = 0
                kmax = nbox(3) - 1
             END IF
             DO kbox = kmin, kmax
                jmin = FLOOR((box_center(2) - gauge_atom_radius)/dbox(2))
                jmax = FLOOR((box_center(2) + gauge_atom_radius)/dbox(2))
-               IF (jmax - jmin + 1 .GT. nbox(2)) THEN
+               IF (jmax - jmin + 1 > nbox(2)) THEN
                   jmin = 0
                   jmax = nbox(2) - 1
                END IF
                DO jbox = jmin, jmax
                   imin = FLOOR((box_center(1) - gauge_atom_radius)/dbox(1))
                   imax = FLOOR((box_center(1) + gauge_atom_radius)/dbox(1))
-                  IF (imax - imin + 1 .GT. nbox(1)) THEN
+                  IF (imax - imin + 1 > nbox(1)) THEN
                      imin = 0
                      imax = nbox(1) - 1
                   END IF
@@ -1891,9 +1879,9 @@ CONTAINS
                      iend = box_ptr(MODULO(ibox, nbox(1)) + 1, MODULO(jbox, nbox(2)), MODULO(kbox, nbox(3))) - 1
                      DO iatom = ibeg, iend
                         r = pbc(box_center_wrap(:) - box_data(:, iatom), cell)
-                        IF (ABS(r(1)) .LE. (scale + 0.5_dp)*dbox(1) .AND. &
-                            ABS(r(2)) .LE. (scale + 0.5_dp)*dbox(2) .AND. &
-                            ABS(r(3)) .LE. (scale + 0.5_dp)*dbox(3)) THEN
+                        IF (ABS(r(1)) <= (scale + 0.5_dp)*dbox(1) .AND. &
+                            ABS(r(2)) <= (scale + 0.5_dp)*dbox(2) .AND. &
+                            ABS(r(3)) <= (scale + 0.5_dp)*dbox(3)) THEN
                            natms_local = natms_local + 1
                            ratom(:, natms_local) = box_data(:, iatom)
                         END IF
@@ -1905,7 +1893,7 @@ CONTAINS
             ! set the list
             box(i, j, k)%n = natms_local
             NULLIFY (box(i, j, k)%r)
-            IF (natms_local .GT. 0) THEN
+            IF (natms_local > 0) THEN
                ALLOCATE (box(i, j, k)%r(3, natms_local))
                r_ptr => box(i, j, k)%r
                CALL dcopy(3*natms_local, ratom(1, 1), 1, r_ptr(1, 1), 1)
@@ -1918,7 +1906,7 @@ CONTAINS
             DO k = 0, nbox(3) - 1
             DO j = 0, nbox(2) - 1
             DO i = 0, nbox(1) - 1
-               IF (box(i, j, k)%n .GT. 0) THEN
+               IF (box(i, j, k)%n > 0) THEN
                   WRITE (*, *)
                   WRITE (*, *) 'box=', i, j, k
                   box_center(1) = (REAL(i, dp) + 0.5_dp)*dbox(1)
@@ -1931,9 +1919,9 @@ CONTAINS
                   DO iatom = 1, box(i, j, k)%n
                      WRITE (*, '(A,I3,3E14.6)') 'coor=', iatom, r_ptr(:, iatom)
                      r(:) = pbc(box_center(:) - r_ptr(:, iatom), cell)
-                     IF (ABS(r(1)) .GT. (scale + 0.5_dp)*dbox(1) .OR. &
-                         ABS(r(2)) .GT. (scale + 0.5_dp)*dbox(2) .OR. &
-                         ABS(r(3)) .GT. (scale + 0.5_dp)*dbox(3)) THEN
+                     IF (ABS(r(1)) > (scale + 0.5_dp)*dbox(1) .OR. &
+                         ABS(r(2)) > (scale + 0.5_dp)*dbox(2) .OR. &
+                         ABS(r(3)) > (scale + 0.5_dp)*dbox(3)) THEN
                         WRITE (*, *) 'error too many atoms'
                         WRITE (*, *) 'dist=', ABS(r(:))
                         WRITE (*, *) 'large_dist=', (scale + 0.5_dp)*dbox
@@ -1959,12 +1947,12 @@ CONTAINS
                   r(:) = pbc(box_center(:) - ratom(:, iatom), cell)
                   ifind = 0
                   DO jatom = 1, box(i, j, k)%n
-                     IF (SUM(ABS(ratom(:, iatom) - r_ptr(:, jatom))) .LT. 1E-10_dp) ifind = 1
+                     IF (SUM(ABS(ratom(:, iatom) - r_ptr(:, jatom))) < 1E-10_dp) ifind = 1
                   END DO
 
-                  IF (ifind .EQ. 0) THEN
-                     ! SQRT(DOT_PRODUCT(r, r)) .LT. gauge_atom_radius
-                     IF (DOT_PRODUCT(r, r) .LT. (gauge_atom_radius*gauge_atom_radius)) THEN
+                  IF (ifind == 0) THEN
+                     ! SQRT(DOT_PRODUCT(r, r)) < gauge_atom_radius
+                     IF (DOT_PRODUCT(r, r) < (gauge_atom_radius*gauge_atom_radius)) THEN
                         WRITE (*, *) 'error atom too close'
                         WRITE (*, *) 'iatom', iatom
                         WRITE (*, *) 'box_center', box_center
@@ -2070,8 +2058,8 @@ CONTAINS
             !
             ! sanity checks
             IF (.TRUE.) THEN
-               IF (REAL(ks - 1 + delta_lb(3), dp)*dr(3) .LT. REAL(kb, dp)*dbox(3) .OR. &
-                   REAL(ke - 1 + delta_lb(3), dp)*dr(3) .GT. REAL(kb + 1, dp)*dbox(3)) THEN
+               IF (REAL(ks - 1 + delta_lb(3), dp)*dr(3) < REAL(kb, dp)*dbox(3) .OR. &
+                   REAL(ke - 1 + delta_lb(3), dp)*dr(3) > REAL(kb + 1, dp)*dbox(3)) THEN
                   WRITE (*, *) 'box_k', REAL(kb, dp)*dbox(3), REAL(kb + 1, dp)*dbox(3)
                   WRITE (*, *) 'point_k', REAL(ks - 1 + delta_lb(3), dp)*dr(3), REAL(ke - 1 + delta_lb(3), dp)*dr(3)
                   WRITE (*, *) 'ibox', ibox, 'jbox', jbox, 'kbox', kbox
@@ -2079,16 +2067,16 @@ CONTAINS
                   WRITE (*, *) 'ibs,ibe', ibs, ibe, ' jbs,jbe', jbs, jbe, ' kbs,kbe', kbs, kbe
                   CPABORT("we stop_k")
                END IF
-               IF (REAL(js - 1 + delta_lb(2), dp)*dr(2) .LT. REAL(jb, dp)*dbox(2) .OR. &
-                   REAL(je - 1 + delta_lb(2), dp)*dr(2) .GT. REAL(jb + 1, dp)*dbox(2)) THEN
+               IF (REAL(js - 1 + delta_lb(2), dp)*dr(2) < REAL(jb, dp)*dbox(2) .OR. &
+                   REAL(je - 1 + delta_lb(2), dp)*dr(2) > REAL(jb + 1, dp)*dbox(2)) THEN
                   WRITE (*, *) 'box_j', REAL(jb, dp)*dbox(2), REAL(jb + 1, dp)*dbox(2)
                   WRITE (*, *) 'point_j', REAL(js - 1 + delta_lb(2), dp)*dr(2), REAL(je - 1 + delta_lb(2), dp)*dr(2)
                   WRITE (*, *) 'is,ie', is, ie, ' js,je', js, je, ' ks,ke', ks, ke
                   WRITE (*, *) 'ibs,ibe', ibs, ibe, ' jbs,jbe', jbs, jbe, ' kbs,kbe', kbs, kbe
                   CPABORT("we stop_j")
                END IF
-               IF (REAL(is - 1 + delta_lb(1), dp)*dr(1) .LT. REAL(ib, dp)*dbox(1) .OR. &
-                   REAL(ie - 1 + delta_lb(1), dp)*dr(1) .GT. REAL(ib + 1, dp)*dbox(1)) THEN
+               IF (REAL(is - 1 + delta_lb(1), dp)*dr(1) < REAL(ib, dp)*dbox(1) .OR. &
+                   REAL(ie - 1 + delta_lb(1), dp)*dr(1) > REAL(ib + 1, dp)*dbox(1)) THEN
                   WRITE (*, *) 'box_i', REAL(ib, dp)*dbox(1), REAL(ib + 1, dp)*dbox(1)
                   WRITE (*, *) 'point_i', REAL(is - 1 + delta_lb(1), dp)*dr(1), REAL(ie - 1 + delta_lb(1), dp)*dr(1)
                   WRITE (*, *) 'is,ie', is, ie, ' js,je', js, je, ' ks,ke', ks, ke
@@ -2107,7 +2095,7 @@ CONTAINS
             r_ptr => box(ibox, jbox, kbox)%r
             !
             ! go over the grid inside the box
-            IF (natms_local0 .GT. 0) THEN
+            IF (natms_local0 > 0) THEN
                !
                ! here there are some atoms...
                DO k = ks, ke
@@ -2123,7 +2111,7 @@ CONTAINS
                   DO iatom = 1, natms_local0
                      r(:) = pbc(r_ptr(:, iatom) - point(:), cell) + point(:) !needed?
                      dist = (r(1) - point(1))**2 + (r(2) - point(2))**2 + (r(3) - point(3))**2
-                     IF (dist .LT. gauge_atom_radius**2) THEN
+                     IF (dist < gauge_atom_radius**2) THEN
                         natms_local1 = natms_local1 + 1
                         ratom(:, natms_local1) = r(:)
                         !
@@ -2139,7 +2127,7 @@ CONTAINS
                   END DO
                   !
                   !
-                  IF (natms_local1 .GT. 0) THEN
+                  IF (natms_local1 > 0) THEN
                      !
                      ! build the step
                      DO iatom = 1, natms_local1
@@ -2149,7 +2137,7 @@ CONTAINS
                         pra(3) = atms_pnt(3, iatom)
                         pa = nrm_atms_pnt(iatom)
                         DO jatom = 1, natms_local1
-                           IF (iatom .EQ. jatom) CYCLE
+                           IF (iatom == jatom) CYCLE
                            pb = nrm_atms_pnt(jatom)
                            x = pra(1) - atms_pnt(1, jatom)
                            y = pra(2) - atms_pnt(2, jatom)
@@ -2374,7 +2362,7 @@ CONTAINS
                         name="op_mom", &
                         dist=dbcsr_dist, matrix_type=dbcsr_type_no_symmetry, &
                         row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                        nze=0, mutable_work=.TRUE.)
+                        mutable_work=.TRUE.)
       CALL cp_dbcsr_alloc_block_from_nbl(op_mom_ao(1)%matrix, sab_all)
 
       DO idir2 = 1, 3
@@ -2400,7 +2388,7 @@ CONTAINS
                         name="op_p_ao", &
                         dist=dbcsr_dist, matrix_type=dbcsr_type_antisymmetric, &
                         row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                        nze=0, mutable_work=.TRUE.)
+                        mutable_work=.TRUE.)
       CALL cp_dbcsr_alloc_block_from_nbl(op_p_ao(1)%matrix, sab_orb)
 
       DO idir = 2, 3
@@ -2430,13 +2418,13 @@ CONTAINS
                                ncol_global=max_states, para_env=para_env, &
                                context=mo_coeff%matrix_struct%context)
       DO idir = 1, 3
-         CALL cp_fm_create(p_rxp(idir), tmp_fm_struct)
-         CALL cp_fm_create(r_p1(idir), tmp_fm_struct)
-         CALL cp_fm_create(r_p2(idir), tmp_fm_struct)
+         CALL cp_fm_create(p_rxp(idir), tmp_fm_struct, set_zero=.TRUE.)
+         CALL cp_fm_create(r_p1(idir), tmp_fm_struct, set_zero=.TRUE.)
+         CALL cp_fm_create(r_p2(idir), tmp_fm_struct, set_zero=.TRUE.)
          DO idir2 = 1, 9
-            CALL cp_fm_create(rr_rxp(idir2, idir), tmp_fm_struct)
-            CALL cp_fm_create(rr_p1(idir2, idir), tmp_fm_struct)
-            CALL cp_fm_create(rr_p2(idir2, idir), tmp_fm_struct)
+            CALL cp_fm_create(rr_rxp(idir2, idir), tmp_fm_struct, set_zero=.TRUE.)
+            CALL cp_fm_create(rr_p1(idir2, idir), tmp_fm_struct, set_zero=.TRUE.)
+            CALL cp_fm_create(rr_p2(idir2, idir), tmp_fm_struct, set_zero=.TRUE.)
          END DO
       END DO
       CALL cp_fm_struct_release(tmp_fm_struct)
@@ -2509,26 +2497,26 @@ CONTAINS
                CALL set_vecp(idir, ii, iii)
                CALL cp_dbcsr_sm_fm_multiply(op_p_ao(idir)%matrix, psi_rxp, &
                                             p_rxp(idir), ncol=nstate_loc, alpha=1.e0_dp)
-               IF (iiiB .EQ. iii .OR. iiiB .EQ. ii) THEN
+               IF (iiiB == iii .OR. iiiB == ii) THEN
                   CALL cp_dbcsr_sm_fm_multiply(op_mom_ao(idir)%matrix, psi_p1, &
                                                r_p1(idir), ncol=nstate_loc, alpha=1.e0_dp)
                END IF
-               IF (iiB .EQ. iii .OR. iiB .EQ. ii) THEN
+               IF (iiB == iii .OR. iiB == ii) THEN
                   CALL cp_dbcsr_sm_fm_multiply(op_mom_ao(idir)%matrix, psi_p2, &
                                                r_p2(idir), ncol=nstate_loc, alpha=1.e0_dp)
                END IF
                DO idir2 = 1, 9
-                  IF (idir2 .EQ. ii .OR. idir2 .EQ. iii) THEN
+                  IF (idir2 == ii .OR. idir2 == iii) THEN
                      CALL cp_dbcsr_sm_fm_multiply(op_mom_der_ao(idir2, idir)%matrix, psi_rxp, &
                                                   rr_rxp(idir2, idir), ncol=nstate_loc, alpha=1.e0_dp)
                   END IF
                   !
-                  IF (idir2 .EQ. ind_m2(ii, iiiB) .OR. idir2 .EQ. ind_m2(iii, iiiB) .OR. idir2 .EQ. iiiB) THEN
+                  IF (idir2 == ind_m2(ii, iiiB) .OR. idir2 == ind_m2(iii, iiiB) .OR. idir2 == iiiB) THEN
                      CALL cp_dbcsr_sm_fm_multiply(op_mom_der_ao(idir2, idir)%matrix, psi_p1, &
                                                   rr_p1(idir2, idir), ncol=nstate_loc, alpha=1.e0_dp)
                   END IF
                   !
-                  IF (idir2 .EQ. ind_m2(ii, iiB) .OR. idir2 .EQ. ind_m2(iii, iiB) .OR. idir2 .EQ. iiB) THEN
+                  IF (idir2 == ind_m2(ii, iiB) .OR. idir2 == ind_m2(iii, iiB) .OR. idir2 == iiB) THEN
                      CALL cp_dbcsr_sm_fm_multiply(op_mom_der_ao(idir2, idir)%matrix, psi_p2, &
                                                   rr_p2(idir2, idir), ncol=nstate_loc, alpha=1.e0_dp)
                   END IF
@@ -2786,7 +2774,7 @@ CONTAINS
                         name="op_mom", &
                         dist=dbcsr_dist, matrix_type=dbcsr_type_no_symmetry, &
                         row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                        nze=0, mutable_work=.TRUE.)
+                        mutable_work=.TRUE.)
       CALL cp_dbcsr_alloc_block_from_nbl(op_mom_ao(1)%matrix, sab_all)
 
       DO idir2 = 1, 3
@@ -2812,7 +2800,7 @@ CONTAINS
                         name="op_p_ao", &
                         dist=dbcsr_dist, matrix_type=dbcsr_type_antisymmetric, &
                         row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                        nze=0, mutable_work=.TRUE.)
+                        mutable_work=.TRUE.)
       CALL cp_dbcsr_alloc_block_from_nbl(op_p_ao(1)%matrix, sab_orb)
 
       DO idir = 2, 3
@@ -2879,7 +2867,7 @@ CONTAINS
                                             buf, ncol=nmo, alpha=1.e0_dp)
                DO jdir = 1, 3
                   DO kdir = 1, 3
-                     IF (Levi_Civita(kdir, jdir, idir) .EQ. 0.0_dp) CYCLE
+                     IF (Levi_Civita(kdir, jdir, idir) == 0.0_dp) CYCLE
                      CALL cp_fm_trace(buf, psi1_rxp(ispin, iB), contrib)
                      chi(kdir) = chi(kdir) - Levi_Civita(kdir, jdir, idir)*2.0_dp*dk(jdir)*contrib
                   END DO
@@ -2899,26 +2887,26 @@ CONTAINS
                CALL cp_dbcsr_sm_fm_multiply(op_mom_der_ao(jdir, idir)%matrix, mo_coeff, &
                                             buf, ncol=nmo, alpha=1.e0_dp)
                DO kdir = 1, 3
-                  IF (Levi_Civita(kdir, jdir, idir) .EQ. 0.0_dp) CYCLE
+                  IF (Levi_Civita(kdir, jdir, idir) == 0.0_dp) CYCLE
                   CALL cp_fm_trace(buf, psi1_rxp(ispin, iB), contrib)
                   chi(kdir) = chi(kdir) - Levi_Civita(kdir, jdir, idir)*2.0_dp*contrib
                END DO
                !
                IF (.NOT. chi_pbc) THEN
-                  IF (jdir .EQ. iiB) THEN
+                  IF (jdir == iiB) THEN
                      DO jjdir = 1, 3
                         DO kdir = 1, 3
-                           IF (Levi_Civita(kdir, jjdir, idir) .EQ. 0.0_dp) CYCLE
+                           IF (Levi_Civita(kdir, jjdir, idir) == 0.0_dp) CYCLE
                            CALL cp_fm_trace(buf, psi1_p(ispin, iiiB), contrib)
                            chi(kdir) = chi(kdir) + Levi_Civita(kdir, jjdir, idir)*2.0_dp*dk(jjdir)*contrib
                         END DO
                      END DO
                   END IF
                   !
-                  IF (jdir .EQ. iiiB) THEN
+                  IF (jdir == iiiB) THEN
                      DO jjdir = 1, 3
                         DO kdir = 1, 3
-                           IF (Levi_Civita(kdir, jjdir, idir) .EQ. 0.0_dp) CYCLE
+                           IF (Levi_Civita(kdir, jjdir, idir) == 0.0_dp) CYCLE
                            CALL cp_fm_trace(buf, psi1_p(ispin, iiB), contrib)
                            chi(kdir) = chi(kdir) - Levi_Civita(kdir, jjdir, idir)*2.0_dp*dk(jjdir)*contrib
                         END DO
@@ -2939,7 +2927,7 @@ CONTAINS
                CALL cp_dbcsr_sm_fm_multiply(op_mom_der_ao(ind_m2(jdir, iiB), idir)%matrix, mo_coeff, &
                                             buf, ncol=nmo, alpha=1.e0_dp)
                DO kdir = 1, 3
-                  IF (Levi_Civita(kdir, jdir, idir) .EQ. 0.0_dp) CYCLE
+                  IF (Levi_Civita(kdir, jdir, idir) == 0.0_dp) CYCLE
                   CALL cp_fm_trace(buf, psi1_p(ispin, iiiB), contrib)
                   chi(kdir) = chi(kdir) + Levi_Civita(kdir, jdir, idir)*2.0_dp*contrib
                END DO
@@ -2947,7 +2935,7 @@ CONTAINS
                CALL cp_dbcsr_sm_fm_multiply(op_mom_der_ao(ind_m2(jdir, iiiB), idir)%matrix, mo_coeff, &
                                             buf, ncol=nmo, alpha=1.e0_dp)
                DO kdir = 1, 3
-                  IF (Levi_Civita(kdir, jdir, idir) .EQ. 0.0_dp) CYCLE
+                  IF (Levi_Civita(kdir, jdir, idir) == 0.0_dp) CYCLE
                   CALL cp_fm_trace(buf, psi1_p(ispin, iiB), contrib)
                   chi(kdir) = chi(kdir) - Levi_Civita(kdir, jdir, idir)*2.0_dp*contrib
                END DO
@@ -2964,7 +2952,7 @@ CONTAINS
                                          buf, ncol=nmo, alpha=1.e0_dp)
             DO jdir = 1, 3
                DO kdir = 1, 3
-                  IF (Levi_Civita(kdir, idir, jdir) .EQ. 0.0_dp) CYCLE
+                  IF (Levi_Civita(kdir, idir, jdir) == 0.0_dp) CYCLE
                   IF (iiB == jdir) THEN
                      CALL cp_fm_trace(buf, psi1_p(ispin, iiiB), contrib)
                      chi(kdir) = chi(kdir) + Levi_Civita(kdir, idir, jdir)*contrib
@@ -2974,7 +2962,7 @@ CONTAINS
             !
             DO jdir = 1, 3
                DO kdir = 1, 3
-                  IF (Levi_Civita(kdir, idir, jdir) .EQ. 0.0_dp) CYCLE
+                  IF (Levi_Civita(kdir, idir, jdir) == 0.0_dp) CYCLE
                   IF (iiiB == jdir) THEN
                      CALL cp_fm_trace(buf, psi1_p(ispin, iiB), contrib)
                      chi(kdir) = chi(kdir) - Levi_Civita(kdir, idir, jdir)*contrib

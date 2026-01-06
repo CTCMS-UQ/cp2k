@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -15,20 +15,20 @@
 ! **************************************************************************************************
 
 MODULE pexsi_methods
-   USE arnoldi_api,                     ONLY: arnoldi_data_type,&
+   USE arnoldi_api,                     ONLY: arnoldi_env_type,&
                                               arnoldi_ev,&
-                                              deallocate_arnoldi_data,&
+                                              deallocate_arnoldi_env,&
                                               get_selected_ritz_val,&
                                               get_selected_ritz_vector,&
                                               set_arnoldi_initial_vector,&
-                                              setup_arnoldi_data
+                                              setup_arnoldi_env
    USE cp_dbcsr_api,                    ONLY: &
         dbcsr_convert_csr_to_dbcsr, dbcsr_convert_dbcsr_to_csr, dbcsr_copy, dbcsr_create, &
         dbcsr_csr_create, dbcsr_csr_create_from_dbcsr, dbcsr_csr_destroy, &
-        dbcsr_csr_eqrow_floor_dist, dbcsr_csr_print_sparsity, dbcsr_desymmetrize, &
-        dbcsr_distribution_get, dbcsr_distribution_type, dbcsr_get_info, dbcsr_has_symmetry, &
-        dbcsr_p_type, dbcsr_release, dbcsr_scale, dbcsr_set, dbcsr_type, dbcsr_type_no_symmetry, &
-        dbcsr_type_real_8
+        dbcsr_csr_eqrow_floor_dist, dbcsr_csr_print_sparsity, dbcsr_csr_type_real_8, &
+        dbcsr_desymmetrize, dbcsr_distribution_get, dbcsr_distribution_type, dbcsr_get_info, &
+        dbcsr_has_symmetry, dbcsr_p_type, dbcsr_release, dbcsr_scale, dbcsr_set, dbcsr_type, &
+        dbcsr_type_no_symmetry
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_to_csr_screening
    USE cp_dbcsr_operations,             ONLY: dbcsr_allocate_matrix_set
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
@@ -146,7 +146,7 @@ CONTAINS
       pexsi_env%num_ranks_per_pole = min_ranks_per_pole ! not a PEXSI option
       pexsi_env%csr_screening = csr_screening
 
-      IF (numElectronInitialTolerance .LT. numElectronTargetTolerance) &
+      IF (numElectronInitialTolerance < numElectronTargetTolerance) &
          numElectronInitialTolerance = numElectronTargetTolerance
 
       pexsi_env%tol_nel_initial = numElectronInitialTolerance
@@ -195,8 +195,7 @@ CONTAINS
       END IF
 
       CALL dbcsr_create(pexsi_env%csr_sparsity, "CSR sparsity", &
-                        template=pexsi_env%dbcsr_template_matrix_sym, &
-                        data_type=dbcsr_type_real_8)
+                        template=pexsi_env%dbcsr_template_matrix_sym)
       CALL dbcsr_copy(pexsi_env%csr_sparsity, pexsi_env%dbcsr_template_matrix_sym)
 
       CALL cp_dbcsr_to_csr_screening(ks_env, pexsi_env%csr_sparsity)
@@ -256,7 +255,7 @@ CONTAINS
 
       mu_total = SUM(mu_spin(1:pexsi_env%nspin))/REAL(pexsi_env%nspin, KIND=dp)
       kTS_total = SUM(pexsi_env%kTS)
-      IF (pexsi_env%nspin .EQ. 1) kTS_total = kTS_total*2.0_dp
+      IF (pexsi_env%nspin == 1) kTS_total = kTS_total*2.0_dp
 
       IF (unit_nr > 0) THEN
          WRITE (unit_nr, "(/A,T55,F26.15)") &
@@ -317,7 +316,7 @@ CONTAINS
       LOGICAL                                            :: first_call, pexsi_convergence
       REAL(KIND=dp) :: delta_E, energy_H, energy_S, free_energy, mu_max_in, mu_max_out, mu_min_in, &
          mu_min_out, nel_tol, nelectron_diff, nelectron_exact_pexsi, nelectron_out
-      TYPE(arnoldi_data_type)                            :: my_arnoldi
+      TYPE(arnoldi_env_type)                             :: arnoldi_env
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_distribution_type)                      :: dist
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: arnoldi_matrices
@@ -332,7 +331,7 @@ CONTAINS
          unit_nr = -1
       END IF
 
-      first_call = (iscf .EQ. 1) .AND. (ispin .EQ. 1)
+      first_call = (iscf == 1) .AND. (ispin == 1)
 
       ! Assert a few things the first time PEXSI is called
       IF (first_call) THEN
@@ -344,13 +343,13 @@ CONTAINS
             CPABORT("PEXSI interface expects a non-symmetric DBCSR overlap matrix")
 
          ! Assertion on datatype
-         IF ((pexsi_env%csr_mat_s%nzval_local%data_type .NE. dbcsr_type_real_8) &
-             .OR. (pexsi_env%csr_mat_ks%nzval_local%data_type .NE. dbcsr_type_real_8)) &
+         IF ((pexsi_env%csr_mat_s%nzval_local%data_type /= dbcsr_csr_type_real_8) &
+             .OR. (pexsi_env%csr_mat_ks%nzval_local%data_type /= dbcsr_csr_type_real_8)) &
             CPABORT("Complex data type not supported by PEXSI")
 
          ! Assertion on number of non-zero elements
          !(TODO: update when PEXSI changes to Long Int)
-         IF (pexsi_env%csr_mat_s%nze_total .GE. INT(2, kind=int_8)**31) &
+         IF (pexsi_env%csr_mat_s%nze_total >= INT(2, kind=int_8)**31) &
             CPABORT("Total number of non-zero elements of CSR matrix is too large to be handled by PEXSI")
       END IF
 
@@ -373,17 +372,17 @@ CONTAINS
       CALL dbcsr_allocate_matrix_set(arnoldi_matrices, 2)
       arnoldi_matrices(1)%matrix => matrix_ks
       arnoldi_matrices(2)%matrix => matrix_s
-      CALL setup_arnoldi_data(my_arnoldi, arnoldi_matrices, max_iter=20, &
-                              threshold=1.0E-2_dp, selection_crit=2, nval_request=1, nrestarts=21, &
-                              generalized_ev=.TRUE., iram=.FALSE.)
-      IF (iscf .GT. 1) CALL set_arnoldi_initial_vector(my_arnoldi, pexsi_env%max_ev_vector(ispin))
-      CALL arnoldi_ev(arnoldi_matrices, my_arnoldi)
-      delta_E = REAL(get_selected_ritz_val(my_arnoldi, 1), dp)
+      CALL setup_arnoldi_env(arnoldi_env, arnoldi_matrices, max_iter=20, &
+                             threshold=1.0E-2_dp, selection_crit=2, nval_request=1, nrestarts=21, &
+                             generalized_ev=.TRUE., iram=.FALSE.)
+      IF (iscf > 1) CALL set_arnoldi_initial_vector(arnoldi_env, pexsi_env%max_ev_vector(ispin))
+      CALL arnoldi_ev(arnoldi_matrices, arnoldi_env)
+      delta_E = REAL(get_selected_ritz_val(arnoldi_env, 1), dp)
       ! increase delta_E a bit to make sure that it really is an upper bound
       delta_E = delta_E + 1.0E-2_dp*ABS(delta_E)
-      CALL get_selected_ritz_vector(my_arnoldi, 1, arnoldi_matrices(1)%matrix, &
+      CALL get_selected_ritz_vector(arnoldi_env, 1, arnoldi_matrices(1)%matrix, &
                                     pexsi_env%max_ev_vector(ispin))
-      CALL deallocate_arnoldi_data(my_arnoldi)
+      CALL deallocate_arnoldi_env(arnoldi_env)
       DEALLOCATE (arnoldi_matrices)
 
       nelectron_exact_pexsi = nelectron_exact
@@ -391,7 +390,7 @@ CONTAINS
       CALL cp_pexsi_set_options(pexsi_env%options, deltaE=delta_E)
 
       ! Set PEXSI options appropriately for first SCF iteration
-      IF (iscf .EQ. 1) THEN
+      IF (iscf == 1) THEN
          ! Get option isInertiaCount to reset it later on and set it to 1 for first SCF iteration
          CALL cp_pexsi_get_options(pexsi_env%options, isInertiaCount=isInertiaCount)
          CALL cp_pexsi_set_options(pexsi_env%options, isInertiaCount=1, &
@@ -408,7 +407,7 @@ CONTAINS
 !                                                ", spin component", ispin
 
       IF (unit_nr > 0) WRITE (unit_nr, '(/A,T41,L20)') " PEXSI| Do inertia counting?", &
-         isInertiaCount_out .EQ. 1
+         isInertiaCount_out == 1
       IF (unit_nr > 0) WRITE (unit_nr, '(A,T50,F5.2,T56,F5.2)') &
          " PEXSI| Guess for min mu, max mu", mu_min_in, mu_max_in
 
@@ -416,7 +415,7 @@ CONTAINS
          " PEXSI| Tolerance in number of electrons", nel_tol
 
 !    IF(unit_nr>0) WRITE(unit_nr,'(A,T41,L20)') &
-!                  " PEXSI|   Do symbolic factorization?", is_symbolic_factorize.EQ.1
+!                  " PEXSI|   Do symbolic factorization?", is_symbolic_factorize==1
 
       IF (unit_nr > 0) WRITE (unit_nr, '(A,T41,F20.2)') &
          " PEXSI| Arnoldi est. spectral radius", delta_E
@@ -446,7 +445,7 @@ CONTAINS
 
       ! Check convergence
       nelectron_diff = nelectron_out - nelectron_exact_pexsi
-      pexsi_convergence = ABS(nelectron_diff) .LT. nel_tol
+      pexsi_convergence = ABS(nelectron_diff) < nel_tol
 
       IF (unit_nr > 0) THEN
          IF (pexsi_convergence) THEN
@@ -500,7 +499,7 @@ CONTAINS
                                 muMax0=mu_max_out)
 
       ! Reset isInertiaCount according to user input
-      IF (iscf .EQ. 1) THEN
+      IF (iscf == 1) THEN
          CALL cp_pexsi_set_options(pexsi_env%options, isInertiaCount= &
                                    isInertiaCount)
       END IF
@@ -560,11 +559,11 @@ CONTAINS
          tol_nel = MIN(tol_nel, pexsi_env%tol_nel_initial)
       END IF
 
-      check_convergence = (tol_nel .LE. pexsi_env%tol_nel_target)
+      check_convergence = (tol_nel <= pexsi_env%tol_nel_target)
 
       CALL cp_pexsi_set_options(pexsi_env%options, numElectronPEXSITolerance=tol_nel)
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE pexsi_set_convergence_tolerance
 
 ! **************************************************************************************************
 !> \brief Pass energy weighted density matrix and entropic energy contribution
@@ -610,13 +609,13 @@ CONTAINS
          DO ispin = 1, ls_scf_env%nspins
             CALL matrix_ls_to_qs(matrix_w_qs(ispin)%matrix, matrix_w(ispin)%matrix, &
                                  ls_scf_env%ls_mstruct, covariant=.FALSE.)
-            IF (ls_scf_env%nspins .EQ. 1) CALL dbcsr_scale(matrix_w_qs(ispin)%matrix, 2.0_dp)
+            IF (ls_scf_env%nspins == 1) CALL dbcsr_scale(matrix_w_qs(ispin)%matrix, 2.0_dp)
          END DO
       END IF
 
       IF (PRESENT(kTS)) THEN
          kTS_total = SUM(kTS)
-         IF (ls_scf_env%nspins .EQ. 1) kTS_total = kTS_total*2.0_dp
+         IF (ls_scf_env%nspins == 1) kTS_total = kTS_total*2.0_dp
          energy%kTS = kTS_total
       END IF
 

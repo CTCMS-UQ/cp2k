@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -276,7 +276,7 @@ CONTAINS
       END DO
 ! if we're doing a classical simulation, figure out the largest
 ! potential cutoff and write it to the screen
-      IF (force_env(1)%force_env%in_use .EQ. use_fist_force) THEN
+      IF (force_env(1)%force_env%in_use == use_fist_force) THEN
          CALL find_mc_rcut(mc_par(1)%mc_par, force_env(1)%force_env, lterminate)
          CALL get_mc_par(mc_par(1)%mc_par, rcut=rcut)
          IF (iw > 0) WRITE (iw, '( A,T73,F8.4 )') &

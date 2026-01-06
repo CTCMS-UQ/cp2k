@@ -6,9 +6,9 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-deepmd_ver="2.2.7"
-deepmd_pkg="libdeepmd_c-${deepmd_ver}.tar.gz"
-deepmd_sha256="605bbb0c3bcc847ecbfe7326bac9ff4cac5690accc8083122e3735290bb923ae"
+deepmd_ver="3.1.0"
+deepmd_sha256="45f13df9ed011438d139a7f61416b8d7940f63c47fcde53180bfccd60c9d22ee"
+deepmd_pkg="deepmd-kit-${deepmd_ver}.tar.gz"
 
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}"/common_vars.sh
@@ -28,7 +28,7 @@ cd "${BUILDDIR}"
 case "$with_deepmd" in
   __INSTALL__)
     echo "==================== Installing DeePMD ===================="
-    pkg_install_dir="${INSTALLDIR}/libdeepmd_c-${deepmd_ver}"
+    pkg_install_dir="${INSTALLDIR}/deepmd-kit-${deepmd_ver}"
     install_lock_file="${pkg_install_dir}/install_successful"
     deepmd_root="${pkg_install_dir}"
     if verify_checksums "${install_lock_file}"; then
@@ -39,10 +39,21 @@ case "$with_deepmd" in
       else
         download_pkg_from_cp2k_org "${deepmd_sha256}" "${deepmd_pkg}"
       fi
-      [ -d libdeepmd_c ] && rm -rf libdeepmd_c
+      [ -d deepmd-kit-${deepmd_ver} ] && rm -rf deepmd-kit-${deepmd_ver}
       echo "Installing from scratch into ${pkg_install_dir}"
       tar -xzf ${deepmd_pkg}
-      mv libdeepmd_c ${pkg_install_dir}
+      cd deepmd-kit-${deepmd_ver}/source
+
+      mkdir build
+      cd build
+      cmake \
+        -DCMAKE_INSTALL_PREFIX="${pkg_install_dir}" \
+        -DCMAKE_CXX_STANDARD=11 \
+        -DCMAKE_CXX_STANDARD_REQUIRED=TRUE \
+        -DENABLE_PYTORCH=TRUE \
+        .. > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
+      make -j deepmd_c > make.log 2>&1 || tail -n ${LOG_LINES} make.log
+      make install > install.log 2>&1 || tail -n ${LOG_LINES} install.log
       write_checksums "${install_lock_file}" "${SCRIPT_DIR}/stage6/$(basename ${SCRIPT_NAME})"
     fi
     DEEPMD_DFLAGS="-D__DEEPMD"
@@ -78,6 +89,7 @@ EOF
 prepend_path LD_LIBRARY_PATH "$pkg_install_dir/lib"
 prepend_path LD_RUN_PATH "$pkg_install_dir/lib"
 prepend_path LIBRARY_PATH "$pkg_install_dir/lib"
+prepend_path CMAKE_PREFIX_PATH "$pkg_install_dir"
 EOF
     cat "${BUILDDIR}/setup_deepmd" >> $SETUPFILE
   fi

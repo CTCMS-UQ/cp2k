@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -155,7 +155,7 @@ CONTAINS
       gridlevel = 1
       needed_cutoff = ABS(exponent)*gridlevel_info%rel_cutoff
       DO i = 1, gridlevel_info%ngrid_levels
-         IF ((gridlevel_info%cutoff(i) + 1E-6_dp) .GE. needed_cutoff) THEN
+         IF ((gridlevel_info%cutoff(i) + 1E-6_dp) >= needed_cutoff) THEN
             gridlevel = i
          END IF
       END DO

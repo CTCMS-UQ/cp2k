@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -23,12 +23,13 @@ MODULE rt_propagation_methods
                                               rtp_control_type
    USE cp_dbcsr_api,                    ONLY: &
         dbcsr_add, dbcsr_copy, dbcsr_create, dbcsr_deallocate_matrix, dbcsr_desymmetrize, &
-        dbcsr_filter, dbcsr_frobenius_norm, dbcsr_get_block_p, dbcsr_init_p, &
-        dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, dbcsr_iterator_start, &
-        dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, dbcsr_p_type, dbcsr_release, &
-        dbcsr_scale, dbcsr_set, dbcsr_transposed, dbcsr_type, dbcsr_type_antisymmetric
+        dbcsr_filter, dbcsr_get_block_p, dbcsr_init_p, dbcsr_iterator_blocks_left, &
+        dbcsr_iterator_next_block, dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, &
+        dbcsr_multiply, dbcsr_p_type, dbcsr_release, dbcsr_scale, dbcsr_set, dbcsr_transposed, &
+        dbcsr_type, dbcsr_type_antisymmetric
    USE cp_dbcsr_cholesky,               ONLY: cp_dbcsr_cholesky_decompose,&
                                               cp_dbcsr_cholesky_invert
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_frobenius_norm
    USE cp_dbcsr_operations,             ONLY: cp_dbcsr_sm_fm_multiply,&
                                               dbcsr_allocate_matrix_set,&
                                               dbcsr_deallocate_matrix_set
@@ -305,19 +306,19 @@ CONTAINS
                       matrix_ks=matrix_ks, matrix_ks_im=matrix_ks_im, energy=energy)
       CALL get_rtp(rtp=rtp, exp_H_old=exp_H_old, exp_H_new=exp_H_new)
 
-      IF (rtp_control%sc_check_start .LT. rtp%iter) THEN
+      IF (rtp_control%sc_check_start < rtp%iter) THEN
          rtp%delta_iter_old = rtp%delta_iter
          IF (rtp%linear_scaling) THEN
             CALL rt_convergence_density(rtp, delta_P, rtp%delta_iter)
          ELSE
             CALL rt_convergence(rtp, s_mat(1)%matrix, delta_mos, rtp%delta_iter)
          END IF
-         rtp%converged = (rtp%delta_iter .LT. rtp_control%eps_ener)
+         rtp%converged = (rtp%delta_iter < rtp_control%eps_ener)
          !Apply mixing if scf loop is not converging
 
          !It would be better to redo the current step with mixixng,
          !but currently the decision is made to use mixing from the next step on
-         IF (rtp_control%sc_check_start .LT. rtp%iter + 1) THEN
+         IF (rtp_control%sc_check_start < rtp%iter + 1) THEN
             IF (rtp%delta_iter/rtp%delta_iter_old > 0.9) THEN
                rtp%mixing_factor = MAX(rtp%mixing_factor/2.0_dp, 0.125_dp)
                rtp%mixing = .TRUE.
@@ -510,7 +511,7 @@ CONTAINS
          CALL cp_dbcsr_cholesky_decompose(S_inv, para_env=rtp%ao_ao_fmstruct%para_env, &
                                           blacs_env=rtp%ao_ao_fmstruct%context)
          CALL cp_dbcsr_cholesky_invert(S_inv, para_env=rtp%ao_ao_fmstruct%para_env, &
-                                       blacs_env=rtp%ao_ao_fmstruct%context, upper_to_full=.TRUE.)
+                                       blacs_env=rtp%ao_ao_fmstruct%context, uplo_to_full=.TRUE.)
       END IF
 
       CALL timestop(handle)
@@ -534,7 +535,7 @@ CONTAINS
 
       INTEGER                                            :: col_atom, handle, row_atom
       LOGICAL                                            :: found
-      REAL(dp), DIMENSION(:), POINTER                    :: block_values, block_values2
+      REAL(dp), DIMENSION(:, :), POINTER                 :: block_values, block_values2
       TYPE(dbcsr_iterator_type)                          :: iter
       TYPE(dbcsr_type), POINTER                          :: tmp
 
@@ -638,8 +639,8 @@ CONTAINS
             CALL dbcsr_add(tmp(re)%matrix, P(re)%matrix, 1.0_dp, -1.0_dp)
             CALL dbcsr_add(tmp(im)%matrix, P(im)%matrix, 1.0_dp, -1.0_dp)
             CALL complex_frobenius_norm(frob_norm, tmp(re)%matrix, tmp(im)%matrix)
-            IF (unit_nr .GT. 0) WRITE (unit_nr, '(t3,a,2f16.8)') "Deviation from idempotency: ", frob_norm
-            IF (frob_norm .GT. threshold .AND. max_iter > 0) THEN
+            IF (unit_nr > 0) WRITE (unit_nr, '(t3,a,2f16.8)') "Deviation from idempotency: ", frob_norm
+            IF (frob_norm > threshold .AND. max_iter > 0) THEN
                CALL dbcsr_copy(P(re)%matrix, PSP(re)%matrix)
                CALL dbcsr_copy(P(im)%matrix, PSP(im)%matrix)
                CALL cp_complex_dbcsr_gemm_3("N", "N", -2.0_dp, PS(re)%matrix, PS(im)%matrix, &

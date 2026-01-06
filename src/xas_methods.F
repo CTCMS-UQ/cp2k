@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -509,13 +509,13 @@ CONTAINS
 
                ! Write last wavefunction to screen
                IF (SIZE(mos) > 1) THEN
-                  CALL write_mo_set_to_output_unit(mos(1), atomic_kind_set, qs_kind_set, particle_set, &
-                                                   dft_section, 4, 0, final_mos=.FALSE., spin="XAS ALPHA")
-                  CALL write_mo_set_to_output_unit(mos(2), atomic_kind_set, qs_kind_set, particle_set, &
-                                                   dft_section, 4, 0, final_mos=.FALSE., spin="XAS BETA")
+                  CALL write_mo_set_to_output_unit(mos(1), qs_kind_set, particle_set, dft_section, &
+                                                   4, 0, final_mos=.FALSE., spin="XAS ALPHA")
+                  CALL write_mo_set_to_output_unit(mos(2), qs_kind_set, particle_set, dft_section, &
+                                                   4, 0, final_mos=.FALSE., spin="XAS BETA")
                ELSE
-                  CALL write_mo_set_to_output_unit(mos(1), atomic_kind_set, qs_kind_set, particle_set, &
-                                                   dft_section, 4, 0, final_mos=.FALSE., spin="XAS")
+                  CALL write_mo_set_to_output_unit(mos(1), qs_kind_set, particle_set, dft_section, &
+                                                   4, 0, final_mos=.FALSE., spin="XAS")
                END IF
 
             ELSE
@@ -681,7 +681,7 @@ CONTAINS
       CALL get_mo_set(mos(my_spin), nao=nao, homo=homo, nmo=nmo, mo_coeff=mo_coeff, nelectron=nelectron)
 
       nvirtual2 = 0
-      IF (xas_control%added_mos .GT. 0) THEN
+      IF (xas_control%added_mos > 0) THEN
          nvirtual2 = MIN(xas_control%added_mos, nao - nmo)
          xas_env%unoccupied_eps = xas_control%eps_added
          xas_env%unoccupied_max_iter = xas_control%max_iter_added
@@ -827,7 +827,7 @@ CONTAINS
       CALL cp_fm_struct_release(tmp_fm_struct)
 
       !Array to store all the eigenstates: occupied and the required not occupied
-      IF (nvirtual2 .GT. 0) THEN
+      IF (nvirtual2 > 0) THEN
          ALLOCATE (xas_env%unoccupied_evals(nvirtual2))
          NULLIFY (tmp_fm_struct)
          CALL cp_fm_struct_create(tmp_fm_struct, nrow_global=nao, &
@@ -878,7 +878,7 @@ CONTAINS
                            name="xas_env%ostrength_sm", &
                            dist=dbcsr_dist, matrix_type=dbcsr_type_antisymmetric, &
                            row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                           nze=0, mutable_work=.TRUE.)
+                           mutable_work=.TRUE.)
          CALL cp_dbcsr_alloc_block_from_nbl(xas_env%ostrength_sm(1)%matrix, sab_orb)
          CALL dbcsr_set(xas_env%ostrength_sm(1)%matrix, 0.0_dp)
          DO i = 2, 3
@@ -1641,7 +1641,7 @@ CONTAINS
                   IF (output_unit > 0) WRITE (UNIT=output_unit, FMT="(I4)") state_of_atom(iat, istate)
                END IF
             END DO
-            IF (state_of_atom(iat, 1) == 0 .OR. state_of_atom(iat, 1) .GT. homo) THEN
+            IF (state_of_atom(iat, 1) == 0 .OR. state_of_atom(iat, 1) > homo) THEN
                CPABORT("A wrong state has been selected for excitation, check the Wannier centers")
             END IF
          END DO
@@ -1715,7 +1715,7 @@ CONTAINS
                   END IF
                END DO
             END IF
-            IF (state_of_atom(iat, 1) .GT. homo) THEN
+            IF (state_of_atom(iat, 1) > homo) THEN
                CPABORT("A wrong state has been selected for excitation, check the Wannier centers")
             END IF
          END DO

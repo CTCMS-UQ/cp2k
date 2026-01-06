@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -10,18 +10,20 @@
 !> \par History
 !>      - created (2007-09, Joost VandeVondele)
 !>      - moved into this module information related to runtime:pid, user_name,
-!>        host_name, cwd, datx  (2009-06, Teodoro Laino)
+!>        host_name, cwd, timestamp (2009-06, Teodoro Laino, 2025-08 MK)
 !> \author Joost VandeVondele
 ! **************************************************************************************************
 MODULE cp2k_info
 
+   USE iso_fortran_env,                 ONLY: compiler_options
    USE kinds,                           ONLY: default_path_length,&
                                               default_string_length
-   USE machine,                         ONLY: m_datum,&
-                                              m_getcwd,&
+   USE machine,                         ONLY: m_getcwd,&
                                               m_getlog,&
                                               m_getpid,&
-                                              m_hostnm
+                                              m_hostnm,&
+                                              m_timestamp,&
+                                              timestamp_length
    USE string_utilities,                ONLY: integer_to_string
 
    IMPLICIT NONE
@@ -38,8 +40,8 @@ MODULE cp2k_info
 #endif
 
    !!! Keep version in sync with CMakeLists.txt !!!
-   CHARACTER(LEN=*), PARAMETER :: cp2k_version = "CP2K version 2024.3 (Development Version)"
-   CHARACTER(LEN=*), PARAMETER :: cp2k_year = "2025"
+   CHARACTER(LEN=*), PARAMETER :: cp2k_version = "CP2K version 2026.1 (Development Version)"
+   CHARACTER(LEN=*), PARAMETER :: cp2k_year = "2026"
    CHARACTER(LEN=*), PARAMETER :: cp2k_home = "https://www.cp2k.org/"
 
    ! compile time information
@@ -62,9 +64,9 @@ MODULE cp2k_info
 #endif
 
    ! Local runtime informations
-   CHARACTER(LEN=26), PUBLIC                        :: r_datx
    CHARACTER(LEN=default_path_length), PUBLIC       :: r_cwd
    CHARACTER(LEN=default_string_length), PUBLIC     :: r_host_name, r_user_name
+   CHARACTER(LEN=timestamp_length), PUBLIC          :: r_timestamp
    INTEGER, PUBLIC                                  :: r_pid
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'cp2k_info'
@@ -86,39 +88,37 @@ CONTAINS
       tmp_str = ""
       flags = TRIM(flags)//TRIM(tmp_str)
 
+      IF (INDEX(COMPILER_OPTIONS(), "-fsanitize=leak") > 0) THEN
+         flags = TRIM(flags)//" lsan"
+      END IF
+
 !$    flags = TRIM(flags)//" omp"
+
+      ! TODO: remove __INTEL_LLVM_COMPILER conditions (regtests)
+#if defined(__INTEL_LLVM_COMPILER)
+      flags = TRIM(flags)//" ifx"
+#endif
 #if defined(__LIBINT)
       flags = TRIM(flags)//" libint"
 #endif
 #if defined(__FFTW3)
       flags = TRIM(flags)//" fftw3"
 #endif
-#if defined(__FFTW3_MKL)
-      flags = TRIM(flags)//" fftw3_mkl"
-#endif
 #if defined(__LIBXC)
       flags = TRIM(flags)//" libxc"
 #endif
-#if defined(__LIBGRPP)
-      flags = TRIM(flags)//" libgrpp"
-#endif
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       flags = TRIM(flags)//" pexsi"
 #endif
 #if defined(__ELPA)
       flags = TRIM(flags)//" elpa"
 #endif
-#if defined(__ELPA_NVIDIA_GPU)
-      flags = TRIM(flags)//" elpa_nvidia_gpu"
-#endif
-#if defined(__ELPA_AMD_GPU)
-      flags = TRIM(flags)//" elpa_amd_gpu"
-#endif
-#if defined(__ELPA_INTEL_GPU)
-      flags = TRIM(flags)//" elpa_intel_gpu"
-#endif
 #if defined(__parallel)
+#if defined(__SCALAPACK_NO_WA)
       flags = TRIM(flags)//" parallel scalapack"
+#else
+      flags = TRIM(flags)//" parallel scalapack"
+#endif
 #endif
 #if defined(__MPI_F08)
       flags = TRIM(flags)//" mpi_f08"
@@ -126,31 +126,21 @@ CONTAINS
 #if defined(__COSMA)
       flags = TRIM(flags)//" cosma"
 #endif
-
-#if defined(__QUIP)
-      flags = TRIM(flags)//" quip"
+#if defined(__ACE)
+      flags = TRIM(flags)//" ace"
 #endif
-
-#if defined(__HAS_PATCHED_CUFFT_70)
-      flags = TRIM(flags)//" patched_cufft_70"
-#endif
-
 #if defined(__DEEPMD)
       flags = TRIM(flags)//" deepmd"
 #endif
-
 #if defined(__PW_FPGA)
       flags = TRIM(flags)//" pw_fpga"
 #endif
-
 #if defined(__PW_FPGA_SP)
       flags = TRIM(flags)//" pw_fpga_sp"
 #endif
-
 #if defined(__LIBXSMM)
       flags = TRIM(flags)//" xsmm"
 #endif
-
 #if defined(__CRAY_PM_ACCEL_ENERGY)
       flags = TRIM(flags)//" cray_pm_accel_energy"
 #endif
@@ -170,14 +160,8 @@ CONTAINS
 #if defined(__NO_SOCKETS)
       flags = TRIM(flags)//" no_sockets"
 #endif
-#if defined(__NO_MPI_THREAD_SUPPORT_CHECK)
-      flags = TRIM(flags)//" no_mpi_thread_support_check"
-#endif
 #if defined(__NO_STATM_ACCESS)
       flags = TRIM(flags)//" no_statm_access"
-#endif
-#if defined(__MINGW)
-      flags = TRIM(flags)//" mingw"
 #endif
 #if defined(__PW_CUDA_NO_HOSTALLOC)
       flags = TRIM(flags)//" pw_cuda_no_hostalloc"
@@ -209,8 +193,21 @@ CONTAINS
 #if defined(__DFTD4)
       flags = TRIM(flags)//" libdftd4"
 #endif
+#if defined(__TBLITE)
+      flags = TRIM(flags)//" mctc-lib"
+      flags = TRIM(flags)//" tblite"
+#endif
 #if defined(__SIRIUS)
       flags = TRIM(flags)//" sirius"
+#endif
+#if defined(__SIRIUS_NLCG)
+      flags = TRIM(flags)//" sirius_nlcg"
+#endif
+#if defined(__SIRIUS_DFTD4)
+      flags = TRIM(flags)//" sirius_dftd4"
+#endif
+#if defined(__SIRIUS_VCSQNM)
+      flags = TRIM(flags)//" sirius_vcsqnm"
 #endif
 #if defined(__CHECK_DIAG)
       flags = TRIM(flags)//" check_diag"
@@ -224,6 +221,9 @@ CONTAINS
 #endif
 #if defined(__LIBTORCH)
       flags = TRIM(flags)//" libtorch"
+#endif
+#if defined(__MIMIC)
+      flags = TRIM(flags)//" mimic"
 #endif
 #if defined(__OFFLOAD_CUDA)
       flags = TRIM(flags)//" offload_cuda"
@@ -246,37 +246,32 @@ CONTAINS
 #if defined(__OFFLOAD_PROFILING)
       flags = TRIM(flags)//" offload_profiling"
 #endif
-
 #if defined(__SPLA) && defined(__OFFLOAD_GEMM)
       flags = TRIM(flags)//" spla_gemm_offloading"
 #endif
-
 #if defined(__CUSOLVERMP)
       flags = TRIM(flags)//" cusolvermp"
 #endif
-
 #if defined(__DLAF)
       flags = TRIM(flags)//" dlaf"
 #endif
-
 #if defined(__LIBVDWXC)
       flags = TRIM(flags)//" libvdwxc"
 #endif
-
 #if defined(__HDF5)
       flags = TRIM(flags)//" hdf5"
 #endif
-
 #if defined(__TREXIO)
       flags = TRIM(flags)//" trexio"
 #endif
-
 #if defined(__OFFLOAD_UNIFIED_MEMORY)
       flags = TRIM(flags)//" offload_unified_memory"
 #endif
-
 #if defined(__SMEAGOL)
       flags = TRIM(flags)//" libsmeagol"
+#endif
+#if defined(__GREENX)
+      flags = TRIM(flags)//" greenx"
 #endif
 
    END FUNCTION cp2k_flags
@@ -293,7 +288,7 @@ CONTAINS
          "******************************************************************************", &
          "*                                                                            *", &
          "*   CP2K: A general program to perform molecular dynamics simulations        *", &
-         "*   Copyright (C) 2000-2025  CP2K developer group <https://www.cp2k.org/>    *", &
+         "*   Copyright (C) 2000-2026  CP2K developer group <https://www.cp2k.org/>    *", &
          "*                                                                            *", &
          "*   This program is free software: you can redistribute it and/or modify     *", &
          "*   it under the terms of the GNU General Public License as published by     *", &
@@ -317,19 +312,19 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE get_runtime_info()
 
-      r_datx = ""
       r_cwd = ""
       r_host_name = ""
+      r_timestamp = ""
       r_user_name = ""
       r_pid = -1
 
       CALL m_getpid(r_pid)
       CALL m_getlog(r_user_name)
       CALL m_hostnm(r_host_name)
-      CALL m_datum(r_datx)
+      CALL m_timestamp(r_timestamp)
       CALL m_getcwd(r_cwd)
 
-   END SUBROUTINE
+   END SUBROUTINE get_runtime_info
 
 ! **************************************************************************************************
 !> \brief Writes the header for the restart file
@@ -341,13 +336,14 @@ CONTAINS
    SUBROUTINE write_restart_header(iunit)
       INTEGER, INTENT(IN)                                :: iunit
 
-      CHARACTER(LEN=256)                                 :: cwd, datx
+      CHARACTER(LEN=256)                                 :: cwd
+      CHARACTER(LEN=timestamp_length)                    :: timestamp
 
-      CALL m_datum(datx)
+      CALL m_timestamp(timestamp)
       CALL m_getcwd(cwd)
 
       WRITE (UNIT=iunit, FMT="(T2,A)") "# Version information for this restart file "
-      WRITE (UNIT=iunit, FMT="(T2,A)") "# current date "//TRIM(datx)
+      WRITE (UNIT=iunit, FMT="(T2,A)") "# current date "//timestamp
       WRITE (UNIT=iunit, FMT="(T2,A)") "# current working dir "//TRIM(cwd)
 
       WRITE (UNIT=iunit, FMT="(T2,A,T31,A50)") &

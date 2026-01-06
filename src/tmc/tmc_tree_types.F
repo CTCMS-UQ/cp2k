@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -245,7 +245,7 @@ CONTAINS
       INTEGER                                            :: io_unit
 
       CPASSERT(ASSOCIATED(elem))
-      CPASSERT(io_unit .GT. 0)
+      CPASSERT(io_unit > 0)
       WRITE (io_unit) elem%nr, &
          elem%sub_tree_nr, &
          elem%stat, &
@@ -275,7 +275,7 @@ CONTAINS
       INTEGER                                            :: io_unit
 
       CPASSERT(ASSOCIATED(elem))
-      CPASSERT(io_unit .GT. 0)
+      CPASSERT(io_unit > 0)
 
       READ (io_unit) elem%nr, &
          elem%sub_tree_nr, &
@@ -326,7 +326,7 @@ CONTAINS
       IF (l_tmp) THEN
          READ (io_unit) i_tmp
          IF (ASSOCIATED(array)) THEN
-            CPASSERT(SIZE(array) .EQ. i_tmp)
+            CPASSERT(SIZE(array) == i_tmp)
          ELSE
             ALLOCATE (array(i_tmp))
          END IF

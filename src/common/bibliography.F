@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -65,7 +65,7 @@ MODULE bibliography
                             Kantorovich2008a, Wellendorff2012, Niklasson2014, Borstnik2014, &
                             Rayson2009, Grimme2011, Fattebert2002, Andreussi2012, &
                             Khaliullin2007, Khaliullin2008, Merlot2014, Lin2009, Lin2013, &
-                            QUIP_ref, Batzner2022, DelBen2015, Souza2002, Umari2002, Stengel2009, &
+                            Batzner2022, DelBen2015, Souza2002, Umari2002, Stengel2009, &
                             Luber2014, Berghold2011, DelBen2015b, Campana2009, &
                             Schiffmann2015, Bruck2014, Rappe1992, Ceriotti2012, &
                             Ceriotti2010, Walewski2014, Monkhorst1976, MacDonald1978, &
@@ -76,8 +76,8 @@ MODULE bibliography
                             Stoychev2016, Futera2017, Bailey2006, Papior2017, Lehtola2018, &
                             Brieuc2016, Barca2018, Scheiber2018, Huang2011, Heaton_Burgess2007, &
                             Schuett2018, Holmberg2018, Togo2018, Staub2019, Grimme2013, Grimme2016, &
-                            Grimme2017, Kondov2007, Clabaut2020, Clabaut2021, &
-                            Ren2011, Ren2013, Cohen2000, Rogers2002, Filippetti2000, &
+                            Grimme2017, Asgeirsson2017, Bannwarth2019, Kondov2007, Clabaut2020, &
+                            Clabaut2021, Ren2011, Ren2013, Cohen2000, Rogers2002, Filippetti2000, &
                             Limpanuparb2011, Martin2003, Yin2017, Goerigk2017, &
                             Wilhelm2016a, Wilhelm2016b, Wilhelm2017, Wilhelm2018, Wilhelm2021, Lass2018, &
                             cp2kqs2020, Behler2007, Behler2011, Schran2020a, Schran2020b, &
@@ -89,7 +89,8 @@ MODULE bibliography
                             Stein2022, Stein2024, Pracht2019, &
                             Blase2018, Blase2020, Bruneval2015, Golze2019, Gui2018, Jacquemin2017, Liu2020, &
                             Sander2015, Schreiber2008, vanSetten2015, Setyawan2010, Ahart2024, Knysh2024, &
-                            Schambeck2024, Mewes2018
+                            Schambeck2024, Mewes2018, Sertcan2024, Drautz2019, Lysogorskiy2021, Bochkarev2024, &
+                            VazdaCruz2021, Chen2025, Hernandez2025, Marek2025, Hehn2022, Hehn2024, Pasquier2025
 
 CONTAINS
 
@@ -148,13 +149,6 @@ CONTAINS
                          title="Embedded-atom-method functions for the fcc metals Cu, Ag, Au, Ni, Pd, Pt, and their alloys", &
                          source="Phys. Rev. B", volume="33", pages="7983-7991", &
                          year=1986, doi="10.1103/PhysRevB.33.7983")
-
-      CALL add_reference(key=QUIP_ref, &
-                         authors=s2a("QUIP"), &
-                         title="libAtoms/QUIP libraries from http://www.libatoms.org, "// &
-                         "please cite web site and references for appropriate potential invoked", &
-                         source="web site", &
-                         year=2014)
 
       CALL add_reference(key=Batzner2022, &
                          authors=s2a("S. Batzner", "A. Musaelian", "L. Sun", "M. Geiger", "J. P. Mailoa", &
@@ -733,6 +727,21 @@ CONTAINS
                          "Large Molecular Systems Parametrized for All spd-Block Elements (Z = 1-86)", &
                          source="J. Chem. Theory Comput.", volume="13", pages="1989", &
                          year=2017, doi="10.1021/acs.jctc.7b00118")
+
+      CALL add_reference(key=Asgeirsson2017, &
+                         authors=s2a("V. Asgeirsson", "C. A. Bauer", "S. Grimme"), &
+                         title="Quantum chemical calculation of electron ionization mass spectra "// &
+                         "for general organic and inorganic molecules", &
+                         source="Chem. Sci.", volume="8", pages="4879-4895", &
+                         year=2017, doi="10.1039/C7SC00601B")
+
+      CALL add_reference(key=Bannwarth2019, &
+                         authors=s2a("C. Bannwarth", "S. Ehlert", "S. Grimme"), &
+                         title="GFN2-xTB--An Accurate and Broadly Parametrized Self-Consistent "// &
+                         "Tight-Binding Quantum Chemical Method with Multipole Electrostatics "// &
+                         "and Density-Dependent Dispersion Contributions", &
+                         source="J. Chem. Theory Comput.", volume="15", pages="1652-1671", &
+                         year=2019, doi="10.1021/acs.jctc.8b01176")
 
       CALL add_reference(key=Branduardi2007, &
                          authors=s2a("D. Branduardi", "F. L. Gervasio", "M. Parrinello"), &
@@ -1910,6 +1919,81 @@ CONTAINS
                          title="Benchmarking Excited-State Calculations Using Exciton Properties", &
                          source="J. Chem. Theory Comput.", volume="14", pages="710-725", &
                          year=2018, doi="10.1021/acs.jctc.7b01145 ")
+
+      CALL add_reference(key=Hehn2022, &
+                         authors=s2a("A. Hehn", "B. Sertcan", "F. Belleflamme", "S.K. Chulkov", "M. B. Watkins", "J. Hutter"), &
+                         title="Excited-State Properties for Extended Systems: Efficient Hybrid Density Functional Methods", &
+                         source="J. Chem. Theory Comput.", volume="18", pages="4186-4202", &
+                         year=2022, doi="10.1021/acs.jctc.2c00144")
+
+      CALL add_reference(key=Hehn2024, &
+                         authors=s2a("A. Hehn", "B. Sertcan", "F. Belleflamme", "S.K. Chulkov", "M. B. Watkins", "J. Hutter"), &
+               title="Correction to 'Excited-State Properties for Extended Systems: Efficient Hybrid Density Functional Methods'", &
+                         source="J. Chem. Theory Comput.", volume="20", pages="4949-4949", &
+                         year=2024, doi="10.1021/acs.jctc.4c00604")
+
+      CALL add_reference(key=Sertcan2024, &
+                         authors=s2a("B. Sertcan-Gokmen", "J. Hutter", "A. Hehn"), &
+                         title="Excited-State Forces with the Gaussian and Augmented Plane Wave Method "// &
+                         "for the Tamm–Dancoff Approximation of Time-Dependent Density Functional Theory", &
+                         source="J. Chem. Theory Comput.", volume="20", pages="8494-8504", &
+                         year=2024, doi="10.1021/acs.jctc.4c00614")
+
+      CALL add_reference(key=Drautz2019, &
+                         authors=s2a("R. Drautz"), &
+                         title="Atomic cluster expansion for accurate and transferable interatomic potentials", &
+                         source="Phys. Rev. B", volume="99", pages="014104", &
+                         year=2019, doi="10.1103/PhysRevB.99.014104")
+
+      CALL add_reference(key=Lysogorskiy2021, &
+                         authors=s2a("Y. Lysogorskiy", "C. van der Ooord", "A. Bochkarev", "S. Menon", &
+                                     "M. Rinaldi", "T. Hammerschmidt", "M. Mrovec", "A. Thompson", "G. Csanyi", &
+                                     "C. Ortner", "R. Drautz"), &
+                   title="Performant implementation of the atomic cluster expansion (PACE) and application to copper and silicon", &
+                         source="npj Comput. Mater.", volume="7", pages="97", &
+                         year=2021, doi="10.1038/s41524-021-00559-9")
+
+      CALL add_reference(key=Bochkarev2024, &
+                         authors=s2a("A. Bochkarev", "Y. Lysogorskiy", "R. Drautz"), &
+                         title="Graph Atomic Cluster Expansion for semilocal interactions beyond equivariant message passing", &
+                         source="Phys. Rev. X", volume="14", pages="021036", &
+                         year=2024, doi="10.1103/PhysRevX.14.021036")
+
+      CALL add_reference(key=VazdaCruz2021, &
+                         authors=s2a("V. Vaz da Cruz", "S. Eckert", "A. Fohlisch"), &
+                         title="TD-DFT simulations of K-edge resonant inelastic X-ray scattering within "// &
+                         "the restricted subspace approximation", &
+                         source="Phys. Chem. Chem. Phys.", volume="23", pages="1835-1848", &
+                         year=2021, doi="10.1039/d0cp04726k")
+
+      CALL add_reference(key=Chen2025, &
+                         authors=s2a("Z. Chen", "Y. Yang"), &
+                         title="Periodic Constrained Nuclear-Electronic Orbital Density Functional Theory for "// &
+                         "Nuclear Quantum Effects: Method Development and Application to Hydrogen Adsorption on Pt(111)", &
+                         source="J. Chem. Theory Comput.", volume="21", pages="7865-7877", &
+                         year=2025, doi="10.1021/acs.jctc.5c00837")
+
+      CALL add_reference(key=Hernandez2025, &
+                         authors=s2a("L. I. Hernandez-Segura", "S. Luber"), &
+                         title="Spin-Flip TDDFT within the Sternheimer Formulation:"// &
+                         " A Gaussian and Plane Wave Implementation", &
+                         source="J. Phys. Chem. A", volume="129", pages="9798-9809", &
+                         year=2025, doi="10.1021/acs.jpca.5c05234")
+
+      CALL add_reference(key=Marek2025, &
+                         authors=s2a("Š. Marek", "J. Wilhelm"), &
+                         title="Linear and Nonlinear Optical Properties of Molecules from "// &
+                         "Real-Time Propagation Based on the Bethe–Salpeter Equation", &
+                         source="J. Chem. Theory Comput.", volume="21", pages="9814-9822", &
+                         year=2025, doi="10.1021/acs.jctc.5c01246")
+
+      CALL add_reference(key=Pasquier2025, &
+                         authors=s2a("R. Pasquier", "M. Camarasa-Gómez", &
+                                     "A. Hehn", "D. Hernangómez-Pérez", "J. Wilhelm"), &
+                         title="Efficient GW band structure calculations using Gaussian basis functions and application "// &
+                         "to atomically thin transition-metal dichalcogenides", &
+                         source="Phys. Rev. B", volume="112", pages="205130", &
+                         year=2025, doi="10.1103/v4zv-1pf9")
 
    END SUBROUTINE add_all_references
 

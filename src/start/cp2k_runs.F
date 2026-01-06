@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -26,7 +26,6 @@ MODULE cp2k_runs
    USE cp_files,                        ONLY: close_file,&
                                               open_file
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
-                                              cp_logger_get_default_io_unit,&
                                               cp_logger_type,&
                                               cp_logger_would_log,&
                                               cp_note_level
@@ -76,9 +75,9 @@ MODULE cp2k_runs
         bsse_run, cell_opt_run, debug_run, do_atom, do_band, do_cp2k, do_embed, do_farming, &
         do_fist, do_ipi, do_mixed, do_nnp, do_opt_basis, do_optimize_input, do_qmmm, do_qs, &
         do_sirius, do_swarm, do_tamc, do_test, do_tree_mc, do_tree_mc_ana, driver_run, ehrenfest, &
-        electronic_spectra_run, energy_force_run, energy_run, geo_opt_run, linear_response_run, &
-        mol_dyn_run, mon_car_run, negf_run, none_run, pint_run, real_time_propagation, &
-        rtp_method_bse, tree_mc_run, vib_anal
+        energy_force_run, energy_run, geo_opt_run, linear_response_run, mimic_run, mol_dyn_run, &
+        mon_car_run, negf_run, none_run, pint_run, real_time_propagation, rtp_method_bse, &
+        tree_mc_run, vib_anal
    USE input_cp2k,                      ONLY: create_cp2k_root_section
    USE input_cp2k_check,                ONLY: check_cp2k_input
    USE input_cp2k_global,               ONLY: create_global_section
@@ -108,18 +107,19 @@ MODULE cp2k_runs
                                               mp_comm_type,&
                                               mp_para_env_release,&
                                               mp_para_env_type
+   USE mimic_loop,                      ONLY: do_mimic_loop
    USE mscfg_methods,                   ONLY: do_mol_loop,&
                                               loop_over_molecules
    USE neb_methods,                     ONLY: neb
    USE negf_methods,                    ONLY: do_negf
    USE offload_api,                     ONLY: offload_get_chosen_device,&
-                                              offload_get_device_count
+                                              offload_get_device_count,&
+                                              offload_mempool_stats_print
    USE optimize_basis,                  ONLY: run_optimize_basis
    USE optimize_input,                  ONLY: run_optimize_input
    USE pint_methods,                    ONLY: do_pint_run
    USE qs_environment_types,            ONLY: get_qs_env
    USE qs_linres_module,                ONLY: linres_calculation
-   USE qs_tddfpt_module,                ONLY: tddfpt_calculation
    USE reference_manager,               ONLY: export_references_as_xml
    USE rt_bse,                          ONLY: run_propagation_bse
    USE rt_propagation,                  ONLY: rt_prop_setup
@@ -207,19 +207,22 @@ CONTAINS
 
       CALL cite_reference(Hutter2014)
 
-      ! parse the input
-      input_file => read_input(input_declaration, input_file_name, initial_variables=initial_variables, &
+      ! Parse the input
+      input_file => read_input(input_declaration, input_file_name, &
+                               initial_variables=initial_variables, &
                                para_env=para_env)
 
       CALL para_env%sync()
 
+      logger => cp_get_default_logger()
+
       glob_section => section_vals_get_subs_vals(input_file, "GLOBAL")
       CALL section_vals_val_get(glob_section, "ECHO_INPUT", l_val=echo_input)
-      logger => cp_get_default_logger()
-      IF (echo_input) THEN
+      IF (echo_input .AND. (output_unit > 0)) THEN
          CALL section_vals_write(input_file, &
-                                 unit_nr=cp_logger_get_default_io_unit(logger), &
-                                 hide_root=.TRUE., hide_defaults=.FALSE.)
+                                 unit_nr=output_unit, &
+                                 hide_root=.TRUE., &
+                                 hide_defaults=.FALSE.)
       END IF
 
       CALL check_cp2k_input(input_declaration, input_file, para_env=para_env, output_unit=output_unit)
@@ -341,11 +344,6 @@ CONTAINS
          CALL do_mon_car(force_env, globenv, input_declaration, input_file_name)
       CASE (do_tamc)
          CALL qs_tamc(force_env, globenv)
-      CASE (electronic_spectra_run)
-         IF (method_name_id /= do_qs) &
-            CPABORT("Electron spectra available only with Quickstep. ")
-         CALL force_env_calc_energy_force(force_env, calc_force=.FALSE.)
-         CALL tddfpt_calculation(force_env%qs_env)
       CASE (real_time_propagation)
          IF (method_name_id /= do_qs) &
             CPABORT("Real time propagation needs METHOD QS. ")
@@ -387,16 +385,19 @@ CONTAINS
          CALL neb(root_section, input_declaration, para_env, globenv)
       CASE (negf_run)
          CALL do_negf(force_env)
+      CASE (mimic_run)
+         CALL do_mimic_loop(force_env)
       CASE default
          CPABORT("")
       END SELECT
 
-      !sample peak memory
+      ! Sample peak memory
       CALL m_memory()
 
       CALL dbcsr_print_statistics()
       CALL dbm_library_print_stats(mpi_comm=mpi_comm, output_unit=output_unit)
       CALL grid_library_print_stats(mpi_comm=mpi_comm, output_unit=output_unit)
+      CALL offload_mempool_stats_print(mpi_comm=mpi_comm, output_unit=output_unit)
 
       m_memory_max_mpi = m_memory_max
       CALL mpi_comm%max(m_memory_max_mpi)
@@ -499,7 +500,7 @@ CONTAINS
          IF (output_unit > 0) WRITE (output_unit, FMT="(T2,A)") "FARMING| Using a Captain-Minion setup"
 
          ALLOCATE (captain_minion_partition(0:1))
-         captain_minion_partition = (/1, para_env%num_pe - 1/)
+         captain_minion_partition = [1, para_env%num_pe - 1]
          ALLOCATE (group_distribution(0:para_env%num_pe - 1))
 
          CALL minion_group%from_split(para_env, ngroups, group_distribution, &
@@ -707,7 +708,7 @@ CONTAINS
                         WRITE (output_unit, FMT=*) ""
                         CALL m_flush(output_unit)
                      END IF
-                     CPASSERT(todo .NE. do_deadlock)
+                     CPASSERT(todo /= do_deadlock)
                   END IF
                END IF
 
@@ -797,7 +798,7 @@ CONTAINS
          ! change to the new working directory
 
          CALL m_chdir(TRIM(farming_env%Job(i)%cwd), ierr)
-         IF (ierr .NE. 0) &
+         IF (ierr /= 0) &
             CPABORT("Failed to change dir to: "//TRIM(farming_env%Job(i)%cwd))
 
          ! generate a fresh call to cp2k_run
@@ -818,10 +819,10 @@ CONTAINS
                   CALL cp_unit_set_release(default_units)
                   CALL section_vals_val_get(g_data, "PROJECT", &
                                             c_val=str)
-                  IF (str .NE. "") output_file = TRIM(str)//".out"
+                  IF (str /= "") output_file = TRIM(str)//".out"
                   CALL section_vals_val_get(g_data, "OUTPUT_FILE_NAME", &
                                             c_val=str)
-                  IF (str .NE. "") output_file = str
+                  IF (str /= "") output_file = str
                   CALL section_vals_release(g_data)
                   CALL section_release(g_section)
                END IF

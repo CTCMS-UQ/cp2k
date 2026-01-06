@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -154,7 +154,7 @@ CONTAINS
       IF (order >= 0) calc(0:order) = .TRUE.
       IF (order < 0) calc(-order) = .TRUE.
 
-      n = PRODUCT(rho_set%local_bounds(2, :) - rho_set%local_bounds(1, :) + (/1, 1, 1/))
+      n = PRODUCT(rho_set%local_bounds(2, :) - rho_set%local_bounds(1, :) + [1, 1, 1])
       ALLOCATE (rs(n))
 
       CALL calc_rs_pw(rho_set%rho, rs, n)

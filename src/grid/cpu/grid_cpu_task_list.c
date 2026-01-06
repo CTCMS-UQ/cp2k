@@ -1,6 +1,6 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
@@ -71,27 +71,35 @@ void grid_cpu_create_task_list(
 
   size_t size = nblocks * sizeof(int);
   task_list->block_offsets = malloc(size);
-  assert(task_list->block_offsets != NULL);
-  memcpy(task_list->block_offsets, block_offsets, size);
+  assert(task_list->block_offsets != NULL || size == 0);
+  if (size != 0) {
+    memcpy(task_list->block_offsets, block_offsets, size);
+  }
 
   size = 3 * natoms * sizeof(double);
   task_list->atom_positions = malloc(size);
-  assert(task_list->atom_positions != NULL);
-  memcpy(task_list->atom_positions, atom_positions, size);
+  assert(task_list->atom_positions != NULL || size == 0);
+  if (size != 0) {
+    memcpy(task_list->atom_positions, atom_positions, size);
+  }
 
   size = natoms * sizeof(int);
   task_list->atom_kinds = malloc(size);
-  assert(task_list->atom_kinds != NULL);
-  memcpy(task_list->atom_kinds, atom_kinds, size);
+  assert(task_list->atom_kinds != NULL || size == 0);
+  if (size != 0) {
+    memcpy(task_list->atom_kinds, atom_kinds, size);
+  }
 
   size = nkinds * sizeof(grid_basis_set *);
   task_list->basis_sets = malloc(size);
-  assert(task_list->basis_sets != NULL);
-  memcpy(task_list->basis_sets, basis_sets, size);
+  assert(task_list->basis_sets != NULL || size == 0);
+  if (size != 0) {
+    memcpy(task_list->basis_sets, basis_sets, size);
+  }
 
   size = ntasks * sizeof(grid_cpu_task);
   task_list->tasks = malloc(size);
-  assert(task_list->tasks != NULL);
+  assert(task_list->tasks != NULL || size == 0);
   for (int i = 0; i < ntasks; i++) {
     task_list->tasks[i].level = level_list[i];
     task_list->tasks[i].iatom = iatom_list[i];
@@ -111,7 +119,7 @@ void grid_cpu_create_task_list(
   // Store grid layouts.
   size = nlevels * sizeof(grid_cpu_layout);
   task_list->layouts = malloc(size);
-  assert(task_list->layouts != NULL);
+  assert(task_list->layouts != NULL || size == 0);
   for (int level = 0; level < nlevels; level++) {
     for (int i = 0; i < 3; i++) {
       task_list->layouts[level].npts_global[i] = npts_global[level][i];
@@ -131,9 +139,9 @@ void grid_cpu_create_task_list(
   // Find first and last task for each level and block.
   size = nlevels * nblocks * sizeof(int);
   task_list->first_level_block_task = malloc(size);
-  assert(task_list->first_level_block_task != NULL);
+  assert(task_list->first_level_block_task != NULL || size == 0);
   task_list->last_level_block_task = malloc(size);
-  assert(task_list->last_level_block_task != NULL);
+  assert(task_list->last_level_block_task != NULL || size == 0);
   for (int i = 0; i < nlevels * nblocks; i++) {
     task_list->first_level_block_task[i] = 0;
     task_list->last_level_block_task[i] = -1; // last < first means no tasks
@@ -273,7 +281,7 @@ static void collocate_one_grid_level(
     int old_offset = -1, old_iset = -1, old_jset = -1;
 
     // Matrix pab is re-used across tasks.
-    double pab[task_list->maxco * task_list->maxco];
+    double pab[imax(task_list->maxco * task_list->maxco, 1)];
 
     // Ensure that grid can fit into thread-local storage, reallocate if needed.
     const int npts_local_total = npts_local[0] * npts_local[1] * npts_local[2];
@@ -379,10 +387,11 @@ static void collocate_one_grid_level(
       const int actual_group_size = imin(group_size, nthreads - dest_thread);
       // Parallelize summation by dividing grid points across group members.
       const int rank = modulo(ithread, group_size); // position within the group
-      const int lb = (npts_local_total * rank) / actual_group_size;
-      const int ub = (npts_local_total * (rank + 1)) / actual_group_size;
+      const int64_t lb = ((int64_t)npts_local_total * rank) / actual_group_size;
+      const int64_t ub =
+          ((int64_t)npts_local_total * (rank + 1)) / actual_group_size;
       if (src_thread < nthreads) {
-        for (int i = lb; i < ub; i++) {
+        for (int i = (int)lb; i < (int)ub; i++) {
           task_list->threadlocals[dest_thread][i] +=
               task_list->threadlocals[src_thread][i];
         }
@@ -391,9 +400,9 @@ static void collocate_one_grid_level(
     }
 
     // Copy final result from first thread into shared grid.
-    const int lb = (npts_local_total * ithread) / nthreads;
-    const int ub = (npts_local_total * (ithread + 1)) / nthreads;
-    for (int i = lb; i < ub; i++) {
+    const int64_t lb = ((int64_t)npts_local_total * ithread) / nthreads;
+    const int64_t ub = ((int64_t)npts_local_total * (ithread + 1)) / nthreads;
+    for (int i = (int)lb; i < (int)ub; i++) {
       grid->host_buffer[i] = task_list->threadlocals[0][i];
     }
 
@@ -489,8 +498,8 @@ static void integrate_one_grid_level(
     bool old_transpose = false;
 
     // Matrix pab and hab are re-used across tasks.
-    double pab[task_list->maxco * task_list->maxco];
-    double hab[task_list->maxco * task_list->maxco];
+    double pab[imax(task_list->maxco * task_list->maxco, 1)];
+    double hab[imax(task_list->maxco * task_list->maxco, 1)];
 
     // Parallelize over blocks to avoid concurred access to hab_blocks.
     const int nthreads = omp_get_num_threads();
@@ -628,9 +637,12 @@ void grid_cpu_integrate_task_list(
 
   assert(task_list->nlevels == nlevels);
   assert(task_list->natoms == natoms);
+  assert(hab_blocks != NULL);
 
   // Zero result arrays.
-  memset(hab_blocks->host_buffer, 0, hab_blocks->size);
+  if (hab_blocks->size != 0) {
+    memset(hab_blocks->host_buffer, 0, hab_blocks->size);
+  }
   if (forces != NULL) {
     memset(forces, 0, natoms * 3 * sizeof(double));
   }

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -18,7 +18,7 @@ MODULE input_cp2k_pwdft
    USE SIRIUS, ONLY: &
       sirius_option_get, &
       sirius_option_get_section_length, sirius_option_get_info, &
-      SIRIUS_INTEGER_TYPE, SIRIUS_NUMBER_TYPE, SIRIUS_STRING_TYPE, &
+      SIRIUS_INTEGER_TYPE, SIRIUS_NUMBER_TYPE, SIRIUS_STRING_TYPE, SIRIUS_OBJECT_TYPE, &
       SIRIUS_LOGICAL_TYPE, SIRIUS_ARRAY_TYPE, SIRIUS_INTEGER_ARRAY_TYPE, SIRIUS_LOGICAL_ARRAY_TYPE, &
       SIRIUS_NUMBER_ARRAY_TYPE, SIRIUS_STRING_ARRAY_TYPE, string_f2c
 #endif
@@ -123,10 +123,27 @@ CONTAINS
       !
       ! uncomment these lines when nlcg is officialy supported in cp2k
       !
+#if defined(__SIRIUS_NLCG)
+      CALL create_sirius_section(subsection, 'nlcg')
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+#endif
 
-      !      CALL create_sirius_section(subsection, 'nlcg')
-      !      CALL section_add_subsection(section, subsection)
-      !      CALL section_release(subsection)
+#if defined(__SIRIUS_VCSQNM)
+      CALL create_sirius_section(subsection, 'vcsqnm')
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+#endif
+
+#if defined(__SIRIUS_DFTD4)
+      CALL create_sirius_section(subsection, "dftd4")
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+      CALL create_sirius_section(subsection, "dftd3")
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+#endif
 
       CALL create_print_section(subsection)
       CALL section_add_subsection(section, subsection)
@@ -169,13 +186,13 @@ CONTAINS
       CHARACTER(len=*), INTENT(in)                       :: section_name
 
       CHARACTER(len=128)                                 :: name
-      CHARACTER(len=128), TARGET                         :: possible_values(1:16)
+      CHARACTER(len=128), TARGET                         :: possible_values(1:256)
       CHARACTER(len=4096)                                :: description, usage
-      INTEGER                                            :: ctype, enum_i_val(1:16), enum_length, i, &
-                                                            j, length, num_possible_values
-      INTEGER, ALLOCATABLE, DIMENSION(:), TARGET         :: ivec
+      INTEGER                                            :: ctype, enum_length, i, j, length, &
+                                                            num_possible_values
+      INTEGER, ALLOCATABLE, DIMENSION(:), TARGET         :: enum_i_val, ivec
       INTEGER, TARGET                                    :: dummy_i
-      LOGICAL                                            :: lvecl(1:16)
+      LOGICAL                                            :: jump_dft_parameters, lvecl(1:16)
       LOGICAL(4), ALLOCATABLE, DIMENSION(:), TARGET      :: lvec
       LOGICAL(4), TARGET                                 :: dummy_l
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:), TARGET   :: rvec
@@ -185,14 +202,15 @@ CONTAINS
       ALLOCATE (ivec(1:16))
       ALLOCATE (rvec(1:16))
       ALLOCATE (lvec(1:16))
-
+      ALLOCATE (enum_i_val(1:256))
+      jump_dft_parameters = .FALSE.
 #ifdef __LIBVDWXC
       IF (section_name == "parameters") THEN
          NULLIFY (keyword)
          CALL keyword_create(keyword, __LOCATION__, name="VDW_FUNCTIONAL", &
                              description="Select the Van der Walls functionals corrections type", &
                              default_i_val=SIRIUS_NO_VDW, &
-                             enum_i_vals=(/SIRIUS_NO_VDW, SIRIUS_FUNC_VDWDF, SIRIUS_FUNC_VDWDF2, SIRIUS_FUNC_VDWDFCX/), &
+                             enum_i_vals=[SIRIUS_NO_VDW, SIRIUS_FUNC_VDWDF, SIRIUS_FUNC_VDWDF2, SIRIUS_FUNC_VDWDFCX], &
                              enum_c_vals=s2a("NONE", "FUNC_VDWDF", "FUNC_VDWDF2", "FUNC_VDWDFCX"), &
                              enum_desc=s2a("No VdW correction", &
                                            "FUNC_VDWDF", &
@@ -221,10 +239,18 @@ CONTAINS
                                      4096, &
                                      usage, &
                                      4096)
+
          ! description and usage are ignored here
          ! it is a minor inconvenience from the api.
-
          name = TRIM(ADJUSTL(name))
+
+#if defined(__SIRIUS_DFTD4)
+         ! need to implement the object case within a section
+         IF (((section_name == 'dftd3') .OR. (section_name == 'dftd4')) .AND. (name == 'parameters')) THEN
+            CYCLE
+         END IF
+#endif
+
          ! I exclude these three keywords because one of them is for debugging
          ! purpose the other are replaced by a dedicated call in cp2k
          !
@@ -320,7 +346,7 @@ CONTAINS
             CASE (SIRIUS_INTEGER_ARRAY_TYPE)
                CALL sirius_option_get(section_name, name, ctype, C_LOC(ivec(1)), max_length=16)
 
-               IF (num_possible_values .EQ. 0) THEN
+               IF (num_possible_values == 0) THEN
                   CALL keyword_create(keyword, __LOCATION__, &
                                       name=name, &
                                       description=TRIM(ADJUSTL(description)), &
@@ -366,7 +392,7 @@ CONTAINS
             CASE (SIRIUS_NUMBER_ARRAY_TYPE)
                CALL sirius_option_get(section_name, name, ctype, C_LOC(rvec(1)), max_length=16)
 
-               IF (num_possible_values .EQ. 0) THEN
+               IF (num_possible_values == 0) THEN
                   CALL keyword_create(keyword, __LOCATION__, &
                                       name=name, &
                                       description=TRIM(ADJUSTL(description)), &
@@ -386,10 +412,19 @@ CONTAINS
                END IF
                CALL section_add_keyword(section, keyword)
                CALL keyword_release(keyword)
+               !CASE (SIRIUS_OBJECT_TYPE)
+               ! create a subsection for the dftd3/dftd4 parameters
+               !CALL create_sirius_section(sub_section, sub_section_name)
+               !CALL section_add_subsection(section, sub_section)
+               !CALL section_release(sub_section)
             CASE default
             END SELECT
          END IF
       END DO
+      DEALLOCATE (ivec)
+      DEALLOCATE (rvec)
+      DEALLOCATE (lvec)
+      DEALLOCATE (enum_i_val)
    END SUBROUTINE fill_in_section
 
 ! **************************************************************************************************

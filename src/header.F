@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -12,9 +12,9 @@
 ! **************************************************************************************************
 MODULE header
    USE cp2k_info,                       ONLY: r_cwd,&
-                                              r_datx,&
                                               r_host_name,&
                                               r_pid,&
+                                              r_timestamp,&
                                               r_user_name
    USE kinds,                           ONLY: default_path_length
 #include "./base/base_uses.f90"
@@ -23,8 +23,8 @@ MODULE header
 
    PRIVATE
    PUBLIC :: cp2k_header, cp2k_footer, vib_header
-   PUBLIC :: fist_header, se_header, dftb_header, qs_header, tddfpt_header
-   PUBLIC :: qmmm_header, atom_header, atom_footer, band_header, xtb_header
+   PUBLIC :: fist_header, se_header, dftb_header, qs_header, tddfpt_header, rixs_header
+   PUBLIC :: qmmm_header, atom_header, atom_footer, band_header, xtb_header, tblite_header
    PUBLIC :: tmc_header, tmc_ana_header
    PUBLIC :: sirius_header
    PUBLIC :: tddfpt_soc_header
@@ -48,7 +48,7 @@ CONTAINS
       IF (PRESENT(wdir)) cwd = wdir
       WRITE (UNIT=iw, &
              FMT="(/,A,T55,A26,/,A,T51,A30,/,A,T51,A30,/,A,T71,I10)") &
-         "  **** **** ******  **  PROGRAM STARTED AT ", ADJUSTR(r_datx), &
+         "  **** **** ******  **  PROGRAM STARTED AT ", ADJUSTR(r_timestamp), &
          " ***** ** ***  *** **   PROGRAM STARTED ON ", ADJUSTR(r_host_name(1:30)), &
          " **    ****   ******    PROGRAM STARTED BY ", ADJUSTR(r_user_name(1:30)), &
          " ***** **    ** ** **   PROGRAM PROCESS ID ", r_pid
@@ -77,9 +77,9 @@ CONTAINS
       IF (PRESENT(wdir)) cwd = wdir
       WRITE (UNIT=iw, &
              FMT="(A,T55,A26,/,A,T51,A30,/,A,T51,A30,/,A,T71,I10)") &
-         "  **** **** ******  **  PROGRAM ENDED AT   ", ADJUSTR(r_datx), &
-         " ***** ** ***  *** **   PROGRAM RAN ON     ", ADJUSTR(r_host_name(1:30)), &
-         " **    ****   ******    PROGRAM RAN BY     ", ADJUSTR(r_user_name(1:30)), &
+         "  **** **** ******  **  PROGRAM ENDED AT   ", ADJUSTR(r_timestamp), &
+         " ***** ** ***  *** **   PROGRAM RAN ON     ", ADJUSTR(r_host_name(:30)), &
+         " **    ****   ******    PROGRAM RAN BY     ", ADJUSTR(r_user_name(:30)), &
          " ***** **    ** ** **   PROGRAM PROCESS ID ", r_pid
       WRITE (UNIT=iw, FMT="(A,T44,A37)") &
          "  **** **  *******  **  PROGRAM STOPPED IN ", ADJUSTR(cwd(1:37))
@@ -242,6 +242,42 @@ CONTAINS
          '            J. Hutter and A. Hehn                  '
 
    END SUBROUTINE xtb_header
+
+! **************************************************************************************************
+!> \brief ...
+!> \param iw ...
+!> \param tb_type ...
+! **************************************************************************************************
+   SUBROUTINE tblite_header(iw, tb_type)
+      INTEGER, INTENT(in)                                :: iw, tb_type
+
+      IF (iw < 0) RETURN
+      WRITE (iw, '( / )')
+      WRITE (iw, '( 7(16x,a,/) )') &
+         '  #####   #####        #     #   #     #       #          ', &
+         ' #     # #     #      #    ##### #     #   # #####  ####  ', &
+         ' #     # #           #       #   ###   #       #   #    # ', &
+         ' #     #  #####     #        #   #  #  #   #   #   ###### ', &
+         ' #   # #       #   #         #   #   # #   #   #   #      ', &
+         ' #    #  #     #  #          #   #  #  # # #   #    #   # ', &
+         '  #### #  #####  #           #   ###   ##  #   #     ###  '
+
+      SELECT CASE (tb_type)
+      CASE (1)
+         WRITE (iw, '( 34x,a )') ' GFN1-xTB  '
+      CASE (2)
+         WRITE (iw, '( 34x,a )') ' GFN2-xTB  '
+      CASE (3)
+         WRITE (iw, '( 34x,a )') ' IPEA1-xTB '
+      CASE DEFAULT
+      END SELECT
+
+      WRITE (iw, '( 2(16x,a,/) )') &
+         '                 Version 0.0                       ', &
+         '            Johann V. Pototschnig                  '
+
+   END SUBROUTINE tblite_header
+
 ! **************************************************************************************************
 !> \brief ...
 !> \param iw ...
@@ -290,7 +326,7 @@ CONTAINS
          "**                                                                           **", &
          "**                                                ... make the atoms dance   **", &
          "**                                                                           **", &
-         "**            Copyright (C) by CP2K developers group (2000-2025)             **", &
+         "**            Copyright (C) by CP2K developers group (2000-2026)             **", &
          "**                      J. Chem. Phys. 152, 194103 (2020)                    **", &
          "**                                                                           **", &
          "*******************************************************************************"
@@ -472,5 +508,24 @@ CONTAINS
          "*******************************************************************************", &
          "*******************************************************************************"
    END SUBROUTINE tmc_ana_header
+! **************************************************************************************************
+!> \brief ...
+!> \param iw ...
+! **************************************************************************************************
+   SUBROUTINE rixs_header(iw)
+      INTEGER, INTENT(IN)                                :: iw
+
+      IF (iw < 0) RETURN
+      WRITE (iw, "(/,(T2,A79))") &
+         "*******************************************************************************", &
+         "**                   ########   ####  ##     ##   ######                     **", &
+         "**                   ##     ##   ##    ##   ##   ##                          **", &
+         "**                   ########    ##      ###      ######                     **", &
+         "**                   ##   ##     ##     ## ##          ##                    **", &
+         "**                   ##     ##  ####  ##     ##   ######                     **", &
+         "**              Resonant Inelastic X-RAY Scattering calculations             **", &
+         "*******************************************************************************"
+
+   END SUBROUTINE rixs_header
 END MODULE header
 

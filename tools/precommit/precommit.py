@@ -62,8 +62,7 @@ def main() -> None:
     parser.add_argument("files", metavar="FILE", nargs="*", help="files to process")
     args = parser.parse_args()
 
-    # Say hello to the server.
-    print(
+    print(  # Say hello to the server.
         f"Running precommit checks using {args.num_workers} workers and server: {SERVER}"
     )
     server_hello = urlopen(Request(SERVER + "/"), timeout=10).read().decode("utf8")
@@ -79,7 +78,18 @@ def main() -> None:
     if not file_list:
         sys.stdout.write("Searching for files...\r")
         sys.stdout.flush()
-        for root, dirs, files in os.walk("."):
+
+        walk_list = []
+        try:
+            output = subprocess.check_output(["git", "ls-files"], encoding="utf8")
+            for line in filter(None, output.split("\n")):
+                dir, file = os.path.split(line)
+                walk_list.append((os.path.join(".", dir), [dir], [file]))
+        except Exception:
+            walk_list = []
+            pass
+
+        for root, dirs, files in walk_list if walk_list else os.walk("."):
             if root.startswith("./tools/toolchain/build"):
                 continue
             if root.startswith("./tools/toolchain/install"):
@@ -124,7 +134,7 @@ def main() -> None:
                 continue
             file_list += [os.path.join(root, fn) for fn in files]
 
-    # Filter symlinks, backup copies, logs, and hidden files.
+    # Filter symlinks, backup copies, logs, hidden, and very large files.
     file_list = [fn for fn in file_list if not os.path.islink(fn)]
     file_list = [fn for fn in file_list if not fn[-1] in ("~", "#")]
     file_list = [fn for fn in file_list if not fn.endswith(".log")]
@@ -192,13 +202,24 @@ def print_box(fn: str, message: str) -> None:
 # ======================================================================================
 def process_file(fn: str, allow_modifications: bool) -> None:
     # Make a backup copy.
+    basename = Path(fn).name
     orig_content = Path(fn).read_bytes()
-    bak_fn = SCRATCH_DIR / f"{Path(fn).name}_{time()}.bak"
+    bak_fn = SCRATCH_DIR / f"{basename}_{time()}.bak"
     shutil.copy2(fn, bak_fn)
 
     if re.match(r".*\.(F|fypp)$", fn):
         run_local_tool("./tools/doxify/doxify.sh", fn)
         run_format_fortran(fn)
+
+    if re.match(r".*\.F$", fn):
+        try:
+            # First try without fypp as this allows for auto-fixing.
+            run_remote_tool("fortitude", fn)
+        except Exception as err:
+            fypped_fn = SCRATCH_DIR / basename
+            run_local_tool("./tools/build_utils/fypp", fn, str(fypped_fn))
+            run_remote_tool("fortitude_nofix", str(fypped_fn))
+            fypped_fn.unlink()
 
     if re.match(r".*\.(c|cu|cl|h)$", fn):
         run_remote_tool("clangformat", fn)
@@ -207,12 +228,18 @@ def process_file(fn: str, allow_modifications: bool) -> None:
         if fn.endswith("/torch_c_api.cpp"):
             # Begrudgingly tolerated because PyTorch has no C API.
             run_remote_tool("clangformat", fn)
+        elif fn.endswith("/ace_c_api.cpp"):
+            # same as PyTorch
+            run_remote_tool("clangformat", fn)
         else:
             raise Exception(f"C++ is not supported.")
 
     if re.match(r"(.*/PACKAGE)|(.*\.py)$", fn):
         ast.parse(orig_content, filename=fn)
-        run_remote_tool("black", fn)
+        if "tools/spack/cp2k_dev_repo/packages" in fn:
+            run_remote_tool("spackformat", fn)
+        else:
+            run_remote_tool("black", fn)
 
     if re.match(r".*\.sh$", fn):
         run_remote_tool("shfmt", fn)
@@ -283,6 +310,9 @@ def run_local_tool(*cmd: str, timeout: int = 20) -> None:
 
 # ======================================================================================
 def run_remote_tool(tool: str, fn: str) -> None:
+    if os.path.getsize(fn) > 2**20:
+        return  # skip files that are larger than 1MiB
+
     url = f"{SERVER}/{tool}"
     r = http_post(url, fn)
     if r.status == 304:

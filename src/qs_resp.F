@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -642,7 +642,7 @@ CONTAINS
          END IF
 
          CALL get_cell(cell=cell, h=hmat)
-         resp_env%box_hi = (/hmat(1, 1), hmat(2, 2), hmat(3, 3)/)
+         resp_env%box_hi = [hmat(1, 1), hmat(2, 2), hmat(3, 3)]
          resp_env%box_low = 0.0_dp
          CALL section_vals_val_get(sphere_section, "X_HI", explicit=explicit)
          IF (explicit) CALL section_vals_val_get(sphere_section, "X_HI", &
@@ -1415,7 +1415,7 @@ CONTAINS
       IF (resp_env%rheavies) THEN
          DO i = 1, natom
             CALL get_atomic_kind(atomic_kind=particle_set(i)%atomic_kind, z=z)
-            IF (z .NE. 1) THEN
+            IF (z /= 1) THEN
                resp_env%matrix(i, i) = resp_env%matrix(i, i) + 2.0_dp*resp_env%rheavies_strength
             END IF
          END DO

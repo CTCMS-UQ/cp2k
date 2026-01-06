@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -108,10 +108,10 @@ CONTAINS
       zetc(1:npgfc) = 0.3_dp
       zetd(1:npgfd) = 0.2_dp
 
-      ra = (/0.0_dp, 0.0_dp, 0.0_dp/)
-      rb = (/1.0_dp, 0.0_dp, 0.0_dp/)
-      rc = (/0.0_dp, 0.3_dp, 0.3_dp/)
-      rd = (/0.7_dp, 0.2_dp, 0.1_dp/)
+      ra = [0.0_dp, 0.0_dp, 0.0_dp]
+      rb = [1.0_dp, 0.0_dp, 0.0_dp]
+      rc = [0.0_dp, 0.3_dp, 0.3_dp]
+      rd = [0.7_dp, 0.2_dp, 0.1_dp]
 
       rac2 = SUM((ra - rc)**2)
       rpgf = 1.e10_dp

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -36,17 +36,22 @@ CONTAINS
 !> \param unit_nr ...
 !> \param title ...
 !> \param particles ...
+!> \param zeff ...
 !> \param stride ...
+!> \param max_file_size_mb ...
 !> \param zero_tails ...
 !> \param silent minimal I/O
 !> \param mpi_io True if cube should be written in parallel using MPI
 ! **************************************************************************************************
-   SUBROUTINE cp_pw_to_cube(pw, unit_nr, title, particles, stride, zero_tails, silent, mpi_io)
+   SUBROUTINE cp_pw_to_cube(pw, unit_nr, title, particles, zeff, stride, max_file_size_mb, &
+                            zero_tails, silent, mpi_io)
       TYPE(pw_r3d_rs_type), INTENT(IN)                   :: pw
       INTEGER, INTENT(IN)                                :: unit_nr
       CHARACTER(*), INTENT(IN), OPTIONAL                 :: title
       TYPE(particle_list_type), POINTER                  :: particles
+      REAL(KIND=dp), DIMENSION(:), OPTIONAL              :: zeff
       INTEGER, DIMENSION(:), OPTIONAL, POINTER           :: stride
+      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: max_file_size_mb
       LOGICAL, INTENT(IN), OPTIONAL                      :: zero_tails, silent, mpi_io
 
       INTEGER                                            :: i, n
@@ -67,12 +72,13 @@ CONTAINS
 
          CALL pw_to_cube(pw=pw, unit_nr=unit_nr, title=title, &
                          particles_z=particles_z, particles_r=particles_r, &
-                         stride=stride, zero_tails=zero_tails, &
-                         silent=silent, mpi_io=mpi_io)
+                         particles_zeff=zeff, &
+                         stride=stride, max_file_size_mb=max_file_size_mb, &
+                         zero_tails=zero_tails, silent=silent, mpi_io=mpi_io)
       ELSE
          CALL pw_to_cube(pw=pw, unit_nr=unit_nr, title=title, &
-                         stride=stride, zero_tails=zero_tails, &
-                         silent=silent, mpi_io=mpi_io)
+                         stride=stride, max_file_size_mb=max_file_size_mb, &
+                         zero_tails=zero_tails, silent=silent, mpi_io=mpi_io)
       END IF
 
    END SUBROUTINE cp_pw_to_cube

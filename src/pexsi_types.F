@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -90,7 +90,7 @@ MODULE pexsi_types
       TYPE(dbcsr_csr_type)                     :: csr_mat_p = dbcsr_csr_type(), csr_mat_ks = dbcsr_csr_type(), &
                                                   csr_mat_s = dbcsr_csr_type(), csr_mat_E = dbcsr_csr_type(), &
                                                   csr_mat_F = dbcsr_csr_type()
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       TYPE(cp_pexsi_options)                   :: options
 #else
       TYPE(cp_pexsi_options)                   :: options = cp_pexsi_options()
@@ -151,20 +151,20 @@ CONTAINS
 
          ! Use all nodes available per pole by default or if the user tries to use
          ! more nodes than MPI size
-         IF ((pexsi_env%num_ranks_per_pole .GT. numnodes) &
-             .OR. (pexsi_env%num_ranks_per_pole .EQ. 0)) THEN
+         IF ((pexsi_env%num_ranks_per_pole > numnodes) &
+             .OR. (pexsi_env%num_ranks_per_pole == 0)) THEN
             pexsi_env%num_ranks_per_pole = numnodes
          END IF
 
          ! Find num_ranks_per_pole from user input MIN_RANKS_PER_POLE s.t. num_ranks_per_pole
          ! is the smallest number greater or equal to min_ranks_per_pole that divides
          ! MPI size without remainder.
-         DO WHILE (MOD(numnodes, pexsi_env%num_ranks_per_pole) .NE. 0)
+         DO WHILE (MOD(numnodes, pexsi_env%num_ranks_per_pole) /= 0)
             pexsi_env%num_ranks_per_pole = pexsi_env%num_ranks_per_pole + 1
          END DO
 
          CALL cp_pexsi_get_options(pexsi_env%options, npSymbFact=npSymbFact)
-         IF ((npSymbFact .GT. pexsi_env%num_ranks_per_pole) .OR. (npSymbFact .EQ. 0)) THEN
+         IF ((npSymbFact > pexsi_env%num_ranks_per_pole) .OR. (npSymbFact == 0)) THEN
             ! Use maximum possible number of ranks for symbolic factorization
             CALL cp_pexsi_set_options(pexsi_env%options, npSymbFact=pexsi_env%num_ranks_per_pole)
          END IF
@@ -320,7 +320,7 @@ CONTAINS
       CASE (1)
          WRITE (unit_nr, '(A,T61,A20)') " PEXSI|   Row permutation strategy", "make diagonal entry larger than off diagonal"
       END SELECT
-      IF (ordering .EQ. 0) WRITE (unit_nr, '(A,T61,I20/)') &
+      IF (ordering == 0) WRITE (unit_nr, '(A,T61,I20/)') &
          " PEXSI|   Number of processors for symbolic factorization", npSymbFact
 
    END SUBROUTINE print_pexsi_info

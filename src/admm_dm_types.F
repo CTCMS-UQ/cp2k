@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -47,7 +47,7 @@ MODULE admm_dm_types
       INTEGER, DIMENSION(:, :), POINTER         :: block_map => Null()
       TYPE(mcweeny_history_p_type), &
          DIMENSION(:), POINTER                  :: mcweeny_history => Null()
-   END TYPE
+   END TYPE admm_dm_type
 
 CONTAINS
 

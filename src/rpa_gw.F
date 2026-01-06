@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -33,11 +33,12 @@ MODULE rpa_gw
                                               cp_fm_to_cfm
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add_on_diag, dbcsr_copy, dbcsr_create, dbcsr_desymmetrize, dbcsr_filter, &
-        dbcsr_get_info, dbcsr_init_p, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
-        dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, &
-        dbcsr_p_type, dbcsr_release, dbcsr_release_p, dbcsr_scale, dbcsr_set, dbcsr_type, &
-        dbcsr_type_antisymmetric, dbcsr_type_no_symmetry
+        dbcsr_copy, dbcsr_create, dbcsr_desymmetrize, dbcsr_filter, dbcsr_get_info, dbcsr_init_p, &
+        dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, dbcsr_iterator_start, &
+        dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, dbcsr_p_type, dbcsr_release, &
+        dbcsr_release_p, dbcsr_scale, dbcsr_set, dbcsr_type, dbcsr_type_antisymmetric, &
+        dbcsr_type_no_symmetry
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_add_on_diag
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_alloc_block_from_nbl
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
@@ -46,7 +47,7 @@ MODULE rpa_gw
    USE cp_files,                        ONLY: close_file,&
                                               open_file
    USE cp_fm_basic_linalg,              ONLY: cp_fm_scale_and_add,&
-                                              cp_fm_upper_to_full
+                                              cp_fm_uplo_to_full
    USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_decompose,&
                                               cp_fm_cholesky_invert
    USE cp_fm_diag,                      ONLY: cp_fm_syevd
@@ -278,7 +279,7 @@ CONTAINS
 
       DO jquad = 1, num_integ_points
 
-         CALL cp_fm_create(fm_mat_W(jquad), fm_mat_Q%matrix_struct)
+         CALL cp_fm_create(fm_mat_W(jquad), fm_mat_Q%matrix_struct, set_zero=.TRUE.)
          CALL cp_fm_to_fm(fm_mat_Q, fm_mat_W(jquad))
          CALL cp_fm_set_all(fm_mat_W(jquad), 0.0_dp)
 
@@ -853,7 +854,7 @@ CONTAINS
          ! calculate [1+Q(iw')]^-1
          CALL cp_fm_cholesky_invert(fm_mat_Q)
          ! symmetrize the result, fm_mat_R_gw is only temporary work matrix
-         CALL cp_fm_upper_to_full(fm_mat_Q, fm_mat_R_gw)
+         CALL cp_fm_uplo_to_full(fm_mat_Q, fm_mat_R_gw)
 
          ! periodic correction for GW (paper Phys. Rev. B 95, 235123 (2017))
          IF (do_periodic) THEN
@@ -981,7 +982,7 @@ CONTAINS
       CALL cp_fm_cholesky_invert(fm_mat_Q)
 
       ! symmetrize the result
-      CALL cp_fm_upper_to_full(fm_mat_Q, fm_mat_work)
+      CALL cp_fm_uplo_to_full(fm_mat_Q, fm_mat_work)
 
       ! subtract 1 from the diagonal to get rid of exchange self-energy
 !$OMP           PARALLEL DO DEFAULT(NONE) PRIVATE(jjB,iiB,i_global,j_global) &
@@ -1827,12 +1828,12 @@ CONTAINS
          DO j_col = 1, ncol_local
             i_glob = row_indices(i_row)
             j_glob = col_indices(j_col)
-            IF (i_glob .LE. nao) THEN
+            IF (i_glob <= nao) THEN
                E_i = Eigenval(i_glob, ikp, 1)
             ELSE
                E_i = Eigenval(i_glob - nao, ikp, 1)
             END IF
-            IF (j_glob .LE. nao) THEN
+            IF (j_glob <= nao) THEN
                E_j = Eigenval(j_glob, ikp, 1)
             ELSE
                E_j = Eigenval(j_glob - nao, ikp, 1)
@@ -2022,7 +2023,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE add_dbcsr_submatrix
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2108,7 +2109,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE create_cfm_double_row_col_size
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2183,7 +2184,7 @@ CONTAINS
       DO k = 1, SIZE(array, 3)
 
          ! check for NaN
-         IF (array(i, j, k) .NE. array(i, j, k)) array(i, j, k) = real_value
+         IF (array(i, j, k) /= array(i, j, k)) array(i, j, k) = real_value
 
       END DO
       END DO
@@ -2191,7 +2192,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE check_NaN
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2661,8 +2662,8 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'compute_eps_head_Berry'
 
-      INTEGER :: col, col_end_in_block, col_offset, col_size, handle, i_col, i_row, ikp, nkp, row, &
-         row_offset, row_size, row_start_in_block
+      INTEGER :: col, col_end_in_block, col_offset, col_size, handle, i_col, i_row, ikp, nkp, nmo, &
+         row, row_offset, row_size, row_start_in_block
       REAL(KIND=dp)                                      :: abs_k_square, cell_volume, &
                                                             correct_kpoint(3), cos_square, &
                                                             eigen_diff, relative_kpoint(3), &
@@ -2680,6 +2681,8 @@ CONTAINS
       NULLIFY (data_block)
 
       nkp = kpoints%nkp
+
+      nmo = SIZE(Eigenval)
 
       ALLOCATE (P_head(nkp))
       P_head(:) = 0.0_dp
@@ -2717,9 +2720,9 @@ CONTAINS
                col_end_in_block = col_size
             END IF
 
-            DO i_row = row_start_in_block, row_size
+            DO i_row = row_start_in_block, MIN(row_size, nmo - row_offset + 1)
 
-               DO i_col = 1, col_end_in_block
+               DO i_col = 1, MIN(col_end_in_block, nmo - col_offset + 1)
 
                   eigen_diff = Eigenval(i_col + col_offset - 1) - Eigenval(i_row + row_offset - 1)
 
@@ -2757,9 +2760,9 @@ CONTAINS
                col_end_in_block = col_size
             END IF
 
-            DO i_row = row_start_in_block, row_size
+            DO i_row = row_start_in_block, MIN(row_size, nmo - row_offset + 1)
 
-               DO i_col = 1, col_end_in_block
+               DO i_col = 1, MIN(col_end_in_block, nmo - col_offset + 1)
 
                   eigen_diff = Eigenval(i_col + col_offset - 1) - Eigenval(i_row + row_offset - 1)
 
@@ -3035,7 +3038,7 @@ CONTAINS
          CALL cp_fm_cholesky_decompose(fm_mat_s_aux_aux_inv)
          CALL cp_fm_cholesky_invert(fm_mat_s_aux_aux_inv)
          ! Symmetrize the guy
-         CALL cp_fm_upper_to_full(fm_mat_s_aux_aux_inv, fm_mat_work_aux_aux)
+         CALL cp_fm_uplo_to_full(fm_mat_s_aux_aux_inv, fm_mat_work_aux_aux)
 
          CALL copy_fm_to_dbcsr(fm_mat_s_aux_aux_inv, matrix_s_inv_aux_aux, keep_sparsity=.FALSE.)
 
@@ -3416,7 +3419,7 @@ CONTAINS
                         m_level = i_row + row_offset - 1
 
                         ! we only compute the correction for n=m
-                        IF (m_level .NE. n_level_gw) CYCLE
+                        IF (m_level /= n_level_gw) CYCLE
 
                         IF (.NOT. do_extra_kpoints) THEN
 
@@ -3469,7 +3472,7 @@ CONTAINS
                         contribution = weight*(eps_inv_head(ikp) - 1.0_dp)/abs_k_square*(data_block(i_row, i_col))**2
 
                         ! we only compute the correction for n=m
-                        IF (m_level .NE. n_level_gw) CYCLE
+                        IF (m_level /= n_level_gw) CYCLE
 
                         IF (.NOT. do_extra_kpoints) THEN
 
@@ -6706,7 +6709,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE contract_cubic_gw
 
 ! **************************************************************************************************
 !> \brief ...
@@ -6776,9 +6779,9 @@ CONTAINS
          trace_shape(1) = SIZE(block_1, 1)*SIZE(block_1, 2)
          vec_Sigma_prv(n_start:n_end) = &
             vec_Sigma_prv(n_start:n_end) + &
-            (/(DOT_PRODUCT(RESHAPE(block_1(:, :, n), trace_shape), &
-                           RESHAPE(block_2(:, :, n), trace_shape)), &
-               n=n_start_block, n_end_block)/)
+            [(DOT_PRODUCT(RESHAPE(block_1(:, :, n), trace_shape), &
+                          RESHAPE(block_2(:, :, n), trace_shape)), &
+              n=n_start_block, n_end_block)]
          DEALLOCATE (block_1, block_2)
       END DO
       CALL dbt_iterator_stop(iter)
@@ -6793,7 +6796,7 @@ CONTAINS
          vec_Sigma(mo_bounds_off(1):mo_bounds_off(2)) + vec_Sigma_prv
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE trace_sigma_gw
 
 ! **************************************************************************************************
 !> \brief ...

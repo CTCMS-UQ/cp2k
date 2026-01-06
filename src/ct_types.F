@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -124,7 +124,7 @@ MODULE ct_types
       TYPE(mp_para_env_type), POINTER  :: para_env => NULL()
       TYPE(cp_blacs_env_type), POINTER  :: blacs_env => NULL()
 
-   END TYPE
+   END TYPE ct_step_env_type
 
 CONTAINS
 

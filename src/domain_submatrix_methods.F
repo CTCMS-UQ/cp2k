@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -17,9 +17,8 @@ MODULE domain_submatrix_methods
         dbcsr_distribution_get, dbcsr_distribution_type, dbcsr_filter, dbcsr_finalize, &
         dbcsr_get_block_p, dbcsr_get_info, dbcsr_get_matrix_type, dbcsr_get_stored_coordinates, &
         dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, dbcsr_iterator_start, &
-        dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_nblkcols_total, dbcsr_nblkrows_total, &
-        dbcsr_reserve_block2d, dbcsr_type, dbcsr_type_antisymmetric, dbcsr_type_no_symmetry, &
-        dbcsr_type_symmetric, dbcsr_work_create
+        dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_put_block, dbcsr_type, &
+        dbcsr_type_antisymmetric, dbcsr_type_no_symmetry, dbcsr_type_symmetric, dbcsr_work_create
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_unit_nr,&
                                               cp_logger_type
@@ -155,11 +154,11 @@ CONTAINS
 
       ndomains = SIZE(original)
       ndomainsB = SIZE(copy)
-      CPASSERT(ndomains .EQ. ndomainsB)
+      CPASSERT(ndomains == ndomainsB)
       copy(:)%nnodes = original(:)%nnodes
       copy(:)%group = original(:)%group
       DO idomain = 1, ndomains
-         IF (original(idomain)%domain .GT. 0) THEN
+         IF (original(idomain)%domain > 0) THEN
             CALL copy_submatrix(original(idomain), copy(idomain), copy_data)
          END IF
       END DO ! loop over domains
@@ -190,7 +189,7 @@ CONTAINS
       copy%nnodes = original%nnodes
       copy%group = original%group
 
-      IF (original%domain .GT. 0) THEN
+      IF (original%domain > 0) THEN
 
          copy%nbrows = original%nbrows
          copy%nbcols = original%nbcols
@@ -200,7 +199,7 @@ CONTAINS
          IF (.NOT. ALLOCATED(copy%dbcsr_row)) THEN
             ALLOCATE (copy%dbcsr_row(original%nbrows))
          ELSE
-            IF (SIZE(copy%dbcsr_row) .NE. SIZE(original%dbcsr_row)) THEN
+            IF (SIZE(copy%dbcsr_row) /= SIZE(original%dbcsr_row)) THEN
                DEALLOCATE (copy%dbcsr_row)
                ALLOCATE (copy%dbcsr_row(original%nbrows))
             END IF
@@ -208,7 +207,7 @@ CONTAINS
          IF (.NOT. ALLOCATED(copy%dbcsr_col)) THEN
             ALLOCATE (copy%dbcsr_col(original%nbcols))
          ELSE
-            IF (SIZE(copy%dbcsr_col) .NE. SIZE(original%dbcsr_col)) THEN
+            IF (SIZE(copy%dbcsr_col) /= SIZE(original%dbcsr_col)) THEN
                DEALLOCATE (copy%dbcsr_col)
                ALLOCATE (copy%dbcsr_col(original%nbcols))
             END IF
@@ -216,7 +215,7 @@ CONTAINS
          IF (.NOT. ALLOCATED(copy%size_brow)) THEN
             ALLOCATE (copy%size_brow(original%nbrows))
          ELSE
-            IF (SIZE(copy%size_brow) .NE. SIZE(original%size_brow)) THEN
+            IF (SIZE(copy%size_brow) /= SIZE(original%size_brow)) THEN
                DEALLOCATE (copy%size_brow)
                ALLOCATE (copy%size_brow(original%nbrows))
             END IF
@@ -224,7 +223,7 @@ CONTAINS
          IF (.NOT. ALLOCATED(copy%size_bcol)) THEN
             ALLOCATE (copy%size_bcol(original%nbcols))
          ELSE
-            IF (SIZE(copy%size_bcol) .NE. SIZE(original%size_bcol)) THEN
+            IF (SIZE(copy%size_bcol) /= SIZE(original%size_bcol)) THEN
                DEALLOCATE (copy%size_bcol)
                ALLOCATE (copy%size_bcol(original%nbcols))
             END IF
@@ -266,7 +265,7 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CPASSERT(copy%domain .GT. 0)
+      CPASSERT(copy%domain > 0)
 
       ds1 = SIZE(array, 1)
       ds2 = SIZE(array, 2)
@@ -276,7 +275,7 @@ CONTAINS
       ELSE
          ms1 = SIZE(copy%mdata, 1)
          ms2 = SIZE(copy%mdata, 2)
-         IF ((ds1 .NE. ms1) .OR. (ds2 .NE. ms2)) THEN
+         IF ((ds1 /= ms1) .OR. (ds2 /= ms2)) THEN
             DEALLOCATE (copy%mdata)
             ALLOCATE (copy%mdata(ds1, ds2))
          END IF
@@ -307,7 +306,7 @@ CONTAINS
 
       ndomains = SIZE(submatrices)
       DO idomain = 1, ndomains
-         IF (submatrices(idomain)%domain .GT. 0) THEN
+         IF (submatrices(idomain)%domain > 0) THEN
             CALL set_submatrix(submatrices(idomain), scalar)
          END IF
       END DO ! loop over domains
@@ -332,9 +331,9 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CPASSERT(submatrix%domain .GT. 0)
-      CPASSERT(submatrix%nrows .GT. 0)
-      CPASSERT(submatrix%ncols .GT. 0)
+      CPASSERT(submatrix%domain > 0)
+      CPASSERT(submatrix%nrows > 0)
+      CPASSERT(submatrix%ncols > 0)
 
       ds1 = submatrix%nrows
       ds2 = submatrix%ncols
@@ -344,7 +343,7 @@ CONTAINS
       ELSE
          ms1 = SIZE(submatrix%mdata, 1)
          ms2 = SIZE(submatrix%mdata, 2)
-         IF ((ds1 .NE. ms1) .OR. (ds2 .NE. ms2)) THEN
+         IF ((ds1 /= ms1) .OR. (ds2 /= ms2)) THEN
             DEALLOCATE (submatrix%mdata)
             ALLOCATE (submatrix%mdata(ds1, ds2))
          END IF
@@ -449,15 +448,15 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CPASSERT(A%domain .GT. 0)
-      CPASSERT(B%domain .GT. 0)
-      CPASSERT(C%domain .GT. 0)
+      CPASSERT(A%domain > 0)
+      CPASSERT(B%domain > 0)
+      CPASSERT(C%domain > 0)
 
       LDA = SIZE(A%mdata, 1)
       LDB = SIZE(B%mdata, 1)
 
-      NOTA = (transA .EQ. 'N') .OR. (transA .EQ. 'n')
-      NOTB = (transB .EQ. 'N') .OR. (transB .EQ. 'n')
+      NOTA = (transA == 'N') .OR. (transA == 'n')
+      NOTB = (transB == 'N') .OR. (transB == 'n')
 
       IF (NOTA) THEN
          M = A%nrows
@@ -480,7 +479,7 @@ CONTAINS
       END IF
 
       ! these checks are for debugging only
-      CPASSERT(K .EQ. K1)
+      CPASSERT(K == K1)
 
       ! conform C matrix
       C%nrows = M
@@ -526,14 +525,14 @@ CONTAINS
 
       IF (.NOT. ALLOCATED(C%mdata)) THEN
          !!! cannot use non-zero beta if C is not allocated
-         CPASSERT(beta .EQ. 0.0_dp)
+         CPASSERT(beta == 0.0_dp)
          ALLOCATE (C%mdata(C%nrows, C%ncols))
       ELSE
          cs1 = SIZE(C%mdata, 1)
          cs2 = SIZE(C%mdata, 2)
-         IF ((C%nrows .NE. cs1) .OR. (C%ncols .NE. cs2)) THEN
+         IF ((C%nrows /= cs1) .OR. (C%ncols /= cs2)) THEN
             !!! cannot deallocate data if beta is non-zero
-            CPASSERT(beta .EQ. 0.0_dp)
+            CPASSERT(beta == 0.0_dp)
             DEALLOCATE (C%mdata)
             ALLOCATE (C%mdata(C%nrows, C%ncols))
          END IF
@@ -581,20 +580,20 @@ CONTAINS
       ndomainsB = SIZE(B)
       ndomainsC = SIZE(C)
 
-      CPASSERT(ndomains .EQ. ndomainsB)
-      CPASSERT(ndomainsB .EQ. ndomainsC)
+      CPASSERT(ndomains == ndomainsB)
+      CPASSERT(ndomainsB == ndomainsC)
 
       DO idomain = 1, ndomains
 
          idomainA = A(idomain)%domain
          idomainB = B(idomain)%domain
 
-         CPASSERT(idomainA .EQ. idomainB)
+         CPASSERT(idomainA == idomainB)
 
          C(idomain)%domain = idomainA
 
          ! check if the submatrix exists
-         IF (idomainA .GT. 0) THEN
+         IF (idomainA > 0) THEN
             CALL multiply_submatrices_once(transA, transB, alpha, A(idomain), B(idomain), beta, C(idomain))
          END IF ! submatrix for the domain exists
 
@@ -628,13 +627,13 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CPASSERT(A%domain .GT. 0)
-      CPASSERT(B%domain .GT. 0)
+      CPASSERT(A%domain > 0)
+      CPASSERT(B%domain > 0)
 
       R1 = A%nrows
       C1 = A%ncols
 
-      NOTB = (transB .EQ. 'N') .OR. (transB .EQ. 'n')
+      NOTB = (transB == 'N') .OR. (transB == 'n')
 
       IF (NOTB) THEN
          R2 = B%nrows
@@ -645,8 +644,8 @@ CONTAINS
       END IF
 
       ! these checks are for debugging only
-      CPASSERT(C1 .EQ. C2)
-      CPASSERT(R1 .EQ. R2)
+      CPASSERT(C1 == C2)
+      CPASSERT(R1 == R2)
 
       IF (NOTB) THEN
          DO icol = 1, C1
@@ -690,17 +689,17 @@ CONTAINS
       ndomains = SIZE(A)
       ndomainsB = SIZE(B)
 
-      CPASSERT(ndomains .EQ. ndomainsB)
+      CPASSERT(ndomains == ndomainsB)
 
       DO idomain = 1, ndomains
 
          idomainA = A(idomain)%domain
          idomainB = B(idomain)%domain
 
-         CPASSERT(idomainA .EQ. idomainB)
+         CPASSERT(idomainA == idomainB)
 
          ! check if the submatrix exists
-         IF (idomainA .GT. 0) THEN
+         IF (idomainA > 0) THEN
             CALL add_submatrices_once(alpha, A(idomain), beta, B(idomain), transB)
          END IF ! submatrix for the domain exists
 
@@ -739,9 +738,9 @@ CONTAINS
       DO idomain = 1, ndomains
 
          ! check if the submatrix is local
-         IF (submatrices(idomain)%domain .GT. 0) THEN
+         IF (submatrices(idomain)%domain > 0) THEN
             curr_norm = MAXVAL(ABS(submatrices(idomain)%mdata))
-            IF (curr_norm .GT. send_norm) send_norm = curr_norm
+            IF (curr_norm > send_norm) send_norm = curr_norm
          END IF
 
       END DO ! loop over domains
@@ -787,20 +786,20 @@ CONTAINS
       ndomainsA = SIZE(A)
       ndomainsB = SIZE(B)
 
-      CPASSERT(ndomainsA .EQ. ndomainsB)
+      CPASSERT(ndomainsA == ndomainsB)
 
       DO idomain = 1, ndomainsA
 
          domainA = A(idomain)%domain
          domainB = B(idomain)%domain
 
-         CPASSERT(domainA .EQ. domainB)
+         CPASSERT(domainA == domainB)
 
          ! check if the submatrix is local
-         IF (domainA .GT. 0) THEN
+         IF (domainA > 0) THEN
 
-            CPASSERT(A(idomain)%nrows .EQ. B(idomain)%nrows)
-            CPASSERT(A(idomain)%ncols .EQ. B(idomain)%ncols)
+            CPASSERT(A(idomain)%nrows == B(idomain)%nrows)
+            CPASSERT(A(idomain)%ncols == B(idomain)%ncols)
 
             curr_trace = SUM(A(idomain)%mdata(:, :)*B(idomain)%mdata(:, :))
             send_trace = send_trace + curr_trace
@@ -837,7 +836,7 @@ CONTAINS
    SUBROUTINE construct_submatrices(matrix, submatrix, distr_pattern, domain_map, &
                                     node_of_domain, job_type)
 
-      TYPE(dbcsr_type), INTENT(IN)                       :: matrix
+      TYPE(dbcsr_type), INTENT(INOUT)                    :: matrix
       TYPE(domain_submatrix_type), DIMENSION(:), &
          INTENT(INOUT)                                   :: submatrix
       TYPE(dbcsr_type), INTENT(IN)                       :: distr_pattern
@@ -861,7 +860,7 @@ CONTAINS
       LOGICAL                                            :: found, transp
       REAL(KIND=dp)                                      :: antifactor
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: recv_data, send_data
-      REAL(KIND=dp), DIMENSION(:), POINTER               :: block_p
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: block_p
       TYPE(dbcsr_distribution_type)                      :: pattern_dist
       TYPE(mp_comm_type)                                 :: group
 
@@ -872,9 +871,7 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      nblkrows_tot = dbcsr_nblkrows_total(matrix)
-      nblkcols_tot = dbcsr_nblkcols_total(matrix)
-
+      CALL dbcsr_get_info(matrix, nblkrows_total=nblkrows_tot, nblkcols_total=nblkcols_tot)
       ndomains = nblkcols_tot ! RZK-warning not true for atomic distributions
       CALL dbcsr_get_info(distr_pattern, distribution=pattern_dist)
       CALL dbcsr_distribution_get(pattern_dist, numnodes=nNodes, group=GroupID, mynode=myNode)
@@ -896,7 +893,7 @@ CONTAINS
 
          ! loop over those rows that have non-zero quencher
          index_sr = 1 ! index start row
-         IF (idomain .GT. 1) index_sr = domain_map%index1(idomain - 1)
+         IF (idomain > 1) index_sr = domain_map%index1(idomain - 1)
          index_er = domain_map%index1(idomain) - 1 ! index end row
 
          DO index_row = index_sr, index_er
@@ -906,7 +903,7 @@ CONTAINS
             IF (job_type == select_row_col) THEN
                ! loop over those columns that have non-zero quencher
                index_sc = 1 ! index start col
-               IF (idomain .GT. 1) index_sc = domain_map%index1(idomain - 1)
+               IF (idomain > 1) index_sc = domain_map%index1(idomain - 1)
                index_ec = domain_map%index1(idomain) - 1 ! index end col
             ELSE
                ! fake loop
@@ -925,7 +922,7 @@ CONTAINS
                transp = .FALSE.
                CALL dbcsr_get_stored_coordinates(matrix, &
                                                  row, col, block_node)
-               IF (block_node .EQ. myNode) THEN
+               IF (block_node == myNode) THEN
                   CALL dbcsr_get_block_p(matrix, row, col, block_p, found, row_size, col_size)
                   IF (found) THEN
                      send_descriptor(1, dest_node + 1) = send_descriptor(1, dest_node + 1) + 1
@@ -1029,7 +1026,7 @@ CONTAINS
 
          ! loop over those rows that have non-zero quencher
          index_sr = 1 ! index start row
-         IF (idomain .GT. 1) index_sr = domain_map%index1(idomain - 1)
+         IF (idomain > 1) index_sr = domain_map%index1(idomain - 1)
          index_er = domain_map%index1(idomain) - 1 ! index end row
 
          DO index_row = index_sr, index_er
@@ -1039,7 +1036,7 @@ CONTAINS
             IF (job_type == select_row_col) THEN
                ! loop over those columns that have non-zero quencher
                index_sc = 1 ! index start col
-               IF (idomain .GT. 1) index_sc = domain_map%index1(idomain - 1)
+               IF (idomain > 1) index_sc = domain_map%index1(idomain - 1)
                index_ec = domain_map%index1(idomain) - 1 ! index end col
             ELSE
                ! fake loop
@@ -1058,7 +1055,7 @@ CONTAINS
                transp = .FALSE.
                CALL dbcsr_get_stored_coordinates(matrix, &
                                                  row, col, block_node)
-               IF (block_node .EQ. myNode) THEN
+               IF (block_node == myNode) THEN
                   CALL dbcsr_get_block_p(matrix, row, col, block_p, found, row_size, col_size)
                   IF (found) THEN
                      !col_offset=0
@@ -1073,8 +1070,7 @@ CONTAINS
                      col_offset = row_size*col_size
                      start_data = send_offset_cpu(dest_node + 1) + &
                                   offset_block(dest_node + 1)
-                     send_data(start_data + 1:start_data + col_offset) = &
-                        block_p(1:col_offset)
+                     send_data(start_data + 1:start_data + col_offset) = RESHAPE(block_p, [col_offset])
                      offset_block(dest_node + 1) = offset_block(dest_node + 1) + col_offset
                      ! fill out row,col information
                      send_data2(send_offset2_cpu(dest_node + 1) + &
@@ -1150,7 +1146,7 @@ CONTAINS
 !    subm_row_size(:)=0
 !    subm_col_size(:)=0
       ndomains2 = SIZE(submatrix)
-      IF (ndomains2 .NE. ndomains) THEN
+      IF (ndomains2 /= ndomains) THEN
          CPABORT("wrong submatrix size")
       END IF
       CALL release_submatrices(submatrix)
@@ -1166,7 +1162,7 @@ CONTAINS
          !transp=.FALSE.
          !CALL dbcsr_get_stored_coordinates(distr_pattern,&
          !        idomain, idomain, transp, dest_node)
-         IF (dest_node .EQ. mynode) THEN
+         IF (dest_node == mynode) THEN
             submatrix(idomain)%domain = idomain
             submatrix(idomain)%nbrows = 0
             submatrix(idomain)%nbcols = 0
@@ -1174,7 +1170,7 @@ CONTAINS
             ! loop over those rows that have non-zero quencher
             first_row(:) = -1
             index_sr = 1 ! index start row
-            IF (idomain .GT. 1) index_sr = domain_map%index1(idomain - 1)
+            IF (idomain > 1) index_sr = domain_map%index1(idomain - 1)
             index_er = domain_map%index1(idomain) - 1 ! index end row
             DO index_row = index_sr, index_er
                row = domain_map%pairs(index_row, 1)
@@ -1190,7 +1186,7 @@ CONTAINS
             smrow = 1
             ! again loop over those rows that have non-zero quencher
             index_sr = 1 ! index start row
-            IF (idomain .GT. 1) index_sr = domain_map%index1(idomain - 1)
+            IF (idomain > 1) index_sr = domain_map%index1(idomain - 1)
             index_er = domain_map%index1(idomain) - 1 ! index end row
             DO index_row = index_sr, index_er
                row = domain_map%pairs(index_row, 1)
@@ -1207,7 +1203,7 @@ CONTAINS
             IF (job_type == select_row_col) THEN
                ! loop over those columns that have non-zero quencher
                index_sc = 1 ! index start col
-               IF (idomain .GT. 1) index_sc = domain_map%index1(idomain - 1)
+               IF (idomain > 1) index_sc = domain_map%index1(idomain - 1)
                index_ec = domain_map%index1(idomain) - 1 ! index end col
             ELSE
                ! fake loop
@@ -1241,7 +1237,7 @@ CONTAINS
             IF (job_type == select_row_col) THEN
                ! loop over those columns that have non-zero quencher
                index_sc = 1 ! index start col
-               IF (idomain .GT. 1) index_sc = domain_map%index1(idomain - 1)
+               IF (idomain > 1) index_sc = domain_map%index1(idomain - 1)
                index_ec = domain_map%index1(idomain) - 1 ! index end col
             ELSE
                ! fake loop
@@ -1273,7 +1269,7 @@ CONTAINS
                   row = recv_data2(recv_offset2_cpu(iNode) + (iBlock - 1)*2 + 1)
                   col = recv_data2(recv_offset2_cpu(iNode) + (iBlock - 1)*2 + 2)
                   ! check if this block should be in the submatrix of this domain
-                  IF ((first_col(col) .NE. -1) .AND. (first_row(row) .NE. -1)) THEN
+                  IF ((first_col(col) /= -1) .AND. (first_row(row) /= -1)) THEN
                      ! copy data from the received array into submatrix
                      start_data = recv_offset_cpu(iNode) + block_offset + 1
                      DO icol = 0, col_blk_size(col) - 1
@@ -1353,6 +1349,7 @@ CONTAINS
       INTEGER, DIMENSION(:), POINTER                     :: col_blk_size, row_blk_size
       LOGICAL                                            :: transp
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: recv_data, send_data
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: new_block
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: block_p
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_distribution_type)                      :: pattern_dist
@@ -1369,13 +1366,11 @@ CONTAINS
          unit_nr = -1
       END IF
 
-      nblkrows_tot = dbcsr_nblkrows_total(matrix)
-      nblkcols_tot = dbcsr_nblkcols_total(matrix)
-
+      CALL dbcsr_get_info(matrix, nblkrows_total=nblkrows_tot, nblkcols_total=nblkcols_tot)
       ndomains = nblkcols_tot ! RZK-warning not true for atomic distributions
       ndomains2 = SIZE(submatrix)
 
-      IF (ndomains .NE. ndomains2) THEN
+      IF (ndomains /= ndomains2) THEN
          CPABORT("domain mismatch")
       END IF
 
@@ -1385,7 +1380,7 @@ CONTAINS
       CALL group%set_handle(GroupID)
 
       matrix_type = dbcsr_get_matrix_type(matrix)
-      IF (matrix_type .NE. dbcsr_type_no_symmetry) THEN
+      IF (matrix_type /= dbcsr_type_no_symmetry) THEN
          CPABORT("only non-symmetric matrices so far")
       END IF
 
@@ -1408,18 +1403,18 @@ CONTAINS
       ! loop over domains - find how much data to send
       DO idomain = 1, ndomains
 
-         IF (submatrix(idomain)%domain .GT. 0) THEN
+         IF (submatrix(idomain)%domain > 0) THEN
 
             DO irow_subm = 1, submatrix(idomain)%nbrows
 
-               IF (submatrix(idomain)%nbcols .NE. 1) THEN
+               IF (submatrix(idomain)%nbcols /= 1) THEN
                   CPABORT("corrupt submatrix structure")
                END IF
 
                row = submatrix(idomain)%dbcsr_row(irow_subm)
                col = submatrix(idomain)%dbcsr_col(1)
 
-               IF (col .NE. idomain) THEN
+               IF (col /= idomain) THEN
                   CPABORT("corrupt submatrix structure")
                END IF
 
@@ -1496,7 +1491,7 @@ CONTAINS
       ! loop over domains - collect data to send
       DO idomain = 1, ndomains
 
-         IF (submatrix(idomain)%domain .GT. 0) THEN
+         IF (submatrix(idomain)%domain > 0) THEN
 
             smroff = 0
             DO irow_subm = 1, submatrix(idomain)%nbrows
@@ -1560,19 +1555,16 @@ CONTAINS
             ! read the (row,col) of the block
             row = recv_data2(recv_offset2_cpu(iNode) + (iBlock - 1)*2 + 1)
             col = recv_data2(recv_offset2_cpu(iNode) + (iBlock - 1)*2 + 2)
-            !CALL dbcsr_get_block_p(matrix,row,col,block_p,found)
-            !IF (.NOT.found) THEN
-            NULLIFY (block_p)
-            CALL dbcsr_reserve_block2d(matrix, row, col, block_p)
-            CPASSERT(ASSOCIATED(block_p))
-            !ENDIF
             ! copy data from the received array into the matrix block
             start_data = recv_offset_cpu(iNode) + block_offset + 1
+            ALLOCATE (new_block(row_blk_size(row), col_blk_size(col)))
             DO icol = 1, col_blk_size(col)
-               block_p(:, icol) = &
+               new_block(:, icol) = &
                   recv_data(start_data:start_data + row_blk_size(row) - 1)
                start_data = start_data + row_blk_size(row)
             END DO
+            CALL dbcsr_put_block(matrix, row, col, new_block)
+            DEALLOCATE (new_block)
             block_offset = block_offset + col_blk_size(col)*row_blk_size(row)
          END DO
       END DO
@@ -1613,7 +1605,7 @@ CONTAINS
          ncols = SIZE(submatrices(i)%mdata, 2)
          WRITE (colstr, *) ncols
          formatstr = '('//TRIM(ADJUSTL(colstr))//'F16.9)'
-         IF (submatrices(i)%domain .GT. 0) THEN
+         IF (submatrices(i)%domain > 0) THEN
             WRITE (*, *) "SUBMATRIX: ", i, nrows, 'x', ncols
             nrows = SIZE(submatrices(i)%mdata, 1)
             DO irow = 1, nrows
@@ -1650,17 +1642,17 @@ CONTAINS
       ndomains = SIZE(map%index1)
 
       qblk_exists = .FALSE.
-      IF (col .LT. 1 .OR. col .GT. ndomains) RETURN
+      IF (col < 1 .OR. col > ndomains) RETURN
       first = 1
-      IF (col .GT. 1) first = map%index1(col - 1)
+      IF (col > 1) first = map%index1(col - 1)
       last = map%index1(col) - 1
 
       ! perform binary search within first-last
-      DO WHILE (last .GE. first)
+      DO WHILE (last >= first)
          mid = first + (last - first)/2
-         IF (map%pairs(mid, 1) .GT. row) THEN
+         IF (map%pairs(mid, 1) > row) THEN
             last = mid - 1
-         ELSE IF (map%pairs(mid, 1) .LT. row) THEN
+         ELSE IF (map%pairs(mid, 1) < row) THEN
             first = mid + 1
          ELSE
             qblk_exists = .TRUE. ! SUCCESS!!

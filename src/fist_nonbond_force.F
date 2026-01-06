@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -38,8 +38,9 @@ MODULE fist_nonbond_force
    USE message_passing,                 ONLY: mp_comm_type
    USE pair_potential_coulomb,          ONLY: potential_coulomb
    USE pair_potential_types,            ONLY: &
-        allegro_type, deepmd_type, gal21_type, gal_type, nequip_type, nosh_nosh, nosh_sh, &
-        pair_potential_pp_type, pair_potential_single_type, sh_sh, siepmann_type, tersoff_type
+        ace_type, allegro_type, deepmd_type, gal21_type, gal_type, nequip_type, nosh_nosh, &
+        nosh_sh, pair_potential_pp_type, pair_potential_single_type, sh_sh, siepmann_type, &
+        tersoff_type
    USE particle_types,                  ONLY: particle_type
    USE shell_potential_types,           ONLY: get_shell,&
                                               shell_kind_type
@@ -179,7 +180,7 @@ CONTAINS
       Lists: DO ilist = 1, nonbonded%nlists
          neighbor_kind_pair => nonbonded%neighbor_kind_pairs(ilist)
          npairs = neighbor_kind_pair%npairs
-         IF (npairs == 0) CYCLE
+         IF (npairs == 0) CYCLE Lists
          list => neighbor_kind_pair%list
          cvi = neighbor_kind_pair%cell_vector
          cell_v = MATMUL(cell%hmat, cvi)
@@ -230,7 +231,7 @@ CONTAINS
                full_nl = ANY(pot%type == tersoff_type) .OR. ANY(pot%type == siepmann_type) &
                          .OR. ANY(pot%type == gal_type) .OR. ANY(pot%type == gal21_type) &
                          .OR. ANY(pot%type == nequip_type) .OR. ANY(pot%type == allegro_type) &
-                         .OR. ANY(pot%type == deepmd_type)
+                         .OR. ANY(pot%type == ace_type) .OR. ANY(pot%type == deepmd_type)
                IF ((.NOT. full_nl) .AND. (atom_a == atom_b)) THEN
                   fac_ei = 0.5_dp*fac_ei
                   fac_vdw = 0.5_dp*fac_vdw
@@ -290,7 +291,7 @@ CONTAINS
 
                ! In case we have only manybody potentials and no charges, this
                ! pair of atom types can be ignored here.
-               IF (pot%no_pp .AND. (fac_ei == 0.0)) CYCLE
+               IF (pot%no_pp .AND. (fac_ei == 0.0)) CYCLE Pairs
 
                ! Setup spline_data set
                spl_f => pot%spl_f
@@ -614,7 +615,7 @@ CONTAINS
          pv(3, 3) = pv(3, 3) + rab(3)*fr(3)
       END IF
 
-   END SUBROUTINE
+   END SUBROUTINE add_force_nonbond
 
 ! **************************************************************************************************
 !> \brief corrects electrostatics for bonded terms
@@ -691,12 +692,12 @@ CONTAINS
       Lists: DO ilist = 1, nonbonded%nlists
          neighbor_kind_pair => nonbonded%neighbor_kind_pairs(ilist)
          npairs = neighbor_kind_pair%nscale
-         IF (npairs == 0) CYCLE
+         IF (npairs == 0) CYCLE Lists
          list => neighbor_kind_pair%list
          Kind_Group_Loop: DO igrp = 1, neighbor_kind_pair%ngrp_kind
             istart = neighbor_kind_pair%grp_kind_start(igrp)
             IF (istart > npairs) THEN
-               EXIT
+               EXIT Kind_Group_Loop
             END IF
             iend = MIN(npairs, neighbor_kind_pair%grp_kind_end(igrp))
 
@@ -721,7 +722,7 @@ CONTAINS
                full_nl = ANY(pot%type == tersoff_type) .OR. ANY(pot%type == siepmann_type) &
                          .OR. ANY(pot%type == gal_type) .OR. ANY(pot%type == gal21_type) &
                          .OR. ANY(pot%type == nequip_type) .OR. ANY(pot%type == allegro_type) &
-                         .OR. ANY(pot%type == deepmd_type)
+                         .OR. ANY(pot%type == ace_type) .OR. ANY(pot%type == deepmd_type)
                IF ((.NOT. full_nl) .AND. (atom_a == atom_b)) THEN
                   fac_ei = fac_ei*0.5_dp
                END IF
@@ -731,7 +732,7 @@ CONTAINS
                ! The amount of correction is related to the
                ! amount of scaling as follows:
                fac_cor = 1.0_dp - fac_ei
-               IF (fac_cor <= 0.0_dp) CYCLE
+               IF (fac_cor <= 0.0_dp) CYCLE Pairs
 
                ! Parameters for kind a
                atomic_kind => atomic_kind_set(kind_a)

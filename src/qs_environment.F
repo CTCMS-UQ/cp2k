@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -43,7 +43,7 @@ MODULE qs_environment
                                               xtb_control_type
    USE cp_control_utils,                ONLY: &
         read_ddapc_section, read_dft_control, read_mgrid_section, read_qs_section, &
-        read_tddfpt2_control, read_tddfpt_control, write_admm_control, write_dft_control, &
+        read_rixs_control, read_tddfpt2_control, write_admm_control, write_dft_control, &
         write_qs_control
    USE cp_ddapc_types,                  ONLY: cp_ddapc_ewald_create
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
@@ -84,6 +84,7 @@ MODULE qs_environment
    USE header,                          ONLY: dftb_header,&
                                               qs_header,&
                                               se_header,&
+                                              tblite_header,&
                                               xtb_header
    USE hfx_types,                       ONLY: compare_hfx_sections,&
                                               hfx_create
@@ -163,8 +164,9 @@ MODULE qs_environment
                                               write_ppl_radii,&
                                               write_ppnl_radii
    USE qs_kind_types,                   ONLY: &
-        check_qs_kind_set, get_qs_kind, get_qs_kind_set, init_gapw_basis_set, init_gapw_nlcc, &
-        init_qs_kind_set, qs_kind_type, set_qs_kind, write_gto_basis_sets, write_qs_kind_set
+        check_qs_kind_set, get_qs_kind, get_qs_kind_set, init_cneo_basis_set, init_gapw_basis_set, &
+        init_gapw_nlcc, init_qs_kind_set, qs_kind_type, set_qs_kind, write_gto_basis_sets, &
+        write_qs_kind_set
    USE qs_ks_types,                     ONLY: qs_ks_env_create,&
                                               qs_ks_env_type,&
                                               set_ks_env
@@ -200,12 +202,17 @@ MODULE qs_environment
    USE semi_empirical_types,            ONLY: se_taper_create,&
                                               se_taper_type
    USE semi_empirical_utils,            ONLY: se_cutoff_compatible
+   USE tblite_interface,                ONLY: tb_get_basis,&
+                                              tb_init_geometry,&
+                                              tb_init_wf,&
+                                              tb_set_calculator
    USE transport,                       ONLY: transport_env_create
    USE xtb_parameters,                  ONLY: init_xtb_basis,&
                                               xtb_parameters_init,&
                                               xtb_parameters_set
    USE xtb_potentials,                  ONLY: xtb_pp_radius
-   USE xtb_types,                       ONLY: allocate_xtb_atom_param
+   USE xtb_types,                       ONLY: allocate_xtb_atom_param,&
+                                              set_xtb_atom_param
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -592,12 +599,13 @@ CONTAINS
 
       CHARACTER(len=2)                                   :: element_symbol
       INTEGER :: gfn_type, handle, ikind, ispin, iw, lmax_sphere, maxl, maxlgto, maxlgto_lri, &
-         maxlppl, maxlppnl, method_id, multiplicity, my_ival, n_ao, n_mo_add, natom, nelectron, &
-         ngauss, nkind, output_unit, sort_basis, tnadd_method
+         maxlgto_nuc, maxlppl, maxlppnl, method_id, multiplicity, my_ival, n_ao, n_mo_add, natom, &
+         nelectron, ngauss, nkind, output_unit, sort_basis, tnadd_method
       INTEGER, DIMENSION(2)                              :: n_mo, nelectron_spin
-      LOGICAL :: all_potential_present, be_silent, do_kpoints, do_ri_hfx, do_ri_mp2, do_ri_rpa, &
-         do_ri_sos_mp2, do_rpa_ri_exx, do_wfc_im_time, e1terms, has_unit_metric, lribas, &
-         mp2_present, orb_gradient
+      INTEGER, DIMENSION(5)                              :: occ
+      LOGICAL :: all_potential_present, be_silent, cneo_potential_present, do_kpoints, do_ri_hfx, &
+         do_ri_mp2, do_ri_rpa, do_ri_sos_mp2, do_rpa_ri_exx, do_wfc_im_time, e1terms, &
+         has_unit_metric, lribas, mp2_present, orb_gradient
       REAL(KIND=dp)                                      :: alpha, ccore, ewald_rcut, fxx, maxocc, &
                                                             rcut, total_zeff_corr, verlet_skin, &
                                                             zeff_correction
@@ -641,7 +649,8 @@ CONTAINS
       TYPE(se_taper_type), POINTER                       :: se_taper
       TYPE(section_vals_type), POINTER :: dft_section, et_coupling_section, et_ddapc_section, &
          ewald_section, harris_section, lri_section, mp2_section, nl_section, poisson_section, &
-         pp_section, print_section, qs_section, se_section, tddfpt_section, xc_section
+         pp_section, print_section, qs_section, rixs_section, se_section, tddfpt_section, &
+         xc_section
       TYPE(semi_empirical_control_type), POINTER         :: se_control
       TYPE(semi_empirical_si_type), POINTER              :: se_store_int_env
       TYPE(xtb_control_type), POINTER                    :: xtb_control
@@ -673,6 +682,7 @@ CONTAINS
       et_coupling_section => section_vals_get_subs_vals(qs_env%input, "PROPERTIES%ET_COUPLING")
       ! reimplemented TDDFPT
       tddfpt_section => section_vals_get_subs_vals(qs_env%input, "PROPERTIES%TDDFPT")
+      rixs_section => section_vals_get_subs_vals(qs_env%input, "PROPERTIES%RIXS")
 
       CALL qs_subsys_get(subsys, particle_set=particle_set, &
                          qs_kind_set=qs_kind_set, &
@@ -683,10 +693,6 @@ CONTAINS
       !   *** Read the input section with the DFT control parameters ***
       CALL read_dft_control(dft_control, dft_section)
 
-      ! original implementation of TDDFPT
-      IF (dft_control%do_tddfpt_calculation) THEN
-         CALL read_tddfpt_control(dft_control%tddfpt_control, dft_section)
-      END IF
       ! set periodicity flag
       dft_control%qs_control%periodicity = SUM(cell%perd)
 
@@ -706,8 +712,12 @@ CONTAINS
          CASE (do_method_dftb)
             CALL dftb_header(iw)
          CASE (do_method_xtb)
-            gfn_type = dft_control%qs_control%xtb_control%gfn_type
-            CALL xtb_header(iw, gfn_type)
+            IF (dft_control%qs_control%xtb_control%do_tblite) THEN
+               CALL tblite_header(iw, dft_control%qs_control%xtb_control%tblite_method)
+            ELSE
+               gfn_type = dft_control%qs_control%xtb_control%gfn_type
+               CALL xtb_header(iw, gfn_type)
+            END IF
          END SELECT
          CALL cp_print_key_finished_output(iw, logger, dft_section, &
                                            "PRINT%PROGRAM_BANNER")
@@ -739,6 +749,12 @@ CONTAINS
 
       ! reimplemented TDDFPT
       CALL read_tddfpt2_control(dft_control%tddfpt2_control, tddfpt_section, dft_control%qs_control)
+
+      ! rixs
+      CALL section_vals_get(rixs_section, explicit=qs_env%do_rixs)
+      IF (qs_env%do_rixs) THEN
+         CALL read_rixs_control(dft_control%rixs_control, rixs_section, dft_control%qs_control)
+      END IF
 
       !   Create relativistic control section
       BLOCK
@@ -773,76 +789,103 @@ CONTAINS
       ELSEIF (dft_control%qs_control%method_id == do_method_xtb) THEN
          !   *** Read xTB parameter file ***
          xtb_control => dft_control%qs_control%xtb_control
-         NULLIFY (ewald_env, ewald_pw)
          CALL get_qs_env(qs_env, nkind=nkind)
-         DO ikind = 1, nkind
-            qs_kind => qs_kind_set(ikind)
-            ! Setup proper xTB parameters
-            CPASSERT(.NOT. ASSOCIATED(qs_kind%xtb_parameter))
-            CALL allocate_xtb_atom_param(qs_kind%xtb_parameter)
-            ! Set default parameters
-            gfn_type = dft_control%qs_control%xtb_control%gfn_type
-            CALL get_qs_kind(qs_kind, element_symbol=element_symbol)
-            CALL xtb_parameters_init(qs_kind%xtb_parameter, gfn_type, element_symbol, &
-                                     xtb_control%parameter_file_path, xtb_control%parameter_file_name, &
-                                     para_env)
-            ! set dependent parameters
-            CALL xtb_parameters_set(qs_kind%xtb_parameter)
-            ! Generate basis set
-            NULLIFY (tmp_basis_set)
-            IF (qs_kind%xtb_parameter%z == 1) THEN
-               ! special case hydrogen
-               ngauss = xtb_control%h_sto_ng
-            ELSE
-               ngauss = xtb_control%sto_ng
-            END IF
-            IF (qs_kind%xtb_parameter%defined) THEN
-               CALL init_xtb_basis(qs_kind%xtb_parameter, tmp_basis_set, ngauss)
+         IF (xtb_control%do_tblite) THEN
+            ! put geometry to tblite
+            CALL tb_init_geometry(qs_env, qs_env%tb_tblite)
+            ! select tblite method
+            CALL tb_set_calculator(qs_env%tb_tblite, xtb_control%tblite_method)
+            !set up wave function
+            CALL tb_init_wf(qs_env%tb_tblite)
+            !get basis set
+            DO ikind = 1, nkind
+               qs_kind => qs_kind_set(ikind)
+               ! Setup proper xTB parameters
+               CPASSERT(.NOT. ASSOCIATED(qs_kind%xtb_parameter))
+               CALL allocate_xtb_atom_param(qs_kind%xtb_parameter)
+               ! Set default parameters
+               CALL get_qs_kind(qs_kind, element_symbol=element_symbol)
+
+               NULLIFY (tmp_basis_set)
+               CALL tb_get_basis(qs_env%tb_tblite, tmp_basis_set, element_symbol, qs_kind%xtb_parameter, occ)
                CALL add_basis_set_to_container(qs_kind%basis_sets, tmp_basis_set, "ORB")
-            ELSE
-               CALL set_qs_kind(qs_kind, ghost=.TRUE.)
-               IF (ASSOCIATED(qs_kind%all_potential)) THEN
-                  DEALLOCATE (qs_kind%all_potential%elec_conf)
-                  DEALLOCATE (qs_kind%all_potential)
-               END IF
-            END IF
-            ! potential
-            IF (qs_kind%xtb_parameter%defined) THEN
+               CALL set_xtb_atom_param(qs_kind%xtb_parameter, occupation=occ)
+
+               !setting the potential for the computation
                zeff_correction = 0.0_dp
                CALL init_potential(qs_kind%all_potential, itype="BARE", &
-                                   zeff=qs_kind%xtb_parameter%zeff, zeff_correction=zeff_correction)
-               CALL get_potential(qs_kind%all_potential, alpha_core_charge=alpha)
-               ccore = qs_kind%xtb_parameter%zeff*SQRT((alpha/pi)**3)
-               CALL set_potential(qs_kind%all_potential, ccore_charge=ccore)
-               qs_kind%xtb_parameter%zeff = qs_kind%xtb_parameter%zeff - zeff_correction
+                                   zeff=REAL(SUM(occ), dp), zeff_correction=zeff_correction)
+            END DO
+         ELSE
+            NULLIFY (ewald_env, ewald_pw)
+            DO ikind = 1, nkind
+               qs_kind => qs_kind_set(ikind)
+               ! Setup proper xTB parameters
+               CPASSERT(.NOT. ASSOCIATED(qs_kind%xtb_parameter))
+               CALL allocate_xtb_atom_param(qs_kind%xtb_parameter)
+               ! Set default parameters
+               gfn_type = dft_control%qs_control%xtb_control%gfn_type
+               CALL get_qs_kind(qs_kind, element_symbol=element_symbol)
+               CALL xtb_parameters_init(qs_kind%xtb_parameter, gfn_type, element_symbol, &
+                                        xtb_control%parameter_file_path, xtb_control%parameter_file_name, &
+                                        para_env)
+               ! set dependent parameters
+               CALL xtb_parameters_set(qs_kind%xtb_parameter)
+               ! Generate basis set
+               NULLIFY (tmp_basis_set)
+               IF (qs_kind%xtb_parameter%z == 1) THEN
+                  ! special case hydrogen
+                  ngauss = xtb_control%h_sto_ng
+               ELSE
+                  ngauss = xtb_control%sto_ng
+               END IF
+               IF (qs_kind%xtb_parameter%defined) THEN
+                  CALL init_xtb_basis(qs_kind%xtb_parameter, tmp_basis_set, ngauss)
+                  CALL add_basis_set_to_container(qs_kind%basis_sets, tmp_basis_set, "ORB")
+               ELSE
+                  CALL set_qs_kind(qs_kind, ghost=.TRUE.)
+                  IF (ASSOCIATED(qs_kind%all_potential)) THEN
+                     DEALLOCATE (qs_kind%all_potential%elec_conf)
+                     DEALLOCATE (qs_kind%all_potential)
+                  END IF
+               END IF
+               ! potential
+               IF (qs_kind%xtb_parameter%defined) THEN
+                  zeff_correction = 0.0_dp
+                  CALL init_potential(qs_kind%all_potential, itype="BARE", &
+                                      zeff=qs_kind%xtb_parameter%zeff, zeff_correction=zeff_correction)
+                  CALL get_potential(qs_kind%all_potential, alpha_core_charge=alpha)
+                  ccore = qs_kind%xtb_parameter%zeff*SQRT((alpha/pi)**3)
+                  CALL set_potential(qs_kind%all_potential, ccore_charge=ccore)
+                  qs_kind%xtb_parameter%zeff = qs_kind%xtb_parameter%zeff - zeff_correction
+               END IF
+            END DO
+            !
+            ! set repulsive potential range
+            !
+            ALLOCATE (xtb_control%rcpair(nkind, nkind))
+            CALL xtb_pp_radius(qs_kind_set, xtb_control%rcpair, xtb_control%eps_pair, xtb_control%kf)
+            ! check for Ewald
+            IF (xtb_control%do_ewald) THEN
+               ALLOCATE (ewald_env)
+               CALL ewald_env_create(ewald_env, para_env)
+               poisson_section => section_vals_get_subs_vals(dft_section, "POISSON")
+               CALL ewald_env_set(ewald_env, poisson_section=poisson_section)
+               ewald_section => section_vals_get_subs_vals(poisson_section, "EWALD")
+               print_section => section_vals_get_subs_vals(qs_env%input, "PRINT%GRID_INFORMATION")
+               IF (gfn_type == 0) THEN
+                  CALL read_ewald_section_tb(ewald_env, ewald_section, cell_ref%hmat, &
+                                             silent=silent, pset="EEQ")
+               ELSE
+                  CALL read_ewald_section_tb(ewald_env, ewald_section, cell_ref%hmat, &
+                                             silent=silent)
+               END IF
+               ALLOCATE (ewald_pw)
+               CALL ewald_pw_create(ewald_pw, ewald_env, cell, cell_ref, print_section=print_section)
+               CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
             END IF
-         END DO
-         !
-         ! set repulsive potential range
-         !
-         ALLOCATE (xtb_control%rcpair(nkind, nkind))
-         CALL xtb_pp_radius(qs_kind_set, xtb_control%rcpair, xtb_control%eps_pair, xtb_control%kf)
-         ! check for Ewald
-         IF (xtb_control%do_ewald) THEN
-            ALLOCATE (ewald_env)
-            CALL ewald_env_create(ewald_env, para_env)
-            poisson_section => section_vals_get_subs_vals(dft_section, "POISSON")
-            CALL ewald_env_set(ewald_env, poisson_section=poisson_section)
-            ewald_section => section_vals_get_subs_vals(poisson_section, "EWALD")
-            print_section => section_vals_get_subs_vals(qs_env%input, "PRINT%GRID_INFORMATION")
-            IF (gfn_type == 0) THEN
-               CALL read_ewald_section_tb(ewald_env, ewald_section, cell_ref%hmat, &
-                                          silent=silent, pset="EEQ")
-            ELSE
-               CALL read_ewald_section_tb(ewald_env, ewald_section, cell_ref%hmat, &
-                                          silent=silent)
-            END IF
-            ALLOCATE (ewald_pw)
-            CALL ewald_pw_create(ewald_pw, ewald_env, cell, cell_ref, print_section=print_section)
-            CALL set_qs_env(qs_env, ewald_env=ewald_env, ewald_pw=ewald_pw)
          END IF
       END IF
-
       ! lri or ri env initialization
       lri_section => section_vals_get_subs_vals(qs_section, "LRIGPW")
       IF (dft_control%qs_control%method_id == do_method_lrigpw .OR. &
@@ -863,6 +906,13 @@ CONTAINS
          IF (all_potential_present) THEN
             CPABORT("All-electron calculations with GPW, GAPW_XC, and OFGPW are not implemented")
          END IF
+      END IF
+
+      !   *** Check that no cneo potential is present if not GAPW
+      CALL get_qs_kind_set(qs_kind_set, cneo_potential_present=cneo_potential_present)
+      IF (cneo_potential_present .AND. &
+          dft_control%qs_control%method_id /= do_method_gapw) THEN
+         CPABORT("CNEO calculations require GAPW method")
       END IF
 
       ! DFT+U
@@ -1011,13 +1061,16 @@ CONTAINS
                   ! Generate a default basis
                   CALL create_ri_aux_basis_set(ri_aux_basis_set, qs_kind, dft_control%auto_basis_ri_aux, basis_sort=sort_basis)
                   CALL add_basis_set_to_container(qs_kind%basis_sets, ri_aux_basis_set, "RI_AUX")
+                  ! Add a flag, which allows to check if the basis was generated
+                  !  when applying ERI_METHOD OS to mp2, ri-rpa, gw etc
+                  qs_env%mp2_env%ri_aux_auto_generated = .TRUE.
                END IF
             END DO
          END IF
 
       END IF
 
-      IF (dft_control%do_xas_tdp_calculation) THEN
+      IF (dft_control%do_xas_tdp_calculation .OR. qs_env%do_rixs) THEN
          ! Check if RI_XAS basis is given, auto-generate if not
          CALL get_qs_env(qs_env, nkind=nkind)
          DO ikind = 1, nkind
@@ -1036,8 +1089,13 @@ CONTAINS
       !   *** the orbital transformation matrices    ***
       CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto, maxlppl=maxlppl, maxlppnl=maxlppnl)
 
+      ! CNEO nuclear basis contributes to GAPW rho0
+      IF (cneo_potential_present) THEN
+         CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto_nuc, basis_type="NUC")
+         maxlgto = MAX(maxlgto, maxlgto_nuc)
+      END IF
       lmax_sphere = dft_control%qs_control%gapw_control%lmax_sphere
-      IF (lmax_sphere .LT. 0) THEN
+      IF (lmax_sphere < 0) THEN
          lmax_sphere = 2*maxlgto
          dft_control%qs_control%gapw_control%lmax_sphere = lmax_sphere
       END IF
@@ -1049,7 +1107,7 @@ CONTAINS
          CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto_lri, basis_type="RI_HXC")
          maxlgto = MAX(maxlgto, maxlgto_lri)
       END IF
-      IF (dft_control%do_xas_tdp_calculation) THEN
+      IF (dft_control%do_xas_tdp_calculation .OR. qs_env%do_rixs) THEN
          !done as a precaution
          CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto_lri, basis_type="RI_XAS")
          maxlgto = MAX(maxlgto, maxlgto_lri)
@@ -1070,6 +1128,11 @@ CONTAINS
          CALL init_gapw_basis_set(qs_kind_set, qs_control, qs_env%input)
       END IF
 
+      !   *** Initialise CNEO nuclear soft basis
+      IF (cneo_potential_present) THEN
+         CALL init_cneo_basis_set(qs_kind_set, qs_control)
+      END IF
+
       !   *** Initialize the pretabulation for the calculation of the   ***
       !   *** incomplete Gamma function F_n(t) after McMurchie-Davidson ***
       CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto)
@@ -1080,26 +1143,29 @@ CONTAINS
       CALL init_interaction_radii(dft_control%qs_control, qs_kind_set)
       !
       IF (dft_control%qs_control%method_id == do_method_xtb) THEN
-         ! cutoff radius
-         DO ikind = 1, nkind
-            qs_kind => qs_kind_set(ikind)
-            IF (qs_kind%xtb_parameter%defined) THEN
-               CALL get_qs_kind(qs_kind, basis_set=tmp_basis_set)
-               rcut = xtb_control%coulomb_sr_cut
-               fxx = 2.0_dp*xtb_control%coulomb_sr_eps*qs_kind%xtb_parameter%eta**2
-               fxx = 0.80_dp*(1.0_dp/fxx)**0.3333_dp
-               rcut = MIN(rcut, xtb_control%coulomb_sr_cut)
-               qs_kind%xtb_parameter%rcut = MIN(rcut, fxx)
-            ELSE
-               qs_kind%xtb_parameter%rcut = 0.0_dp
-            END IF
-         END DO
+         IF (.NOT. dft_control%qs_control%xtb_control%do_tblite) THEN
+            ! cutoff radius
+            DO ikind = 1, nkind
+               qs_kind => qs_kind_set(ikind)
+               IF (qs_kind%xtb_parameter%defined) THEN
+                  CALL get_qs_kind(qs_kind, basis_set=tmp_basis_set)
+                  rcut = xtb_control%coulomb_sr_cut
+                  fxx = 2.0_dp*xtb_control%coulomb_sr_eps*qs_kind%xtb_parameter%eta**2
+                  fxx = 0.80_dp*(1.0_dp/fxx)**0.3333_dp
+                  rcut = MIN(rcut, xtb_control%coulomb_sr_cut)
+                  qs_kind%xtb_parameter%rcut = MIN(rcut, fxx)
+               ELSE
+                  qs_kind%xtb_parameter%rcut = 0.0_dp
+               END IF
+            END DO
+         END IF
       END IF
 
       IF (.NOT. be_silent) THEN
          CALL write_pgf_orb_radii("orb", atomic_kind_set, qs_kind_set, subsys_section)
          CALL write_pgf_orb_radii("aux", atomic_kind_set, qs_kind_set, subsys_section)
          CALL write_pgf_orb_radii("lri", atomic_kind_set, qs_kind_set, subsys_section)
+         CALL write_pgf_orb_radii("nuc", atomic_kind_set, qs_kind_set, subsys_section)
          CALL write_core_charge_radii(atomic_kind_set, qs_kind_set, subsys_section)
          CALL write_ppl_radii(atomic_kind_set, qs_kind_set, subsys_section)
          CALL write_ppnl_radii(atomic_kind_set, qs_kind_set, subsys_section)
@@ -1122,7 +1188,11 @@ CONTAINS
          scf_control%non_selfconsistent = .NOT. dft_control%qs_control%dftb_control%self_consistent
       END IF
       IF (dft_control%qs_control%xtb) THEN
-         scf_control%non_selfconsistent = (dft_control%qs_control%xtb_control%gfn_type == 0)
+         IF (dft_control%qs_control%xtb_control%do_tblite) THEN
+            scf_control%non_selfconsistent = .FALSE.
+         ELSE
+            scf_control%non_selfconsistent = (dft_control%qs_control%xtb_control%gfn_type == 0)
+         END IF
       END IF
       IF (qs_env%harris_method) THEN
          scf_control%non_selfconsistent = .TRUE.
@@ -1375,51 +1445,53 @@ CONTAINS
          END IF
          CALL set_qs_env(qs_env, dispersion_env=dispersion_env)
       ELSE IF (dft_control%qs_control%method_id == do_method_xtb) THEN
-         ALLOCATE (dispersion_env)
-         ! set general defaults
-         dispersion_env%doabc = .FALSE.
-         dispersion_env%c9cnst = .FALSE.
-         dispersion_env%lrc = .FALSE.
-         dispersion_env%srb = .FALSE.
-         dispersion_env%verbose = .FALSE.
-         NULLIFY (dispersion_env%c6ab, dispersion_env%maxci, &
-                  dispersion_env%r0ab, dispersion_env%rcov, &
-                  dispersion_env%r2r4, dispersion_env%cn, &
-                  dispersion_env%cnkind, dispersion_env%cnlist, &
-                  dispersion_env%d3_exclude_pair)
-         NULLIFY (dispersion_env%q_mesh, dispersion_env%kernel, dispersion_env%d2phi_dk2, &
-                  dispersion_env%d2y_dx2, dispersion_env%dftd_section)
-         NULLIFY (dispersion_env%sab_vdw, dispersion_env%sab_cn)
-         dispersion_env%type = xc_vdw_fun_pairpot
-         dispersion_env%eps_cn = xtb_control%epscn
-         dispersion_env%s6 = xtb_control%s6
-         dispersion_env%s8 = xtb_control%s8
-         dispersion_env%a1 = xtb_control%a1
-         dispersion_env%a2 = xtb_control%a2
-         dispersion_env%domol = .FALSE.
-         dispersion_env%kgc8 = 0._dp
-         dispersion_env%rc_disp = xtb_control%rcdisp
-         dispersion_env%rc_d4 = xtb_control%rcdisp
-         dispersion_env%exp_pre = 0._dp
-         dispersion_env%scaling = 0._dp
-         dispersion_env%nd3_exclude_pair = 0
-         dispersion_env%parameter_file_name = xtb_control%dispersion_parameter_file
-         !
-         SELECT CASE (xtb_control%vdw_type)
-         CASE (xtb_vdw_type_none, xtb_vdw_type_d3)
-            dispersion_env%pp_type = vdw_pairpot_dftd3bj
-            CALL qs_dispersion_pairpot_init(atomic_kind_set, qs_kind_set, dispersion_env, para_env=para_env)
-            IF (xtb_control%vdw_type == xtb_vdw_type_none) dispersion_env%type = xc_vdw_fun_none
-         CASE (xtb_vdw_type_d4)
-            dispersion_env%pp_type = vdw_pairpot_dftd4
-            dispersion_env%ref_functional = "none"
-            CALL qs_dispersion_pairpot_init(atomic_kind_set, qs_kind_set, &
-                                            dispersion_env, para_env=para_env)
-            dispersion_env%cnfun = 2
-         CASE DEFAULT
-            CPABORT("vdw type")
-         END SELECT
-         CALL set_qs_env(qs_env, dispersion_env=dispersion_env)
+         IF (.NOT. (dft_control%qs_control%xtb_control%do_tblite)) THEN
+            ALLOCATE (dispersion_env)
+            ! set general defaults
+            dispersion_env%doabc = .FALSE.
+            dispersion_env%c9cnst = .FALSE.
+            dispersion_env%lrc = .FALSE.
+            dispersion_env%srb = .FALSE.
+            dispersion_env%verbose = .FALSE.
+            NULLIFY (dispersion_env%c6ab, dispersion_env%maxci, &
+                     dispersion_env%r0ab, dispersion_env%rcov, &
+                     dispersion_env%r2r4, dispersion_env%cn, &
+                     dispersion_env%cnkind, dispersion_env%cnlist, &
+                     dispersion_env%d3_exclude_pair)
+            NULLIFY (dispersion_env%q_mesh, dispersion_env%kernel, dispersion_env%d2phi_dk2, &
+                     dispersion_env%d2y_dx2, dispersion_env%dftd_section)
+            NULLIFY (dispersion_env%sab_vdw, dispersion_env%sab_cn)
+            dispersion_env%type = xc_vdw_fun_pairpot
+            dispersion_env%eps_cn = xtb_control%epscn
+            dispersion_env%s6 = xtb_control%s6
+            dispersion_env%s8 = xtb_control%s8
+            dispersion_env%a1 = xtb_control%a1
+            dispersion_env%a2 = xtb_control%a2
+            dispersion_env%domol = .FALSE.
+            dispersion_env%kgc8 = 0._dp
+            dispersion_env%rc_disp = xtb_control%rcdisp
+            dispersion_env%rc_d4 = xtb_control%rcdisp
+            dispersion_env%exp_pre = 0._dp
+            dispersion_env%scaling = 0._dp
+            dispersion_env%nd3_exclude_pair = 0
+            dispersion_env%parameter_file_name = xtb_control%dispersion_parameter_file
+            !
+            SELECT CASE (xtb_control%vdw_type)
+            CASE (xtb_vdw_type_none, xtb_vdw_type_d3)
+               dispersion_env%pp_type = vdw_pairpot_dftd3bj
+               CALL qs_dispersion_pairpot_init(atomic_kind_set, qs_kind_set, dispersion_env, para_env=para_env)
+               IF (xtb_control%vdw_type == xtb_vdw_type_none) dispersion_env%type = xc_vdw_fun_none
+            CASE (xtb_vdw_type_d4)
+               dispersion_env%pp_type = vdw_pairpot_dftd4
+               dispersion_env%ref_functional = "none"
+               CALL qs_dispersion_pairpot_init(atomic_kind_set, qs_kind_set, &
+                                               dispersion_env, para_env=para_env)
+               dispersion_env%cnfun = 2
+            CASE DEFAULT
+               CPABORT("vdw type")
+            END SELECT
+            CALL set_qs_env(qs_env, dispersion_env=dispersion_env)
+         END IF
       ELSE IF (dft_control%qs_control%semi_empirical) THEN
          ALLOCATE (dispersion_env)
          ! set general defaults
@@ -1734,7 +1806,8 @@ CONTAINS
              dft_control%qs_control%method_id == do_method_lrigpw .OR. &
              dft_control%qs_control%method_id == do_method_rigpw .OR. &
              dft_control%qs_control%method_id == do_method_dftb .OR. &
-             dft_control%qs_control%method_id == do_method_xtb .OR. &
+             (dft_control%qs_control%method_id == do_method_xtb .AND. &
+              (.NOT. dft_control%qs_control%xtb_control%do_tblite)) .OR. &
              dft_control%qs_control%method_id == do_method_ofgpw) THEN
             CALL get_qs_env(qs_env, dispersion_env=dispersion_env)
             CALL qs_write_dispersion(qs_env, dispersion_env)
@@ -1813,9 +1886,9 @@ CONTAINS
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(section_vals_type), POINTER                   :: force_env_section
 
-      INTEGER                                            :: maxlgto, maxlppl, maxlppnl, natom, ncgf, &
-                                                            nkind, npgf, nset, nsgf, nshell, &
-                                                            output_unit
+      INTEGER                                            :: maxlgto, maxlppl, maxlppnl, natom, &
+                                                            natom_q, ncgf, nkind, nkind_q, npgf, &
+                                                            nset, nsgf, nshell, output_unit
       TYPE(cp_logger_type), POINTER                      :: logger
 
       NULLIFY (logger)
@@ -1937,6 +2010,32 @@ CONTAINS
             WRITE (UNIT=output_unit, FMT="(/,T3,A,/,T3,A,(T30,A,T71,I10))") &
                "AUX_FIT ADMM-Basis: ", &
                "Total number of", &
+               "- Shell sets:                    ", nset, &
+               "- Shells:                        ", nshell, &
+               "- Primitive Cartesian functions: ", npgf, &
+               "- Cartesian basis functions:     ", ncgf, &
+               "- Spherical basis functions:     ", nsgf
+            WRITE (UNIT=output_unit, FMT="(T30,A,T75,I6)") &
+               "  Maximum angular momentum ", maxlgto
+         END IF
+
+         ! NUCLEAR BASIS
+         CALL get_qs_kind_set(qs_kind_set, &
+                              nkind_q=nkind_q, &
+                              natom_q=natom_q, &
+                              maxlgto=maxlgto, &
+                              ncgf=ncgf, &
+                              npgf=npgf, &
+                              nset=nset, &
+                              nsgf=nsgf, &
+                              nshell=nshell, &
+                              basis_type="NUC")
+         IF (nset + npgf + ncgf > 0) THEN
+            WRITE (UNIT=output_unit, FMT="(/,T3,A,/,T3,A,(T30,A,T71,I10))") &
+               "Nuclear Basis: ", &
+               "Total number of", &
+               "- Quantum atomic kinds:          ", nkind_q, &
+               "- Quantum atoms:                 ", natom_q, &
                "- Shell sets:                    ", nset, &
                "- Shells:                        ", nshell, &
                "- Primitive Cartesian functions: ", npgf, &

@@ -10,7 +10,9 @@ gapw
 hartree-fock/index
 local_ri
 constrained
+cneo
 linear_scaling
+k-points
 basis_sets
 pseudopotentials
 cutoff

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -47,18 +47,23 @@ MODULE negf_control_types
    TYPE negf_control_contact_type
       !> atoms belonging to bulk and screening regions
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: atomlist_bulk, atomlist_screening
-      !> atom belonging to the primary and secondary bulk unit cells
+      !> atoms belonging to the primary and secondary bulk unit cells
       TYPE(negf_allocatable_ivector), ALLOCATABLE, &
          DIMENSION(:)                                    :: atomlist_cell
       !> index of the sub_force_env which should be used for bulk calculation
       INTEGER                                            :: force_env_index = -1
-      !> contact Fermi level needs to be computed prior NEGF run
+      !> contact Fermi level needs to be computed
       LOGICAL                                            :: compute_fermi_level = .FALSE.
-      !> when computing contact Fermi level, use the energy given in 'fermi_level' (instead of HOMO)
-      !> (instead of the HOMO energy) as a starting point
+      !> to refine contact Fermi level using NEGF
       LOGICAL                                            :: refine_fermi_level = .FALSE.
-      !> Fermi level
+      !> to shift energies to common zero level
+      LOGICAL                                            :: shift_fermi_level = .FALSE.
+      !> to read/write H and S from/to file
+      LOGICAL                                            :: read_write_HS = .FALSE.
+      !> Fermi level or starting Fermi level
       REAL(kind=dp)                                      :: fermi_level = -1.0_dp
+      !> Fermi level shifted to the common zero-energy level
+      REAL(kind=dp)                                      :: fermi_level_shifted = -1.0_dp
       !> temperature [in a.u.]
       REAL(kind=dp)                                      :: temperature = -1.0_dp
       !> applied electric potential
@@ -210,7 +215,8 @@ CONTAINS
       LOGICAL                                            :: do_negf, is_explicit
       REAL(kind=dp)                                      :: eta_max, temp_current, temp_min
       TYPE(section_vals_type), POINTER                   :: cell_section, contact_section, &
-                                                            negf_section, region_section
+                                                            negf_section, region_section, &
+                                                            subsection
 
       CALL timeset(routineN, handle)
 
@@ -286,19 +292,14 @@ CONTAINS
          CALL section_vals_val_get(contact_section, "FERMI_LEVEL", &
                                    r_val=negf_control%contacts(i_rep)%fermi_level, &
                                    i_rep_section=i_rep, explicit=is_explicit)
+         IF (.NOT. is_explicit) negf_control%contacts(i_rep)%refine_fermi_level = .FALSE.
          negf_control%contacts(i_rep)%compute_fermi_level = (.NOT. is_explicit) .OR. &
                                                             negf_control%contacts(i_rep)%refine_fermi_level
 
-         IF (do_negf .AND. negf_control%contacts(i_rep)%force_env_index <= 0 .AND. &
-             (.NOT. (is_explicit .OR. negf_control%contacts(i_rep)%refine_fermi_level))) THEN
-            WRITE (contact_id_str, '(I11)') i_rep
-            CALL cp_warn(__LOCATION__, &
-                         "There is no way to reasonably guess the Fermi level for the bulk contact "// &
-                         TRIM(ADJUSTL(contact_id_str))//" without running a separate bulk DFT calculation first. "// &
-                         "Therefore, 0.0 Hartree will be used as an initial guess. It is strongly advised to enable "// &
-                         "the REFINE_FERMI_LEVEL switch and to provide an initial guess using the FERMI_LEVEL keyword. "// &
-                         "Alternatively, a bulk FORCE_EVAL_SECTION can be set up.")
-         END IF
+         CALL section_vals_val_get(contact_section, "FERMI_LEVEL_SHIFTED", &
+                                   r_val=negf_control%contacts(i_rep)%fermi_level_shifted, &
+                                   i_rep_section=i_rep, explicit=is_explicit)
+         IF (is_explicit) negf_control%contacts(i_rep)%shift_fermi_level = .TRUE.
 
          CALL section_vals_val_get(contact_section, "TEMPERATURE", &
                                    r_val=negf_control%contacts(i_rep)%temperature, &
@@ -310,6 +311,14 @@ CONTAINS
          CALL section_vals_val_get(contact_section, "ELECTRIC_POTENTIAL", &
                                    r_val=negf_control%contacts(i_rep)%v_external, &
                                    i_rep_section=i_rep)
+
+         subsection => section_vals_get_subs_vals(contact_section, "RESTART", i_rep_section=i_rep)
+
+         CALL section_vals_val_get(subsection, "READ_WRITE_HS", &
+                                   l_val=negf_control%contacts(i_rep)%read_write_HS, &
+                                   explicit=is_explicit)
+         IF (is_explicit) negf_control%contacts(i_rep)%read_write_HS = .TRUE.
+
       END DO
 
       region_section => section_vals_get_subs_vals(negf_section, "SCATTERING_REGION")
@@ -493,7 +502,7 @@ CONTAINS
       CALL section_vals_val_get(input_section, "MOLNAME", i_rep_section=i_rep_section, &
                                 n_rep_val=nrep_molname, explicit=is_molname)
 
-      ! compute the number of atoms in the NEGF region, and check the validity of giben atomic indices
+      ! compute the number of atoms in the NEGF region, and check the validity of given atomic indices
       natoms_total = 0
       IF (is_list .AND. nrep_list > 0) THEN
          DO irep = 1, nrep_list
@@ -522,7 +531,7 @@ CONTAINS
 
             DO iname = 1, nnames
                DO ikind = 1, nkinds
-                  IF (molecule_kind_set(ikind)%name .EQ. cptr(iname)) EXIT
+                  IF (molecule_kind_set(ikind)%name == cptr(iname)) EXIT
                END DO
 
                IF (ikind <= nkinds) THEN
@@ -567,7 +576,7 @@ CONTAINS
 
                DO iname = 1, nnames
                   DO ikind = 1, nkinds
-                     IF (molecule_kind_set(ikind)%name .EQ. cptr(iname)) EXIT
+                     IF (molecule_kind_set(ikind)%name == cptr(iname)) EXIT
                   END DO
 
                   IF (ikind <= nkinds) THEN

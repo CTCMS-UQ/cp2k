@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -133,8 +133,7 @@ CONTAINS
 
       ! Array collected is used as a bit field.
       ! It's of type integer in order to use the convenient MINLOC routine.
-      ALLOCATE (collected(list_size(timer_env%routine_stats)))
-      collected(:) = 0
+      ALLOCATE (collected(list_size(timer_env%routine_stats)), SOURCE=0)
 
       DO
          ! does any rank have uncollected stats?
@@ -184,7 +183,7 @@ CONTAINS
          CALL para_env%sum(r_report%sum_stackdepth)
 
          ! get value and rank of the maximum inclusive cost
-         dbuf = (/r_report%max_icost, REAL(para_env%mepos, KIND=dp)/)
+         dbuf = [r_report%max_icost, REAL(para_env%mepos, KIND=dp)]
          CALL para_env%maxloc(dbuf)
          r_report%max_icost = dbuf(1)
          r_report%max_irank = INT(dbuf(2))
@@ -192,7 +191,7 @@ CONTAINS
          CALL para_env%sum(r_report%sum_icost)
 
          ! get value and rank of the maximum exclusive cost
-         dbuf = (/r_report%max_ecost, REAL(para_env%mepos, KIND=dp)/)
+         dbuf = [r_report%max_ecost, REAL(para_env%mepos, KIND=dp)]
          CALL para_env%maxloc(dbuf)
          r_report%max_ecost = dbuf(1)
          r_report%max_erank = INT(dbuf(2))

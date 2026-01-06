@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -118,7 +118,7 @@ CONTAINS
 
       IF (dft_control%qs_control%ddapc_restraint) THEN
          ddapc_size = SIZE(dft_control%qs_control%ddapc_restraint_control)
-         IF (SIZE(energy%ddapc_restraint) .NE. ddapc_size) THEN
+         IF (SIZE(energy%ddapc_restraint) /= ddapc_size) THEN
             DEALLOCATE (energy%ddapc_restraint)
             ALLOCATE (energy%ddapc_restraint(ddapc_size))
          END IF

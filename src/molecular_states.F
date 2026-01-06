@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -155,7 +155,7 @@ CONTAINS
       END IF
       CALL section_vals_val_get(loc_print_section, "MOLECULAR_STATES%MARK_STATES", &
                                 n_rep_val=n_rep)
-      IF (n_rep .GT. 0) THEN
+      IF (n_rep > 0) THEN
          ALLOCATE (mark_states(2, n_rep))
          IF (.NOT. ASSOCIATED(marked_states)) THEN
             ALLOCATE (marked_states(n_rep))

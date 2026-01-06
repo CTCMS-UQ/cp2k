@@ -32,6 +32,17 @@ run_test ./tools/precommit/format_fortran_test.py
 run_test ./tools/minimax_tools/minimax_to_fortran_source.py --check
 run_test ./tools/docker/generate_dockerfiles.py --check
 
+# Test pao-ml training.
+run_test ./tools/pao-ml/pao-train.py --kind=H --epochs=200 ./tools/pao-ml/example.pao
+run_test ./tools/pao-ml/pao-retrain.py --model="DZVP-MOLOPT-GTH-PAO4-H.pt" --epochs=200 ./tools/pao-ml/example.pao
+run_test ./tools/pao-ml/pao-validate.py --threshold=1e-1 --model="DZVP-MOLOPT-GTH-PAO4-H.pt" ./tools/pao-ml/example.pao
+run_test ./tools/pao-ml/pao-validate.py --threshold=1e-6 --model="tests/QS/regtest-pao-5/DZVP-MOLOPT-GTH-PAO4-H.pt" ./tools/pao-ml/example.pao
+run_test ./tools/pao-ml/pao-validate.py --threshold=1e-5 --model="tests/QS/regtest-pao-5/DZVP-MOLOPT-GTH-PAO4-O.pt" ./tools/pao-ml/example.pao
+
+# Test vibronic_spec
+run_test ./tools/vibronic_spec/main.py ./tools/vibronic_spec/example/example_config.toml
+
+run_test mypy --strict ./tools/pao-ml/
 run_test mypy --strict ./tools/minimax_tools/minimax_to_fortran_source.py
 run_test mypy --strict ./tools/dashboard/generate_dashboard.py
 run_test mypy --strict ./tools/dashboard/generate_regtest_survey.py
@@ -41,10 +52,13 @@ run_test mypy --strict ./tools/precommit/check_file_properties.py
 run_test mypy --strict ./tools/precommit/format_makefile.py
 run_test mypy --strict ./tools/precommit/format_input_file.py
 run_test mypy --strict ./tools/docker/generate_dockerfiles.py
+run_test mypy --strict ./tools/docker/scripts/plot_performance.py
+run_test mypy --strict ./tools/conventions/redirect_gfortran_output.py
 run_test mypy --strict ./tools/conventions/analyze_gfortran_ast.py
 run_test mypy --strict ./tests/do_regtest.py
 run_test mypy --strict ./docs/generate_input_reference.py
 run_test mypy --strict ./docs/fix_github_links.py
+run_test mypy --strict ./tools/vibronic_spec/
 
 # TODO: Find a way to test generate_dashboard.py without git repository.
 #

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -78,7 +78,7 @@ CONTAINS
          farming_env%max_steps = 65535
          NULLIFY (farming_env%Job)
       END IF
-   END SUBROUTINE
+   END SUBROUTINE init_farming_env
 
 ! **************************************************************************************************
 !> \brief provide a default initialization

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -36,7 +36,7 @@ MODULE qs_oce_types
 ! **************************************************************************************************
    TYPE oce_matrix_type
       TYPE(sap_int_type), DIMENSION(:), POINTER        :: intac => NULL()
-   END TYPE
+   END TYPE oce_matrix_type
 
 ! *** Public data types ***
 

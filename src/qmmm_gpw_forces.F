@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -113,12 +113,12 @@ CONTAINS
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(mp_para_env_type), POINTER                    :: para_env
-      TYPE(pw_c1d_gs_type), POINTER                      :: rho0_s_gs, rho_core
+      TYPE(pw_c1d_gs_type), POINTER                      :: rho0_s_gs, rho_core, rhoz_cneo_s_gs
       TYPE(pw_env_type), POINTER                         :: pw_env
       TYPE(pw_pool_p_type), DIMENSION(:), POINTER        :: pw_pools
       TYPE(pw_pool_type), POINTER                        :: auxbas_pool
+      TYPE(pw_r3d_rs_type)                               :: rho_tot_r, rho_tot_r2, rho_tot_r3
       TYPE(pw_r3d_rs_type), DIMENSION(:), POINTER        :: rho_r
-      TYPE(pw_r3d_rs_type), POINTER                      :: rho_tot_r, rho_tot_r2
       TYPE(qs_energy_type), POINTER                      :: energy
       TYPE(qs_ks_qmmm_env_type), POINTER                 :: ks_qmmm_env_loc
       TYPE(qs_rho_type), POINTER                         :: rho
@@ -129,8 +129,8 @@ CONTAINS
       need_f = .TRUE.
       periodic = qmmm_env%periodic
       IF (PRESENT(calc_force)) need_f = calc_force
-      NULLIFY (dft_control, ks_qmmm_env_loc, rho, pw_env, rho_tot_r, energy, Forces, &
-               Forces_added_charges, input_section, rho0_s_gs, rho_r)
+      NULLIFY (dft_control, ks_qmmm_env_loc, rho, pw_env, energy, Forces, &
+               Forces_added_charges, input_section, rho0_s_gs, rhoz_cneo_s_gs, rho_r)
       CALL get_qs_env(qs_env=qs_env, &
                       rho=rho, &
                       rho_core=rho_core, &
@@ -139,6 +139,7 @@ CONTAINS
                       para_env=para_env, &
                       input=input_section, &
                       rho0_s_gs=rho0_s_gs, &
+                      rhoz_cneo_s_gs=rhoz_cneo_s_gs, &
                       dft_control=dft_control)
 
       CALL qs_rho_get(rho, rho_r=rho_r)
@@ -203,23 +204,30 @@ CONTAINS
          CALL pw_env_get(pw_env=pw_env, &
                          pw_pools=pw_pools, &
                          auxbas_pw_pool=auxbas_pool)
-         NULLIFY (rho_tot_r)
-         ALLOCATE (rho_tot_r)
          CALL auxbas_pool%create_pw(rho_tot_r)
          ! IF GAPW the core charge is replaced by the compensation charge
          IF (gapw) THEN
             IF (dft_control%qs_control%gapw_control%nopaw_as_gpw) THEN
                CALL pw_transfer(rho_core, rho_tot_r)
                energy%qmmm_nu = pw_integral_ab(rho_tot_r, ks_qmmm_env_loc%v_qmmm_rspace)
-               NULLIFY (rho_tot_r2)
-               ALLOCATE (rho_tot_r2)
                CALL auxbas_pool%create_pw(rho_tot_r2)
                CALL pw_transfer(rho0_s_gs, rho_tot_r2)
                CALL pw_axpy(rho_tot_r2, rho_tot_r)
+               IF (ASSOCIATED(rhoz_cneo_s_gs)) THEN
+                  CALL auxbas_pool%create_pw(rho_tot_r3)
+                  CALL pw_transfer(rhoz_cneo_s_gs, rho_tot_r3)
+                  CALL pw_axpy(rho_tot_r3, rho_tot_r)
+                  CALL auxbas_pool%give_back_pw(rho_tot_r3)
+               END IF
                CALL auxbas_pool%give_back_pw(rho_tot_r2)
-               DEALLOCATE (rho_tot_r2)
             ELSE
                CALL pw_transfer(rho0_s_gs, rho_tot_r)
+               IF (ASSOCIATED(rhoz_cneo_s_gs)) THEN
+                  CALL auxbas_pool%create_pw(rho_tot_r3)
+                  CALL pw_transfer(rhoz_cneo_s_gs, rho_tot_r3)
+                  CALL pw_axpy(rho_tot_r3, rho_tot_r)
+                  CALL auxbas_pool%give_back_pw(rho_tot_r3)
+               END IF
                !
                ! QM/MM Nuclear Electrostatic Potential already included through rho0
                !
@@ -311,7 +319,6 @@ CONTAINS
       IF ((.NOT. dft_control%qs_control%semi_empirical) .AND. &
           (.NOT. dft_control%qs_control%dftb) .AND. (.NOT. dft_control%qs_control%xtb)) THEN
          CALL auxbas_pool%give_back_pw(rho_tot_r)
-         DEALLOCATE (rho_tot_r)
       END IF
       IF (iw > 0) THEN
          IF (.NOT. gapw) WRITE (iw, '(T2,"QMMM|",1X,A,T66,F15.9)') &
@@ -331,7 +338,7 @@ CONTAINS
             IF (qmmm_env%image_charge) THEN
                DO iatom = 1, qmmm_env%num_image_mm_atoms
                   image_IndMM = qmmm_env%image_charge_pot%image_mm_list(iatom)
-                  IF (image_IndMM .EQ. IndMM) THEN
+                  IF (image_IndMM == IndMM) THEN
                      Forces(:, Imm) = Forces(:, Imm) &
                                       + qmmm_env%image_charge_pot%image_forcesMM(:, iatom)
                   END IF
@@ -352,7 +359,7 @@ CONTAINS
             END DO
          END IF
          DEALLOCATE (Forces_added_charges)
-         IF (qmmm_env%added_shells%num_mm_atoms .GT. 0) THEN
+         IF (qmmm_env%added_shells%num_mm_atoms > 0) THEN
             DO Imm = 1, qmmm_env%added_shells%num_mm_atoms
                IndMM = qmmm_env%added_shells%mm_core_index(Imm)
                ! Hack: In Forces there the gradients indeed...
@@ -397,7 +404,7 @@ CONTAINS
                                         aug_pools, auxbas_grid, coarser_grid, cube_info, para_env, &
                                         eps_mm_rspace, pw_pools, Forces, Forces_added_charges, Forces_added_shells, &
                                         interp_section, iw, mm_cell)
-      TYPE(pw_r3d_rs_type), POINTER                      :: rho
+      TYPE(pw_r3d_rs_type), INTENT(IN)                   :: rho
       TYPE(qmmm_env_qm_type), POINTER                    :: qmmm_env
       TYPE(particle_type), DIMENSION(:), POINTER         :: mm_particles
       TYPE(pw_pool_p_type), DIMENSION(:), POINTER        :: aug_pools
@@ -415,7 +422,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'qmmm_forces_with_gaussian'
 
       INTEGER                                            :: handle, i, igrid, j, k, kind_interp, me, &
-                                                            ngrids, stat
+                                                            ngrids
       INTEGER, DIMENSION(3)                              :: glb, gub, lb, ub
       INTEGER, DIMENSION(:), POINTER                     :: pos_of_x
       LOGICAL                                            :: shells
@@ -463,7 +470,7 @@ CONTAINS
       me = grids(auxbas_grid)%pw_grid%para%group%mepos
       glb = rho%pw_grid%bounds(1, :)
       gub = rho%pw_grid%bounds(2, :)
-      IF ((pos_of_x(glb(1)) .EQ. me) .AND. (pos_of_x(gub(1)) .EQ. me)) THEN
+      IF ((pos_of_x(glb(1)) == me) .AND. (pos_of_x(gub(1)) == me)) THEN
          DO k = lb(3), ub(3)
             DO j = lb(2), ub(2)
                grids(auxbas_grid)%array(ub(1) + 1, j, k) = rho%array(lb(1), j, k)
@@ -474,20 +481,16 @@ CONTAINS
             grids(auxbas_grid)%array(ub(1) + 1, j, ub(3) + 1) = rho%array(lb(1), j, lb(3))
          END DO
          grids(auxbas_grid)%array(ub(1) + 1, ub(2) + 1, ub(3) + 1) = rho%array(lb(1), lb(2), lb(3))
-      ELSE IF (pos_of_x(glb(1)) .EQ. me) THEN
+      ELSE IF (pos_of_x(glb(1)) == me) THEN
          ALLOCATE (tmp(rho%pw_grid%bounds_local(1, 2):rho%pw_grid%bounds_local(2, 2), &
-                       rho%pw_grid%bounds_local(1, 3):rho%pw_grid%bounds_local(2, 3)), &
-                   stat=stat)
-         CPASSERT(stat == 0)
+                       rho%pw_grid%bounds_local(1, 3):rho%pw_grid%bounds_local(2, 3)))
          tmp = rho%array(lb(1), :, :)
          CALL group%isend(msgin=tmp, dest=pos_of_x(rho%pw_grid%bounds(2, 1)), &
                           request=request, tag=112)
          CALL request%wait()
-      ELSE IF (pos_of_x(gub(1)) .EQ. me) THEN
+      ELSE IF (pos_of_x(gub(1)) == me) THEN
          ALLOCATE (tmp(rho%pw_grid%bounds_local(1, 2):rho%pw_grid%bounds_local(2, 2), &
-                       rho%pw_grid%bounds_local(1, 3):rho%pw_grid%bounds_local(2, 3)), &
-                   stat=stat)
-         CPASSERT(stat == 0)
+                       rho%pw_grid%bounds_local(1, 3):rho%pw_grid%bounds_local(2, 3)))
          CALL group%irecv(msgout=tmp, source=pos_of_x(rho%pw_grid%bounds(1, 1)), &
                           request=request, tag=112)
          CALL request%wait()
@@ -543,7 +546,7 @@ CONTAINS
                                            qmmm_env%spherical_cutoff, shells)
       END IF
 
-      IF (qmmm_env%added_shells%num_mm_atoms .GT. 0) THEN
+      IF (qmmm_env%added_shells%num_mm_atoms > 0) THEN
          shells = .TRUE.
          CALL qmmm_force_with_gaussian_low(grids, qmmm_env%added_shells%added_particles, &
                                            qmmm_env%added_shells%mm_core_chrg, &
@@ -865,7 +868,7 @@ CONTAINS
          Atoms: DO Imm = 1, SIZE(per_pot%mm_atom_index)
             IF (par_scheme == do_par_atom) THEN
                myind = Imm + (IRadTyp - 1)*SIZE(per_pot%mm_atom_index)
-               IF (MOD(myind, para_env%num_pe) /= para_env%mepos) CYCLE
+               IF (MOD(myind, para_env%num_pe) /= para_env%mepos) CYCLE Atoms
             END IF
             LIndMM = per_pot%mm_atom_index(Imm)
             IndMM = mm_atom_index(LIndMM)
@@ -1207,7 +1210,7 @@ CONTAINS
          Atoms: DO Imm = 1, SIZE(pot%mm_atom_index)
             IF (par_scheme == do_par_atom) THEN
                myind = Imm + (IRadTyp - 1)*SIZE(pot%mm_atom_index)
-               IF (MOD(myind, para_env%num_pe) /= para_env%mepos) CYCLE
+               IF (MOD(myind, para_env%num_pe) /= para_env%mepos) CYCLE Atoms
             END IF
             LIndMM = pot%mm_atom_index(Imm)
             IndMM = mm_atom_index(LIndMM)
@@ -1324,7 +1327,7 @@ CONTAINS
    SUBROUTINE qmmm_debug_forces(rho, qs_env, qmmm_env, Analytical_Forces, &
                                 mm_particles, mm_atom_index, num_mm_atoms, &
                                 interp_section, mm_cell)
-      TYPE(pw_r3d_rs_type), POINTER                      :: rho
+      TYPE(pw_r3d_rs_type), INTENT(IN)                   :: rho
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(qmmm_env_qm_type), POINTER                    :: qmmm_env
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: Analytical_Forces

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -133,7 +133,8 @@ CONTAINS
       !
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(qs_p_env_type)                                :: p_env
-      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: c0, Av
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: c0
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(INOUT)      :: Av
 
       INTEGER                                            :: ispin, ncol
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -287,8 +288,12 @@ CONTAINS
       DO ispin = 2, nspins
          CALL pw_axpy(rho1_g(ispin), rho1_tot_gspace)
       END DO
-      IF (gapw) &
+      IF (gapw) THEN
          CALL pw_axpy(p_env%local_rho_set%rho0_mpole%rho0_s_gs, rho1_tot_gspace)
+         IF (ASSOCIATED(p_env%local_rho_set%rho0_mpole%rhoz_cneo_s_gs)) THEN
+            CALL pw_axpy(p_env%local_rho_set%rho0_mpole%rhoz_cneo_s_gs, rho1_tot_gspace)
+         END IF
+      END IF
 
       IF (.NOT. (nspins == 1 .AND. lr_triplet)) THEN
          CALL pw_poisson_solve(poisson_env, rho1_tot_gspace, &
@@ -318,7 +323,7 @@ CONTAINS
             CALL get_qs_env(qs_env, rho_atom_set=rho_atom_set)
             rho1_atom_set => p_env%local_rho_set%rho_atom_set
             CALL calculate_xc_2nd_deriv_atom(rho_atom_set, rho1_atom_set, qs_env, xc_section, para_env, &
-                                             do_tddft=.FALSE., do_triplet=lr_triplet)
+                                             do_triplet=lr_triplet)
          END IF
       ELSE
          CALL qs_fxc_fdiff(ks_env, rho0, rho1a, xc_section, 6, lr_triplet, v_xc, v_xc_tau)

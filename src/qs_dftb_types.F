@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -19,7 +19,7 @@ MODULE qs_dftb_types
 
    PRIVATE
 
-! *** Global parameters ***
+   ! Global parameters
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_dftb_types'
 
@@ -68,7 +68,7 @@ MODULE qs_dftb_types
       REAL(KIND=dp)                          :: a = -1.0_dp, b = -1.0_dp, c = -1.0_dp ! Short range polynomial coeffs
    END TYPE qs_dftb_pairpot_type
 
-! *** Public data types ***
+   ! Public data types
 
    PUBLIC :: qs_dftb_atom_type, qs_dftb_pairpot_type, &
              qs_dftb_pairpot_init, qs_dftb_pairpot_create, qs_dftb_pairpot_release

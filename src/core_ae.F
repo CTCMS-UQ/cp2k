@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -58,7 +58,7 @@ MODULE core_ae
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'core_ae'
 
-   PUBLIC :: build_core_ae, build_erfc
+   PUBLIC :: build_core_ae, build_erfc, verfc_force
 
 CONTAINS
 
@@ -78,11 +78,12 @@ CONTAINS
 !> \param sac_ae ...
 !> \param nimages ...
 !> \param cell_to_index ...
+!> \param basis_type ...
 !> \param atcore ...
 ! **************************************************************************************************
    SUBROUTINE build_core_ae(matrix_h, matrix_p, force, virial, calculate_forces, use_virial, nder, &
                             qs_kind_set, atomic_kind_set, particle_set, sab_orb, sac_ae, &
-                            nimages, cell_to_index, atcore)
+                            nimages, cell_to_index, basis_type, atcore)
 
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_h, matrix_p
       TYPE(qs_force_type), DIMENSION(:), POINTER         :: force
@@ -97,6 +98,7 @@ CONTAINS
          POINTER                                         :: sab_orb, sac_ae
       INTEGER, INTENT(IN)                                :: nimages
       INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
+      CHARACTER(LEN=*), INTENT(IN)                       :: basis_type
       REAL(KIND=dp), DIMENSION(:), INTENT(INOUT), &
          OPTIONAL                                        :: atcore
 
@@ -168,7 +170,7 @@ CONTAINS
 
       ALLOCATE (basis_set_list(nkind))
       DO ikind = 1, nkind
-         CALL get_qs_kind(qs_kind_set(ikind), basis_set=basis_set_a)
+         CALL get_qs_kind(qs_kind_set(ikind), basis_set=basis_set_a, basis_type=basis_type)
          IF (ASSOCIATED(basis_set_a)) THEN
             basis_set_list(ikind)%gto_basis_set => basis_set_a
          ELSE
@@ -176,7 +178,7 @@ CONTAINS
          END IF
       END DO
 
-      CALL get_qs_kind_set(qs_kind_set, &
+      CALL get_qs_kind_set(qs_kind_set, basis_type=basis_type, &
                            maxco=maxco, maxlgto=maxl, maxsgf=maxsgf, maxnset=maxnset)
       CALL init_orbital_pointers(maxl + nder + 1)
       ldsab = MAX(maxco, maxsgf)
@@ -195,7 +197,7 @@ CONTAINS
 !$OMP          sab_orb, sac_ae, nthread, ncoset, nkind, cell_to_index, &
 !$OMP          slot, ldsab,  maxnset, ldai, nder, maxl, maxco, dokp, doat, locks, natom) &
 !$OMP PRIVATE (ikind, jkind, iatom, jatom, rab, basis_set_a, basis_set_b, &
-!$OMP          first_sgfa, la_max, la_min, npgfa, nsgfa, sphi_a, &
+!$OMP          first_sgfa, la_max, la_min, npgfa, nsgfa, sphi_a, lock_num, &
 !$OMP          zeta, first_sgfb, lb_max, lb_min, npgfb, nsetb, rpgfb, set_radius_b, sphi_b, &
 !$OMP          zetb, zeta_c, alpha_c, core_charge, dab, irow, icol, h_block, found, iset, ncoa, &
 !$OMP          sgfa, jset, ncob, sgfb, nsgfb, p_block, work, pab, hab, kkind, nseta, &
@@ -700,7 +702,7 @@ CONTAINS
 !$OMP          sab_orb, sac_ae, nthread, ncoset, nkind, calpha, ccore, eps_core_charge, &
 !$OMP          slot, ldsab,  maxnset, ldai, maxl, maxco, doat, locks, natom) &
 !$OMP PRIVATE (ikind, jkind, iatom, jatom, rab, basis_set_a, basis_set_b, &
-!$OMP          first_sgfa, la_max, la_min, npgfa, nsgfa, sphi_a, &
+!$OMP          first_sgfa, la_max, la_min, npgfa, nsgfa, sphi_a, lock_num, &
 !$OMP          zeta, first_sgfb, lb_max, lb_min, npgfb, nsetb, rpgfb, set_radius_b, sphi_b, &
 !$OMP          zetb, zeta_c, alpha_c, core_charge, dab, irow, icol, h_block, found, iset, ncoa, &
 !$OMP          sgfa, jset, ncob, sgfb, nsgfb, p_block, work, pab, hab, kkind, nseta, &

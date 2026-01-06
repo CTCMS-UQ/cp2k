@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -137,7 +137,7 @@ CONTAINS
          CALL cp_abort(__LOCATION__, "Initial dimension was too large and could not be corrected. "// &
                        "Choose another num_exc_en and num_add_start_z_space or adapt your basis set.")
       END IF
-      IF (num_max_z_space .GE. homo*virtual) THEN
+      IF (num_max_z_space >= homo*virtual) THEN
          fac_max_z_space = homo*virtual/num_Z_vectors_init
          num_max_z_space = num_Z_vectors_init*fac_max_z_space
 
@@ -197,8 +197,8 @@ CONTAINS
          END IF
 
          !MG to check: Reshaping correct?
-         AZ_reshaped(:, :) = RESHAPE(AZ, (/homo*virtual, num_Z_vectors/))
-         Z_vectors_reshaped(:, :) = RESHAPE(Z_vectors, (/homo*virtual, num_Z_vectors/))
+         AZ_reshaped(:, :) = RESHAPE(AZ, [homo*virtual, num_Z_vectors])
+         Z_vectors_reshaped(:, :) = RESHAPE(Z_vectors, [homo*virtual, num_Z_vectors])
 
          ! Diagonalize M and extract smallest eigenvalues/corresponding eigenvector
          CALL compute_diagonalize_ZAZ(AZ_reshaped, Z_vectors_reshaped, num_Z_vectors, Subspace_new_eigenval, &
@@ -305,7 +305,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE do_subspace_iterations
 
 ! **************************************************************************************************
 !> \brief ...
@@ -336,7 +336,7 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      IF (num_Z_vectors + num_new_t .LE. num_max_z_space) THEN
+      IF (num_Z_vectors + num_new_t <= num_max_z_space) THEN
          W_vectors(:, :, :num_Z_vectors) = Z_vectors(:, :, :)
          W_vectors(:, :, num_Z_vectors + 1:) = Subspace_add_dir
          num_Z_vectors = num_Z_vectors + num_new_t
@@ -353,7 +353,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE check_Z_space_dimension
 
 ! **************************************************************************************************
 !> \brief ...
@@ -445,7 +445,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE create_bse_work_arrays
 
 ! **************************************************************************************************
 !> \brief ...
@@ -548,7 +548,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE postprocess_bse
 
 ! **************************************************************************************************
 !> \brief ...
@@ -643,7 +643,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE print_davidson_parameter
 
 ! **************************************************************************************************
 !> \brief ...
@@ -681,7 +681,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE check_en_convergence
 
 ! **************************************************************************************************
 !> \brief ...
@@ -730,7 +730,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE check_res_convergence
 
 ! **************************************************************************************************
 !> \brief ...
@@ -754,7 +754,7 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       ALLOCATE (W_vectors_reshaped(homo*virtual, num_Z_vectors))
-      W_vectors_reshaped(:, :) = RESHAPE(W_vectors, (/homo*virtual, num_Z_vectors/))
+      W_vectors_reshaped(:, :) = RESHAPE(W_vectors, [homo*virtual, num_Z_vectors])
 
       ALLOCATE (Tau_W(MIN(homo*virtual, num_Z_vectors)))
       Tau_W = 0.0_dp
@@ -786,13 +786,13 @@ CONTAINS
          CPABORT("QR Decomp Step 2 doesnt work")
       END IF
 
-      W_vectors(:, :, :) = RESHAPE(W_vectors_reshaped, (/homo, virtual, num_Z_vectors/))
+      W_vectors(:, :, :) = RESHAPE(W_vectors_reshaped, [homo, virtual, num_Z_vectors])
 
       DEALLOCATE (WORK_W, WORK_W_dor, Tau_W, W_vectors_reshaped)
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE orthonormalize_W
 
 ! **************************************************************************************************
 !> \brief ...
@@ -841,12 +841,12 @@ CONTAINS
          END DO
       END DO
 
-      Subspace_add_dir(:, :, :) = RESHAPE(Subspace_add_dir_reshaped, (/homo, virtual, num_new_t/))
+      Subspace_add_dir(:, :, :) = RESHAPE(Subspace_add_dir_reshaped, [homo, virtual, num_new_t])
 
       DEALLOCATE (Subspace_add_dir_reshaped)
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE compute_new_directions
 
 ! **************************************************************************************************
 !> \brief ...
@@ -897,12 +897,12 @@ CONTAINS
                                                        - Subspace_res_A(:, mu_subspace)
 
       END DO
-      Subspace_ritzvec(:, :, :) = RESHAPE(Subspace_res_ev, (/homo, virtual, num_new_t/))
+      Subspace_ritzvec(:, :, :) = RESHAPE(Subspace_res_ev, [homo, virtual, num_new_t])
       DEALLOCATE (Subspace_res_ev, Subspace_res_A)
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE compute_residuals
 
 ! **************************************************************************************************
 !> \brief ...
@@ -954,13 +954,13 @@ CONTAINS
       !MG to do: Check for symmetry of ZAZ!
       ALLOCATE (WORK(1))
       WORK = 0.0_dp
-      CALL DSYEV("V", "U", num_Z_vectors, ZAZ, num_Z_vectors, Subspace_full_eigenval, WORK, -1, ZAZ_diag_info)
+      CALL dsyev("V", "U", num_Z_vectors, ZAZ, num_Z_vectors, Subspace_full_eigenval, WORK, -1, ZAZ_diag_info)
       LWORK = INT(WORK(1))
       DEALLOCATE (WORK)
       ALLOCATE (WORK(LWORK))
       WORK = 0.0_dp
       !MG to check: Usage of symmetric routine okay? (Correct LWORK?)
-      CALL DSYEV("V", "U", num_Z_vectors, ZAZ, num_Z_vectors, Subspace_full_eigenval, WORK, LWORK, ZAZ_diag_info)
+      CALL dsyev("V", "U", num_Z_vectors, ZAZ, num_Z_vectors, Subspace_full_eigenval, WORK, LWORK, ZAZ_diag_info)
 
       IF (ZAZ_diag_info /= 0) THEN
          CPABORT("ZAZ could not be diagonalized successfully.")
@@ -977,7 +977,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE compute_diagonalize_ZAZ
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1027,7 +1027,7 @@ CONTAINS
       ! we make the sum to sum over all RI basis functions
       CALL para_env%sum(BZ)
 
-   END SUBROUTINE
+   END SUBROUTINE compute_BZ
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1185,13 +1185,13 @@ CONTAINS
          !MG to do: Check for symmetry of ZAZ!
          ALLOCATE (WORK(1))
          WORK = 0.0_dp
-         CALL DSYEV("N", "U", homo*virtual, A_full_reshaped, homo*virtual, Full_exc_spectrum, WORK, -1, diag_info)
+         CALL dsyev("N", "U", homo*virtual, A_full_reshaped, homo*virtual, Full_exc_spectrum, WORK, -1, diag_info)
          LWORK = INT(WORK(1))
          DEALLOCATE (WORK)
          ALLOCATE (WORK(LWORK))
          WORK = 0.0_dp
          !MG to check: Usage of symmetric routine okay? (Correct LWORK?)
-         CALL DSYEV("N", "U", homo*virtual, A_full_reshaped, homo*virtual, Full_exc_spectrum, WORK, LWORK, diag_info)
+         CALL dsyev("N", "U", homo*virtual, A_full_reshaped, homo*virtual, Full_exc_spectrum, WORK, LWORK, diag_info)
 
          DEALLOCATE (WORK)
 
@@ -1200,7 +1200,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE compute_AZ
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1301,7 +1301,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE compute_v_ia_jb_part
 
 ! **************************************************************************************************
 !> \brief ...Eigenval
@@ -1347,7 +1347,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE initial_guess_Z_vectors
 
    ! **************************************************************************************************
 !> \brief ...
@@ -1402,7 +1402,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE fill_local_3c_arrays
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1584,6 +1584,6 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE allocate_and_fill_local_array
 
 END MODULE bse_iterative

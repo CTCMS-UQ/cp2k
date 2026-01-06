@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -16,6 +16,7 @@ MODULE qs_mo_methods
    USE admm_utils,                      ONLY: admm_correct_for_eigenvalues,&
                                               admm_uncorrect_for_eigenvalues
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
+   USE cp_control_types,                ONLY: hairy_probes_type
    USE cp_dbcsr_api,                    ONLY: dbcsr_copy,&
                                               dbcsr_get_info,&
                                               dbcsr_init_p,&
@@ -95,14 +96,14 @@ CONTAINS
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct_tmp
       TYPE(cp_fm_type)                                   :: overlap_vv, svmatrix
 
-      IF (ncol .EQ. 0) RETURN
+      IF (ncol == 0) RETURN
 
       CALL timeset(routineN, handle)
 
       CALL cp_fm_get_info(matrix=vmatrix, nrow_global=n, ncol_global=ncol_global)
-      IF (ncol .GT. ncol_global) CPABORT("Wrong ncol value")
+      IF (ncol > ncol_global) CPABORT("Wrong ncol value")
 
-      CALL cp_fm_create(svmatrix, vmatrix%matrix_struct, "SV")
+      CALL cp_fm_create(svmatrix, vmatrix%matrix_struct, "SV", set_zero=.TRUE.)
       CALL cp_dbcsr_sm_fm_multiply(matrix_s, vmatrix, svmatrix, ncol)
 
       NULLIFY (fm_struct_tmp)
@@ -144,13 +145,13 @@ CONTAINS
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct_tmp
       TYPE(cp_fm_type)                                   :: overlap_vv
 
-      IF (ncol .EQ. 0) RETURN
+      IF (ncol == 0) RETURN
 
       CALL timeset(routineN, handle)
       NULLIFY (fm_struct_tmp)
 
       CALL cp_fm_get_info(matrix=vmatrix, nrow_global=n, ncol_global=ncol_global)
-      IF (ncol .GT. ncol_global) CPABORT("Wrong ncol value")
+      IF (ncol > ncol_global) CPABORT("Wrong ncol value")
 
       CALL cp_fm_struct_create(fm_struct_tmp, nrow_global=ncol, ncol_global=ncol, &
                                para_env=vmatrix%matrix_struct%para_env, &
@@ -192,13 +193,13 @@ CONTAINS
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct_tmp
       TYPE(cp_fm_type)                                   :: fm_svmatrix, fm_vmatrix, overlap_vv
 
-      IF (ncol .EQ. 0) RETURN
+      IF (ncol == 0) RETURN
 
       CALL timeset(routineN, handle)
 
       !CALL cp_fm_get_info(matrix=vmatrix,nrow_global=n,ncol_global=ncol_global)
       CALL dbcsr_get_info(vmatrix, nfullrows_total=n, nfullcols_total=ncol_global)
-      IF (ncol .GT. ncol_global) CPABORT("Wrong ncol value")
+      IF (ncol > ncol_global) CPABORT("Wrong ncol value")
 
       CALL cp_fm_struct_create(fm_struct_tmp, context=blacs_env, nrow_global=ncol, &
                                ncol_global=ncol, para_env=para_env)
@@ -256,13 +257,13 @@ CONTAINS
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct_tmp
       TYPE(cp_fm_type)                                   :: overlap_vv
 
-      IF (ncol .EQ. 0) RETURN
+      IF (ncol == 0) RETURN
 
       CALL timeset(routineN, handle)
       NULLIFY (fm_struct_tmp)
 
       CALL cp_fm_get_info(matrix=vmatrix, nrow_global=n, ncol_global=ncol_global)
-      IF (ncol .GT. ncol_global) CPABORT("Wrong ncol value")
+      IF (ncol > ncol_global) CPABORT("Wrong ncol value")
 
       CALL cp_fm_struct_create(fm_struct_tmp, nrow_global=ncol, ncol_global=ncol, &
                                para_env=vmatrix%matrix_struct%para_env, &
@@ -308,13 +309,13 @@ CONTAINS
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct_tmp
       TYPE(cp_fm_type)                                   :: csc, sc, work
 
-      IF (ncol .EQ. 0) RETURN
+      IF (ncol == 0) RETURN
 
       CALL timeset(routineN, handle)
       NULLIFY (fm_struct_tmp)
       threshold = 1.0E-7_dp
       CALL cp_fm_get_info(matrix=vmatrix, nrow_global=n, ncol_global=ncol_global)
-      IF (ncol .GT. ncol_global) CPABORT("Wrong ncol value")
+      IF (ncol > ncol_global) CPABORT("Wrong ncol value")
 
       CALL cp_fm_create(sc, vmatrix%matrix_struct, "SC")
       CALL cp_dbcsr_sm_fm_multiply(matrix_s, vmatrix, sc, ncol)
@@ -360,14 +361,14 @@ CONTAINS
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct_tmp
       TYPE(cp_fm_type)                                   :: overlap_vv
 
-      IF (ncol .EQ. 0) RETURN
+      IF (ncol == 0) RETURN
 
       CALL timeset(routineN, handle)
 
       NULLIFY (fm_struct_tmp)
 
       CALL cp_fm_get_info(matrix=vmatrix, nrow_global=n, ncol_global=ncol_global)
-      IF (ncol .GT. ncol_global) CPABORT("Wrong ncol value")
+      IF (ncol > ncol_global) CPABORT("Wrong ncol value")
 
       CALL cp_fm_struct_create(fm_struct_tmp, nrow_global=ncol, ncol_global=ncol, &
                                para_env=vmatrix%matrix_struct%para_env, &
@@ -442,7 +443,7 @@ CONTAINS
          compute_evecs = .TRUE.
       END IF
 
-      IF (ncol_global .GT. 0) THEN
+      IF (ncol_global > 0) THEN
 
          ALLOCATE (evals(ncol_global))
 
@@ -582,7 +583,7 @@ CONTAINS
          compute_evecs = .TRUE.
       END IF
 
-      IF (ncol_global .GT. 0) THEN
+      IF (ncol_global > 0) THEN
 
          ALLOCATE (evals(ncol_global))
 
@@ -736,7 +737,7 @@ CONTAINS
          DO i = 1, nrow_local
             DO j = 1, ncol_local
                alpha = overlap%local_data(i, j)
-               IF (row_indices(i) .EQ. col_indices(j)) alpha = alpha - 1.0_dp
+               IF (row_indices(i) == col_indices(j)) alpha = alpha - 1.0_dp
                max_alpha = MAX(max_alpha, ABS(alpha))
             END DO
          END DO
@@ -809,11 +810,14 @@ CONTAINS
 !> \param scf_control ...
 !> \param mo_derivs ...
 !> \param admm_env ...
+!> \param hairy_probes ...
+!> \param probe ...
 !> \par History
 !>         02.2013 moved from qs_scf_post_gpw
 !>
 ! **************************************************************************************************
-   SUBROUTINE make_mo_eig(mos, nspins, ks_rmpv, scf_control, mo_derivs, admm_env)
+   SUBROUTINE make_mo_eig(mos, nspins, ks_rmpv, scf_control, mo_derivs, admm_env, &
+                          hairy_probes, probe)
 
       TYPE(mo_set_type), DIMENSION(:), INTENT(INOUT)     :: mos
       INTEGER, INTENT(IN)                                :: nspins
@@ -821,6 +825,9 @@ CONTAINS
       TYPE(scf_control_type), POINTER                    :: scf_control
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mo_derivs
       TYPE(admm_type), OPTIONAL, POINTER                 :: admm_env
+      LOGICAL, OPTIONAL                                  :: hairy_probes
+      TYPE(hairy_probes_type), DIMENSION(:), OPTIONAL, &
+         POINTER                                         :: probe
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'make_mo_eig'
 
@@ -839,7 +846,7 @@ CONTAINS
                          eigenvalues=mo_eigenvalues, homo=homo, nmo=nmo)
          IF (output_unit > 0) WRITE (output_unit, *) " "
          IF (output_unit > 0) WRITE (output_unit, *) " Eigenvalues of the occupied subspace spin ", ispin
-         !      IF (homo .NE. nmo) THEN
+         !      IF (homo /= nmo) THEN
          !         IF (output_unit>0) WRITE(output_unit,*)" and ",nmo-homo," added MO eigenvalues"
          !      END IF
          IF (output_unit > 0) WRITE (output_unit, *) "---------------------------------------------"
@@ -852,7 +859,7 @@ CONTAINS
                mo_coeff_deriv => NULL()
             END IF
 
-            ! ** If we do ADMM, we add have to modify the kohn-sham matrix
+            ! If we do ADMM, we add have to modify the Kohn-Sham matrix
             IF (PRESENT(admm_env)) THEN
                CALL admm_correct_for_eigenvalues(ispin, admm_env, ks_rmpv(ispin)%matrix)
             END IF
@@ -861,15 +868,23 @@ CONTAINS
                                                 scr=output_unit, ionode=output_unit > 0, do_rotation=.TRUE., &
                                                 co_rotate_dbcsr=mo_coeff_deriv)
 
-            ! ** If we do ADMM, we restore the original kohn-sham matrix
+            ! If we do ADMM, we restore the original Kohn-Sham matrix
             IF (PRESENT(admm_env)) THEN
                CALL admm_uncorrect_for_eigenvalues(ispin, admm_env, ks_rmpv(ispin)%matrix)
             END IF
          ELSE
             IF (output_unit > 0) WRITE (output_unit, '(4(1X,1F16.8))') mo_eigenvalues(1:homo)
          END IF
-         IF (.NOT. scf_control%diagonalization%mom) &
-            CALL set_mo_occupation(mo_set=mos(ispin), smear=scf_control%smear)
+         IF (.NOT. scf_control%diagonalization%mom) THEN
+            IF (PRESENT(hairy_probes) .EQV. .TRUE.) THEN
+               scf_control%smear%do_smear = .FALSE.
+               CALL set_mo_occupation(mo_set=mos(ispin), &
+                                      smear=scf_control%smear, &
+                                      probe=probe)
+            ELSE
+               CALL set_mo_occupation(mo_set=mos(ispin), smear=scf_control%smear)
+            END IF
+         END IF
          IF (output_unit > 0) WRITE (output_unit, '(T2,A,F12.6)') &
             "Fermi Energy [eV] :", mos(ispin)%mu*evolt
       END DO

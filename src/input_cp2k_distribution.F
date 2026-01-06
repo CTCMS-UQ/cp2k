@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -56,7 +56,7 @@ CONTAINS
                           description="The cost model that needs to be minimized ", &
                           usage="COST_MODEL BLOCK_COUNT", &
                           enum_c_vals=s2a("BLOCK_COUNT", "BLOCK_SURFACE", "BLOCK_LMAX"), &
-                          enum_i_vals=(/model_block_count, model_block_surface, model_block_lmax/), &
+                          enum_i_vals=[model_block_count, model_block_surface, model_block_lmax], &
                           enum_desc=s2a("the number of blocks", &
                                         "the number of blocks weighted by the number elements per block", &
                                         "the number of blocks weighted by the sum of the lmax"), &

@@ -21,9 +21,8 @@
    "OpenMP is required. Please add the corresponding flag (eg. -fopenmp for GFortran) to your Fortran compiler flags."
 #endif
 
-! Dangerous: Full path can be arbitrarily long and might overflow Fortran line.
 #if !defined(__SHORT_FILE__)
-#define __SHORT_FILE__ __FILE__
+   "The preprocessor macro __SHORT_FILE__ is required but has not been defined."
 #endif
 
 #define __LOCATION__ cp__l(__SHORT_FILE__,__LINE__)
@@ -75,4 +74,11 @@
 #define OMP_DEFAULT_NONE_WITH_OOP SHARED
 #else
 #define OMP_DEFAULT_NONE_WITH_OOP NONE
+#endif
+
+#if defined (__MKL)
+! Preprocessing is enabled by default, and below header is not language specific
+! Defines __INTEL_MKL__ (2025), __INTEL_MKL_MINOR__ (0), __INTEL_MKL_UPDATE__ (2),
+! and __INTEL_MKL_PATCH__ (0) as well INTEL_MKL_VERSION, e.g., 20250200.
+#include <mkl_version.h>
 #endif

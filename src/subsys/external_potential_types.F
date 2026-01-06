@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -167,6 +167,8 @@ MODULE external_potential_types
       REAL(KIND=dp), DIMENSION(:), POINTER       :: alpha_lpot => NULL()
       INTEGER, DIMENSION(:), POINTER             :: nct_lpot => NULL()
       REAL(KIND=dp), DIMENSION(:, :), POINTER    :: cval_lpot => NULL()
+      ! monovalent pseudopotential
+      LOGICAL                                    :: monovalent = .FALSE.
    END TYPE gth_potential_type
 
    TYPE sgp_potential_type
@@ -682,6 +684,7 @@ CONTAINS
 !> \param zeff_correction ...
 !> \param ppl_present ...
 !> \param ppnl_present ...
+!> \param soc_present ...
 !> \param alpha_ppnl ...
 !> \param cexp_ppl ...
 !> \param elec_conf ...
@@ -707,6 +710,7 @@ CONTAINS
 !> \param alpha_nlcc ...
 !> \param nct_nlcc ...
 !> \param cval_nlcc ...
+!> \param monovalent ...
 !> \date    11.01.2002
 !> \author  MK
 !> \version 1.0
@@ -716,12 +720,13 @@ CONTAINS
                                 core_charge_radius, ppl_radius, ppnl_radius, &
                                 lppnl, lprj_ppnl_max, nexp_ppl, nppnl, &
                                 nprj_ppnl_max, z, zeff, zeff_correction, &
-                                ppl_present, ppnl_present, &
+                                ppl_present, ppnl_present, soc_present, &
                                 alpha_ppnl, cexp_ppl, elec_conf, nprj_ppnl, cprj, &
                                 cprj_ppnl, vprj_ppnl, wprj_ppnl, hprj_ppnl, kprj_ppnl, &
                                 lpot_present, nexp_lpot, alpha_lpot, nct_lpot, cval_lpot, &
                                 lsd_present, nexp_lsd, alpha_lsd, nct_lsd, cval_lsd, &
-                                nlcc_present, nexp_nlcc, alpha_nlcc, nct_nlcc, cval_nlcc)
+                                nlcc_present, nexp_nlcc, alpha_nlcc, nct_nlcc, cval_nlcc, &
+                                monovalent)
 
       TYPE(gth_potential_type), INTENT(IN)               :: potential
       CHARACTER(LEN=default_string_length), &
@@ -733,7 +738,7 @@ CONTAINS
       INTEGER, INTENT(OUT), OPTIONAL                     :: lppnl, lprj_ppnl_max, nexp_ppl, nppnl, &
                                                             nprj_ppnl_max, z
       REAL(KIND=dp), INTENT(OUT), OPTIONAL               :: zeff, zeff_correction
-      LOGICAL, INTENT(OUT), OPTIONAL                     :: ppl_present, ppnl_present
+      LOGICAL, INTENT(OUT), OPTIONAL                     :: ppl_present, ppnl_present, soc_present
       REAL(KIND=dp), DIMENSION(:), OPTIONAL, POINTER     :: alpha_ppnl, cexp_ppl
       INTEGER, DIMENSION(:), OPTIONAL, POINTER           :: elec_conf, nprj_ppnl
       REAL(KIND=dp), DIMENSION(:, :), OPTIONAL, POINTER  :: cprj, cprj_ppnl, vprj_ppnl, wprj_ppnl
@@ -754,6 +759,7 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(:), OPTIONAL, POINTER     :: alpha_nlcc
       INTEGER, DIMENSION(:), OPTIONAL, POINTER           :: nct_nlcc
       REAL(KIND=dp), DIMENSION(:, :), OPTIONAL, POINTER  :: cval_nlcc
+      LOGICAL, INTENT(OUT), OPTIONAL                     :: monovalent
 
       IF (PRESENT(name)) name = potential%name
       IF (PRESENT(aliases)) aliases = potential%aliases
@@ -766,6 +772,7 @@ CONTAINS
          core_charge_radius = potential%core_charge_radius
       IF (PRESENT(ppl_radius)) ppl_radius = potential%ppl_radius
       IF (PRESENT(ppnl_radius)) ppnl_radius = potential%ppnl_radius
+      IF (PRESENT(soc_present)) soc_present = potential%soc
       IF (PRESENT(lppnl)) lppnl = potential%lppnl
       IF (PRESENT(lprj_ppnl_max)) lprj_ppnl_max = potential%lprj_ppnl_max
       IF (PRESENT(nexp_ppl)) nexp_ppl = potential%nexp_ppl
@@ -804,6 +811,8 @@ CONTAINS
       IF (PRESENT(alpha_nlcc)) alpha_nlcc => potential%alpha_nlcc
       IF (PRESENT(nct_nlcc)) nct_nlcc => potential%nct_nlcc
       IF (PRESENT(cval_nlcc)) cval_nlcc => potential%cval_nlcc
+
+      IF (PRESENT(monovalent)) monovalent = potential%monovalent
 
    END SUBROUTINE get_gth_potential
 
@@ -1651,6 +1660,7 @@ CONTAINS
 !> \param potential_file_name ...
 !> \param potential_section ...
 !> \param update_input ...
+!> \param monovalent ...
 !> \date    14.05.2000
 !> \par  Literature
 !>         - S. Goedecker, M. Teter and J. Hutter,
@@ -1663,7 +1673,8 @@ CONTAINS
 !> \version 1.0
 ! **************************************************************************************************
    SUBROUTINE read_gth_potential(element_symbol, potential_name, potential, zeff_correction, &
-                                 para_env, potential_file_name, potential_section, update_input)
+                                 para_env, potential_file_name, potential_section, update_input, &
+                                 monovalent)
 
       CHARACTER(LEN=*), INTENT(IN)                       :: element_symbol, potential_name
       TYPE(gth_potential_type), INTENT(INOUT)            :: potential
@@ -1672,6 +1683,7 @@ CONTAINS
       CHARACTER(len=default_path_length), INTENT(IN)     :: potential_file_name
       TYPE(section_vals_type), INTENT(IN), POINTER       :: potential_section
       LOGICAL, INTENT(IN)                                :: update_input
+      LOGICAL, INTENT(IN), OPTIONAL                      :: monovalent
 
       CHARACTER(LEN=240)                                 :: line
       CHARACTER(LEN=242)                                 :: line2
@@ -1700,6 +1712,9 @@ CONTAINS
       CALL cite_reference(Goedecker1996)
       CALL cite_reference(Hartwigsen1998)
       CALL cite_reference(Krack2005)
+
+      potential%monovalent = .FALSE.
+      IF (PRESENT(monovalent)) potential%monovalent = monovalent
 
       potential%name = potential_name
       potential%aliases = potential_name
@@ -1788,10 +1803,14 @@ CONTAINS
                END IF
 
                CALL reallocate(potential%elec_conf, 0, l)
-               potential%elec_conf(:) = elec_conf(:)
+               IF (potential%monovalent) THEN
+                  potential%elec_conf(0) = 1
+               ELSE
+                  potential%elec_conf(:) = elec_conf(:)
+               END IF
 
                potential%zeff_correction = zeff_correction
-               potential%zeff = REAL(SUM(elec_conf), dp) + zeff_correction
+               potential%zeff = REAL(SUM(potential%elec_conf), dp) + zeff_correction
 
                DEALLOCATE (elec_conf)
 

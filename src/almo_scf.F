@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -48,13 +48,15 @@ MODULE almo_scf
    USE cp_blacs_env,                    ONLY: cp_blacs_env_release
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add, dbcsr_add_on_diag, dbcsr_binary_read, dbcsr_checksum, dbcsr_copy, dbcsr_create, &
-        dbcsr_distribution_get, dbcsr_distribution_type, dbcsr_filter, dbcsr_finalize, &
-        dbcsr_get_info, dbcsr_get_stored_coordinates, dbcsr_init_random, &
-        dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, dbcsr_iterator_start, &
-        dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, dbcsr_nblkcols_total, &
-        dbcsr_nblkrows_total, dbcsr_p_type, dbcsr_release, dbcsr_reserve_block2d, dbcsr_scale, &
-        dbcsr_set, dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric, dbcsr_work_create
+        dbcsr_add, dbcsr_binary_read, dbcsr_copy, dbcsr_create, dbcsr_distribution_type, &
+        dbcsr_filter, dbcsr_finalize, dbcsr_get_info, dbcsr_iterator_blocks_left, &
+        dbcsr_iterator_next_block, dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, &
+        dbcsr_multiply, dbcsr_p_type, dbcsr_release, dbcsr_scale, dbcsr_set, dbcsr_type, &
+        dbcsr_type_no_symmetry, dbcsr_type_symmetric, dbcsr_work_create
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_add_on_diag,&
+                                              dbcsr_checksum,&
+                                              dbcsr_init_random,&
+                                              dbcsr_reserve_all_blocks
    USE cp_dbcsr_diag,                   ONLY: cp_dbcsr_syevd
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm
    USE cp_fm_types,                     ONLY: cp_fm_type
@@ -226,26 +228,25 @@ CONTAINS
 
       ! copy basic quantities
       almo_scf_env%nspins = dft_control%nspins
-      almo_scf_env%natoms = dbcsr_nblkrows_total(matrix_s(1)%matrix)
       almo_scf_env%nmolecules = SIZE(molecule_set)
-      CALL dbcsr_get_info(matrix_s(1)%matrix, nfullrows_total=naos)
-      almo_scf_env%naos = naos
+      CALL dbcsr_get_info(matrix_s(1)%matrix, &
+                          nfullrows_total=almo_scf_env%naos, nblkrows_total=almo_scf_env%natoms)
 
       !! retrieve smearing parameters, and check compatibility of methods requested
       almo_scf_env%smear = dft_control%smear
       IF (almo_scf_env%smear) THEN
          CALL cite_reference(Staub2019)
-         IF ((almo_scf_env%almo_update_algorithm .NE. almo_scf_diag) .OR. &
-             ((almo_scf_env%deloc_method .NE. almo_deloc_none) .AND. &
-              (almo_scf_env%xalmo_update_algorithm .NE. almo_scf_diag))) THEN
+         IF ((almo_scf_env%almo_update_algorithm /= almo_scf_diag) .OR. &
+             ((almo_scf_env%deloc_method /= almo_deloc_none) .AND. &
+              (almo_scf_env%xalmo_update_algorithm /= almo_scf_diag))) THEN
             CPABORT("ALMO smearing is currently implemented for DIAG algorithm only")
          END IF
-         IF (qs_env%scf_control%smear%method .NE. smear_fermi_dirac) THEN
+         IF (qs_env%scf_control%smear%method /= smear_fermi_dirac) THEN
             CPABORT("Only Fermi-Dirac smearing is currently compatible with ALMO")
          END IF
          almo_scf_env%smear_e_temp = qs_env%scf_control%smear%electronic_temperature
-         IF ((almo_scf_env%mat_distr_aos .NE. almo_mat_distr_molecular) .OR. &
-             (almo_scf_env%domain_layout_mos .NE. almo_domain_layout_molecular)) THEN
+         IF ((almo_scf_env%mat_distr_aos /= almo_mat_distr_molecular) .OR. &
+             (almo_scf_env%domain_layout_mos /= almo_domain_layout_molecular)) THEN
             CPABORT("ALMO smearing was designed to work with molecular fragments only")
          END IF
       END IF
@@ -254,6 +255,7 @@ CONTAINS
       nspins = almo_scf_env%nspins
       nmols = almo_scf_env%nmolecules
       natoms = almo_scf_env%natoms
+      naos = almo_scf_env%naos
 
       ! Define groups: either atomic or molecular
       IF (almo_scf_env%domain_layout_mos == almo_domain_layout_molecular) THEN
@@ -301,7 +303,7 @@ CONTAINS
             nelec_b = nelec - nelec_a
             !! Initializing an occupation-rescaling trick if smearing is on
             IF (almo_scf_env%smear) THEN
-               CPWARN_IF(multip .GT. 1, "BEWARE: Non singlet state detected, treating it as closed-shell")
+               CPWARN_IF(multip > 1, "BEWARE: Non singlet state detected, treating it as closed-shell")
                !! Save real number of electrons of each spin, as it is required for Fermi-dirac smearing
                !! BEWARE : Non singlet states are allowed but treated as closed-shell
                almo_scf_env%real_ne_of_domain(idomain, :) = REAL(nelec, KIND=dp)/2.0_dp
@@ -312,8 +314,8 @@ CONTAINS
                                                             - almo_scf_env%first_atom_of_domain(idomain) + 1)
             ELSE
                almo_scf_env%nocc_of_domain(idomain, 1) = nelec_a
-               IF (nelec_a .NE. nelec_b) THEN
-                  IF (nspins .EQ. 1) THEN
+               IF (nelec_a /= nelec_b) THEN
+                  IF (nspins == 1) THEN
                      WRITE (*, *) "Domain ", idomain, " out of ", ndomains, ". Electrons = ", nelec
                      CPABORT("odd e- -- use unrestricted methods")
                   END IF
@@ -359,7 +361,7 @@ CONTAINS
          END DO ! spin
       ELSE ! domains are atomic
          ! RZK-warning do the same for atomic domains/groups
-         almo_scf_env%domain_index_of_atom(1:natoms) = (/(i, i=1, natoms)/)
+         almo_scf_env%domain_index_of_atom(1:natoms) = [(i, i=1, natoms)]
       END IF
 
       ao = 1
@@ -381,7 +383,7 @@ CONTAINS
       ELSE IF (almo_scf_env%mat_distr_aos == almo_mat_distr_molecular) THEN
          ALLOCATE (almo_scf_env%domain_index_of_ao_block(nmols))
          ! if distr blocks are molecular then domain layout is also molecular
-         almo_scf_env%domain_index_of_ao_block(:) = (/(i, i=1, nmols)/)
+         almo_scf_env%domain_index_of_ao_block(:) = [(i, i=1, nmols)]
       END IF
       ! mo blocks
       IF (almo_scf_env%mat_distr_mos == almo_mat_distr_atomic) THEN
@@ -391,7 +393,7 @@ CONTAINS
       ELSE IF (almo_scf_env%mat_distr_mos == almo_mat_distr_molecular) THEN
          ALLOCATE (almo_scf_env%domain_index_of_mo_block(nmols))
          ! if distr blocks are molecular then domain layout is also molecular
-         almo_scf_env%domain_index_of_mo_block(:) = (/(i, i=1, nmols)/)
+         almo_scf_env%domain_index_of_mo_block(:) = [(i, i=1, nmols)]
       END IF
 
       ! set all flags
@@ -410,29 +412,29 @@ CONTAINS
       almo_scf_env%calc_forces = calc_forces
       IF (calc_forces) THEN
          CALL cite_reference(Scheiber2018)
-         IF (almo_scf_env%deloc_method .EQ. almo_deloc_x .OR. &
-             almo_scf_env%deloc_method .EQ. almo_deloc_xalmo_x .OR. &
-             almo_scf_env%deloc_method .EQ. almo_deloc_xalmo_1diag) THEN
+         IF (almo_scf_env%deloc_method == almo_deloc_x .OR. &
+             almo_scf_env%deloc_method == almo_deloc_xalmo_x .OR. &
+             almo_scf_env%deloc_method == almo_deloc_xalmo_1diag) THEN
             CPABORT("Forces for perturbative methods are NYI. Change DELOCALIZE_METHOD")
          END IF
          ! switch to ASPC after a certain number of exact steps is done
-         IF (almo_scf_env%almo_history%istore .GT. (almo_scf_env%almo_history%nstore + 1)) THEN
-            IF (almo_scf_env%opt_block_diag_pcg%eps_error_early .GT. 0.0_dp) THEN
+         IF (almo_scf_env%almo_history%istore > (almo_scf_env%almo_history%nstore + 1)) THEN
+            IF (almo_scf_env%opt_block_diag_pcg%eps_error_early > 0.0_dp) THEN
                almo_scf_env%opt_block_diag_pcg%eps_error = almo_scf_env%opt_block_diag_pcg%eps_error_early
                almo_scf_env%opt_block_diag_pcg%early_stopping_on = .TRUE.
                IF (unit_nr > 0) WRITE (*, *) "ALMO_OPTIMIZER_PCG: EPS_ERROR_EARLY is on"
             END IF
-            IF (almo_scf_env%opt_block_diag_diis%eps_error_early .GT. 0.0_dp) THEN
+            IF (almo_scf_env%opt_block_diag_diis%eps_error_early > 0.0_dp) THEN
                almo_scf_env%opt_block_diag_diis%eps_error = almo_scf_env%opt_block_diag_diis%eps_error_early
                almo_scf_env%opt_block_diag_diis%early_stopping_on = .TRUE.
                IF (unit_nr > 0) WRITE (*, *) "ALMO_OPTIMIZER_DIIS: EPS_ERROR_EARLY is on"
             END IF
-            IF (almo_scf_env%opt_block_diag_pcg%max_iter_early .GT. 0) THEN
+            IF (almo_scf_env%opt_block_diag_pcg%max_iter_early > 0) THEN
                almo_scf_env%opt_block_diag_pcg%max_iter = almo_scf_env%opt_block_diag_pcg%max_iter_early
                almo_scf_env%opt_block_diag_pcg%early_stopping_on = .TRUE.
                IF (unit_nr > 0) WRITE (*, *) "ALMO_OPTIMIZER_PCG: MAX_ITER_EARLY is on"
             END IF
-            IF (almo_scf_env%opt_block_diag_diis%max_iter_early .GT. 0) THEN
+            IF (almo_scf_env%opt_block_diag_diis%max_iter_early > 0) THEN
                almo_scf_env%opt_block_diag_diis%max_iter = almo_scf_env%opt_block_diag_diis%max_iter_early
                almo_scf_env%opt_block_diag_diis%early_stopping_on = .TRUE.
                IF (unit_nr > 0) WRITE (*, *) "ALMO_OPTIMIZER_DIIS: MAX_ITER_EARLY is on"
@@ -441,13 +443,13 @@ CONTAINS
             almo_scf_env%opt_block_diag_diis%early_stopping_on = .FALSE.
             almo_scf_env%opt_block_diag_pcg%early_stopping_on = .FALSE.
          END IF
-         IF (almo_scf_env%xalmo_history%istore .GT. (almo_scf_env%xalmo_history%nstore + 1)) THEN
-            IF (almo_scf_env%opt_xalmo_pcg%eps_error_early .GT. 0.0_dp) THEN
+         IF (almo_scf_env%xalmo_history%istore > (almo_scf_env%xalmo_history%nstore + 1)) THEN
+            IF (almo_scf_env%opt_xalmo_pcg%eps_error_early > 0.0_dp) THEN
                almo_scf_env%opt_xalmo_pcg%eps_error = almo_scf_env%opt_xalmo_pcg%eps_error_early
                almo_scf_env%opt_xalmo_pcg%early_stopping_on = .TRUE.
                IF (unit_nr > 0) WRITE (*, *) "XALMO_OPTIMIZER_PCG: EPS_ERROR_EARLY is on"
             END IF
-            IF (almo_scf_env%opt_xalmo_pcg%max_iter_early .GT. 0.0_dp) THEN
+            IF (almo_scf_env%opt_xalmo_pcg%max_iter_early > 0.0_dp) THEN
                almo_scf_env%opt_xalmo_pcg%max_iter = almo_scf_env%opt_xalmo_pcg%max_iter_early
                almo_scf_env%opt_xalmo_pcg%early_stopping_on = .TRUE.
                IF (unit_nr > 0) WRITE (*, *) "XALMO_OPTIMIZER_PCG: MAX_ITER_EARLY is on"
@@ -746,7 +748,7 @@ CONTAINS
                               kTS_sum=kTS_sum)
 
       IF (unit_nr > 0) THEN
-         IF (almo_scf_env%almo_scf_guess .EQ. molecular_guess) THEN
+         IF (almo_scf_env%almo_scf_guess == molecular_guess) THEN
             WRITE (unit_nr, '(T2,A38,F40.10)') "Single-molecule energy:", &
                SUM(mscfg_env%energy_of_frag)
          END IF
@@ -837,8 +839,8 @@ CONTAINS
 
       ! exrapolate xalmos?
       delocalization_uses_extrapolation = &
-         .NOT. ((almo_scf_env%deloc_method .EQ. almo_deloc_none) .OR. &
-                (almo_scf_env%deloc_method .EQ. almo_deloc_xalmo_1diag))
+         .NOT. ((almo_scf_env%deloc_method == almo_deloc_none) .OR. &
+                (almo_scf_env%deloc_method == almo_deloc_xalmo_1diag))
       IF (almo_scf_env%xalmo_history%nstore > 0 .AND. &
           delocalization_uses_extrapolation) THEN
 
@@ -931,7 +933,7 @@ CONTAINS
 
          WRITE (unit_nr, '(T2,A,T48,E33.3)') "eps_filter:", almo_scf_env%eps_filter
 
-         IF (almo_scf_env%almo_update_algorithm .EQ. almo_scf_skip) THEN
+         IF (almo_scf_env%almo_update_algorithm == almo_scf_skip) THEN
             WRITE (unit_nr, '(T2,A)') "skip optimization of block-diagonal ALMOs"
          ELSE
             WRITE (unit_nr, '(T2,A)') "optimization of block-diagonal ALMOs:"
@@ -966,7 +968,7 @@ CONTAINS
          END SELECT
          WRITE (unit_nr, '(T2,A,T48,A33)') "delocalization:", TRIM(deloc_method_string)
 
-         IF (almo_scf_env%deloc_method .NE. almo_deloc_none) THEN
+         IF (almo_scf_env%deloc_method /= almo_deloc_none) THEN
 
             SELECT CASE (almo_scf_env%deloc_method)
             CASE (almo_deloc_x, almo_deloc_scf, almo_deloc_x_then_scf)
@@ -978,7 +980,7 @@ CONTAINS
                   almo_scf_env%quencher_r0_factor
             END SELECT
 
-            IF (almo_scf_env%deloc_method .EQ. almo_deloc_xalmo_1diag) THEN
+            IF (almo_scf_env%deloc_method == almo_deloc_xalmo_1diag) THEN
                ! print nothing because no actual optimization is done
             ELSE
                WRITE (unit_nr, '(T2,A)') "optimization of extended orbitals:"
@@ -1086,7 +1088,7 @@ CONTAINS
 
          DO idomain = 1, almo_scf_env%ndomains
 
-            IF (idomain .EQ. 1) THEN
+            IF (idomain == 1) THEN
                index1_prev = 1
             ELSE
                index1_prev = almo_scf_env%domain_map(1)%index1(idomain - 1)
@@ -1116,7 +1118,7 @@ CONTAINS
          WRITE (unit_nr, '(T2,A)') REPEAT("-", 79)
          WRITE (unit_nr, '()')
 
-         IF (almo_scf_env%ndomains .LE. 64) THEN
+         IF (almo_scf_env%ndomains <= 64) THEN
 
             ! print fragment info
             WRITE (unit_nr, '(T2,A10,A13,A13,A13,A13,A13)') &
@@ -1156,7 +1158,7 @@ CONTAINS
                WRITE (unit_nr, '(T2,A)') REPEAT("-", 79)
                DO idomain = 1, almo_scf_env%ndomains
 
-                  IF (idomain .EQ. 1) THEN
+                  IF (idomain == 1) THEN
                      index1_prev = 1
                   ELSE
                      index1_prev = almo_scf_env%domain_map(1)%index1(idomain - 1)
@@ -1233,7 +1235,7 @@ CONTAINS
       CALL dbcsr_filter(almo_scf_env%matrix_s(1), almo_scf_env%eps_filter)
       CALL dbcsr_filter(almo_scf_env%matrix_s_blk(1), almo_scf_env%eps_filter)
 
-      IF (almo_scf_env%almo_update_algorithm .EQ. almo_scf_diag) THEN
+      IF (almo_scf_env%almo_update_algorithm == almo_scf_diag) THEN
          CALL matrix_sqrt_Newton_Schulz(almo_scf_env%matrix_s_blk_sqrt(1), &
                                         almo_scf_env%matrix_s_blk_sqrt_inv(1), &
                                         almo_scf_env%matrix_s_blk(1), &
@@ -1242,7 +1244,7 @@ CONTAINS
                                         !order=0, &
                                         eps_lanczos=almo_scf_env%eps_lanczos, &
                                         max_iter_lanczos=almo_scf_env%max_iter_lanczos)
-      ELSE IF (almo_scf_env%almo_update_algorithm .EQ. almo_scf_dm_sign) THEN
+      ELSE IF (almo_scf_env%almo_update_algorithm == almo_scf_dm_sign) THEN
          CALL invert_Hotelling(almo_scf_env%matrix_s_blk_inv(1), &
                                almo_scf_env%matrix_s_blk(1), &
                                threshold=almo_scf_env%eps_filter, &
@@ -1359,14 +1361,9 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'almo_scf_delocalization'
 
-      INTEGER                                            :: col, handle, hold, iblock_col, &
-                                                            iblock_row, ispin, mynode, &
-                                                            nblkcols_tot, nblkrows_tot, row, &
-                                                            unit_nr
-      LOGICAL                                            :: almo_experimental, tr
-      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: p_new_block
+      INTEGER                                            :: handle, ispin, unit_nr
+      LOGICAL                                            :: almo_experimental
       TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(dbcsr_distribution_type)                      :: dist
       TYPE(dbcsr_type), ALLOCATABLE, DIMENSION(:)        :: no_quench
       TYPE(optimizer_options_type)                       :: arbitrary_optimizer
 
@@ -1400,34 +1397,9 @@ CONTAINS
          CALL dbcsr_create(no_quench(1), &
                            template=almo_scf_env%matrix_t(1), &
                            matrix_type=dbcsr_type_no_symmetry)
-         CALL dbcsr_get_info(no_quench(1), distribution=dist)
-         CALL dbcsr_distribution_get(dist, mynode=mynode)
-         CALL dbcsr_work_create(no_quench(1), &
-                                work_mutable=.TRUE.)
-         nblkrows_tot = dbcsr_nblkrows_total(no_quench(1))
-         nblkcols_tot = dbcsr_nblkcols_total(no_quench(1))
-         ! RZK-warning: is it a quadratic-scaling routine?
-         ! As a matter of fact it is! But this block treats
-         ! fully delocalized MOs. So it is unavoidable.
-         ! C'est la vie
-         DO row = 1, nblkrows_tot
-            DO col = 1, nblkcols_tot
-               tr = .FALSE.
-               iblock_row = row
-               iblock_col = col
-               CALL dbcsr_get_stored_coordinates(no_quench(1), &
-                                                 iblock_row, iblock_col, hold)
-               IF (hold .EQ. mynode) THEN
-                  NULLIFY (p_new_block)
-                  CALL dbcsr_reserve_block2d(no_quench(1), &
-                                             iblock_row, iblock_col, p_new_block)
-                  CPASSERT(ASSOCIATED(p_new_block))
-                  p_new_block(:, :) = 1.0_dp
-               END IF
-            END DO
-         END DO
-         CALL dbcsr_finalize(no_quench(1))
-         IF (almo_scf_env%nspins .GT. 1) THEN
+         CALL dbcsr_reserve_all_blocks(no_quench(1))
+         CALL dbcsr_set(no_quench(1), 1.0_dp)
+         IF (almo_scf_env%nspins > 1) THEN
             DO ispin = 2, almo_scf_env%nspins
                CALL dbcsr_create(no_quench(ispin), &
                                  template=almo_scf_env%matrix_t(1), &
@@ -1471,7 +1443,7 @@ CONTAINS
          !!!ENDIF
          !!!CALL harris_foulkes_correction(qs_env,almo_scf_env)
 
-         IF (almo_scf_env%xalmo_update_algorithm .EQ. almo_scf_pcg) THEN
+         IF (almo_scf_env%xalmo_update_algorithm == almo_scf_pcg) THEN
 
             CALL almo_scf_xalmo_pcg(qs_env=qs_env, &
                                     almo_scf_env=almo_scf_env, &
@@ -1479,11 +1451,11 @@ CONTAINS
                                     quench_t=no_quench, &
                                     matrix_t_in=almo_scf_env%matrix_t_blk, &
                                     matrix_t_out=almo_scf_env%matrix_t, &
-                                    assume_t0_q0x=(almo_scf_env%xalmo_trial_wf .EQ. xalmo_trial_r0_out), &
+                                    assume_t0_q0x=(almo_scf_env%xalmo_trial_wf == xalmo_trial_r0_out), &
                                     perturbation_only=.TRUE., &
                                     special_case=xalmo_case_fully_deloc)
 
-         ELSE IF (almo_scf_env%xalmo_update_algorithm .EQ. almo_scf_trustr) THEN
+         ELSE IF (almo_scf_env%xalmo_update_algorithm == almo_scf_trustr) THEN
 
             CALL almo_scf_xalmo_trustr(qs_env=qs_env, &
                                        almo_scf_env=almo_scf_env, &
@@ -1502,7 +1474,7 @@ CONTAINS
 
       CASE (almo_deloc_xalmo_1diag)
 
-         IF (almo_scf_env%xalmo_update_algorithm .EQ. almo_scf_diag) THEN
+         IF (almo_scf_env%xalmo_update_algorithm == almo_scf_diag) THEN
 
             almo_scf_env%perturbative_delocalization = .TRUE.
             DO ispin = 1, almo_scf_env%nspins
@@ -1520,7 +1492,7 @@ CONTAINS
 
       CASE (almo_deloc_xalmo_x)
 
-         IF (almo_scf_env%xalmo_update_algorithm .EQ. almo_scf_pcg) THEN
+         IF (almo_scf_env%xalmo_update_algorithm == almo_scf_pcg) THEN
 
             CALL almo_scf_xalmo_pcg(qs_env=qs_env, &
                                     almo_scf_env=almo_scf_env, &
@@ -1528,11 +1500,11 @@ CONTAINS
                                     quench_t=almo_scf_env%quench_t, &
                                     matrix_t_in=almo_scf_env%matrix_t_blk, &
                                     matrix_t_out=almo_scf_env%matrix_t, &
-                                    assume_t0_q0x=(almo_scf_env%xalmo_trial_wf .EQ. xalmo_trial_r0_out), &
+                                    assume_t0_q0x=(almo_scf_env%xalmo_trial_wf == xalmo_trial_r0_out), &
                                     perturbation_only=.TRUE., &
                                     special_case=xalmo_case_normal)
 
-         ELSE IF (almo_scf_env%xalmo_update_algorithm .EQ. almo_scf_trustr) THEN
+         ELSE IF (almo_scf_env%xalmo_update_algorithm == almo_scf_trustr) THEN
 
             CALL almo_scf_xalmo_trustr(qs_env=qs_env, &
                                        almo_scf_env=almo_scf_env, &
@@ -1551,7 +1523,7 @@ CONTAINS
 
       CASE (almo_deloc_xalmo_scf)
 
-         IF (almo_scf_env%xalmo_update_algorithm .EQ. almo_scf_diag) THEN
+         IF (almo_scf_env%xalmo_update_algorithm == almo_scf_diag) THEN
 
             CPABORT("Should not be here: convergence will fail!")
 
@@ -1563,7 +1535,7 @@ CONTAINS
             CALL almo_scf_xalmo_eigensolver(qs_env, almo_scf_env, &
                                             arbitrary_optimizer)
 
-         ELSE IF (almo_scf_env%xalmo_update_algorithm .EQ. almo_scf_pcg) THEN
+         ELSE IF (almo_scf_env%xalmo_update_algorithm == almo_scf_pcg) THEN
 
             CALL almo_scf_xalmo_pcg(qs_env=qs_env, &
                                     almo_scf_env=almo_scf_env, &
@@ -1571,7 +1543,7 @@ CONTAINS
                                     quench_t=almo_scf_env%quench_t, &
                                     matrix_t_in=almo_scf_env%matrix_t_blk, &
                                     matrix_t_out=almo_scf_env%matrix_t, &
-                                    assume_t0_q0x=(almo_scf_env%xalmo_trial_wf .EQ. xalmo_trial_r0_out), &
+                                    assume_t0_q0x=(almo_scf_env%xalmo_trial_wf == xalmo_trial_r0_out), &
                                     perturbation_only=.FALSE., &
                                     special_case=xalmo_case_normal)
 
@@ -1587,7 +1559,7 @@ CONTAINS
                                                arbitrary_optimizer)
             END IF ! experimental
 
-         ELSE IF (almo_scf_env%xalmo_update_algorithm .EQ. almo_scf_trustr) THEN
+         ELSE IF (almo_scf_env%xalmo_update_algorithm == almo_scf_trustr) THEN
 
             CALL almo_scf_xalmo_trustr(qs_env=qs_env, &
                                        almo_scf_env=almo_scf_env, &
@@ -1613,11 +1585,11 @@ CONTAINS
       SELECT CASE (almo_scf_env%deloc_method)
       CASE (almo_deloc_scf, almo_deloc_x_then_scf)
 
-         IF (almo_scf_env%deloc_truncate_virt .NE. virt_full) THEN
+         IF (almo_scf_env%deloc_truncate_virt /= virt_full) THEN
             CPABORT("full scf is NYI for truncated virtual space")
          END IF
 
-         IF (almo_scf_env%xalmo_update_algorithm .EQ. almo_scf_pcg) THEN
+         IF (almo_scf_env%xalmo_update_algorithm == almo_scf_pcg) THEN
 
             CALL almo_scf_xalmo_pcg(qs_env=qs_env, &
                                     almo_scf_env=almo_scf_env, &
@@ -1629,7 +1601,7 @@ CONTAINS
                                     perturbation_only=.FALSE., &
                                     special_case=xalmo_case_fully_deloc)
 
-         ELSE IF (almo_scf_env%xalmo_update_algorithm .EQ. almo_scf_trustr) THEN
+         ELSE IF (almo_scf_env%xalmo_update_algorithm == almo_scf_trustr) THEN
 
             CALL almo_scf_xalmo_trustr(qs_env=qs_env, &
                                        almo_scf_env=almo_scf_env, &
@@ -1699,7 +1671,7 @@ CONTAINS
             CALL construct_nlmos_wrapper(qs_env, almo_scf_env, virtuals=.TRUE.)
          END IF
 
-         IF (almo_scf_env%opt_nlmo_pcg%opt_penalty%compactification_filter_start .GT. 0.0_dp) THEN
+         IF (almo_scf_env%opt_nlmo_pcg%opt_penalty%compactification_filter_start > 0.0_dp) THEN
             CALL nlmo_compactification(qs_env, almo_scf_env, almo_scf_env%matrix_t)
          END IF
 
@@ -1731,7 +1703,7 @@ CONTAINS
 
       ! loop over the strength of the orthogonalization penalty
       prev_determinant = 10.0_dp
-      DO WHILE (almo_scf_env%overlap_determinant .GT. almo_scf_env%opt_nlmo_pcg%opt_penalty%final_determinant)
+      DO WHILE (almo_scf_env%overlap_determinant > almo_scf_env%opt_nlmo_pcg%opt_penalty%final_determinant)
 
          IF (.NOT. virtuals) THEN
             CALL almo_scf_construct_nlmos(qs_env=qs_env, &
@@ -1916,8 +1888,9 @@ CONTAINS
       TYPE(dbcsr_type), ALLOCATABLE, DIMENSION(:), &
          INTENT(IN)                                      :: matrix
 
-      INTEGER :: iblock_col, iblock_col_size, iblock_row, iblock_row_size, icol, irow, ispin, &
-         Ncols, Nrows, nspins, para_group_handle, unit_nr
+      INTEGER                                            :: iblock_col, iblock_col_size, iblock_row, &
+                                                            iblock_row_size, icol, irow, ispin, &
+                                                            Ncols, Nrows, nspins, unit_nr
       LOGICAL                                            :: element_by_element
       REAL(KIND=dp)                                      :: energy, eps_local, eps_start, &
                                                             max_element, spin_factor
@@ -1926,7 +1899,7 @@ CONTAINS
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_iterator_type)                          :: iter
       TYPE(dbcsr_type), ALLOCATABLE, DIMENSION(:)        :: matrix_p_tmp, matrix_t_tmp
-      TYPE(mp_comm_type)                                 :: para_group
+      TYPE(mp_comm_type)                                 :: group
 
       ! define the output_unit
       logger => cp_get_default_logger()
@@ -1939,7 +1912,7 @@ CONTAINS
       nspins = SIZE(matrix)
       element_by_element = .FALSE.
 
-      IF (nspins .EQ. 1) THEN
+      IF (nspins == 1) THEN
          spin_factor = 2.0_dp
       ELSE
          spin_factor = 1.0_dp
@@ -1993,7 +1966,7 @@ CONTAINS
                   IF (element_by_element) THEN
 
                      DO irow = 1, iblock_row_size
-                        IF (ABS(data_p(irow, icol)) .LT. eps_local) THEN
+                        IF (ABS(data_p(irow, icol)) < eps_local) THEN
                            data_p(irow, icol) = 0.0_dp
                         ELSE
                            retained(ispin) = retained(ispin) + 1
@@ -2004,11 +1977,11 @@ CONTAINS
 
                      max_element = 0.0_dp
                      DO irow = 1, iblock_row_size
-                        IF (ABS(data_p(irow, icol)) .GT. max_element) THEN
+                        IF (ABS(data_p(irow, icol)) > max_element) THEN
                            max_element = ABS(data_p(irow, icol))
                         END IF
                      END DO
-                     IF (max_element .LT. eps_local) THEN
+                     IF (max_element < eps_local) THEN
                         DO irow = 1, iblock_row_size
                            data_p(irow, icol) = 0.0_dp
                         END DO
@@ -2024,11 +1997,10 @@ CONTAINS
             CALL dbcsr_finalize(matrix_t_tmp(ispin))
             CALL dbcsr_filter(matrix_t_tmp(ispin), eps_local)
 
-            CALL dbcsr_get_info(matrix_t_tmp(ispin), group=para_group_handle, &
+            CALL dbcsr_get_info(matrix_t_tmp(ispin), group=group, &
                                 nfullrows_total=Nrows, &
                                 nfullcols_total=Ncols)
-            CALL para_group%set_handle(para_group_handle)
-            CALL para_group%sum(retained(ispin))
+            CALL group%sum(retained(ispin))
 
             !devide by the total no. elements
             occ(ispin) = retained(ispin)/Nrows/Ncols
@@ -2065,7 +2037,7 @@ CONTAINS
                                  almo_scf_env%eps_filter, &
                                  almo_scf_env%mat_distr_aos)
 
-         IF (nspins .LT. 2) occ(2) = occ(1)
+         IF (nspins < 2) occ(2) = occ(1)
          IF (unit_nr > 0) WRITE (unit_nr, '(T2,E13.3,F20.10,F20.10,F25.15)') &
             eps_local, occ(1), occ(2), energy
 
@@ -2222,7 +2194,7 @@ CONTAINS
                               matrix_qs=matrix_s0, &
                               almo_scf_env=almo_scf_env, &
                               name_new="S", &
-                              size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_aobasis/), &
+                              size_keys=[almo_mat_dim_aobasis, almo_mat_dim_aobasis], &
                               symmetry_new=dbcsr_type_symmetric, &
                               spin_key=0, &
                               init_domains=.FALSE.)
@@ -2230,16 +2202,16 @@ CONTAINS
                               matrix_qs=matrix_s0, &
                               almo_scf_env=almo_scf_env, &
                               name_new="S_BLK", &
-                              size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_aobasis/), &
+                              size_keys=[almo_mat_dim_aobasis, almo_mat_dim_aobasis], &
                               symmetry_new=dbcsr_type_symmetric, &
                               spin_key=0, &
                               init_domains=.TRUE.)
-      IF (almo_scf_env%almo_update_algorithm .EQ. almo_scf_diag) THEN
+      IF (almo_scf_env%almo_update_algorithm == almo_scf_diag) THEN
          CALL matrix_almo_create(matrix_new=almo_scf_env%matrix_s_blk_sqrt_inv(1), &
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="S_BLK_SQRT_INV", &
-                                 size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_aobasis/), &
+                                 size_keys=[almo_mat_dim_aobasis, almo_mat_dim_aobasis], &
                                  symmetry_new=dbcsr_type_symmetric, &
                                  spin_key=0, &
                                  init_domains=.TRUE.)
@@ -2247,16 +2219,16 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="S_BLK_SQRT", &
-                                 size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_aobasis/), &
+                                 size_keys=[almo_mat_dim_aobasis, almo_mat_dim_aobasis], &
                                  symmetry_new=dbcsr_type_symmetric, &
                                  spin_key=0, &
                                  init_domains=.TRUE.)
-      ELSE IF (almo_scf_env%almo_update_algorithm .EQ. almo_scf_dm_sign) THEN
+      ELSE IF (almo_scf_env%almo_update_algorithm == almo_scf_dm_sign) THEN
          CALL matrix_almo_create(matrix_new=almo_scf_env%matrix_s_blk_inv(1), &
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="S_BLK_INV", &
-                                 size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_aobasis/), &
+                                 size_keys=[almo_mat_dim_aobasis, almo_mat_dim_aobasis], &
                                  symmetry_new=dbcsr_type_symmetric, &
                                  spin_key=0, &
                                  init_domains=.TRUE.)
@@ -2281,7 +2253,7 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="Q_BLK", &
-                                 size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_occ/), &
+                                 size_keys=[almo_mat_dim_aobasis, almo_mat_dim_occ], &
                                  symmetry_new=dbcsr_type_no_symmetry, &
                                  spin_key=ispin, &
                                  init_domains=.TRUE.)
@@ -2290,7 +2262,7 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="T_BLK", &
-                                 size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_occ/), &
+                                 size_keys=[almo_mat_dim_aobasis, almo_mat_dim_occ], &
                                  symmetry_new=dbcsr_type_no_symmetry, &
                                  spin_key=ispin, &
                                  init_domains=.TRUE.)
@@ -2299,7 +2271,7 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="ERR_BLK", &
-                                 size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_aobasis/), &
+                                 size_keys=[almo_mat_dim_aobasis, almo_mat_dim_aobasis], &
                                  symmetry_new=dbcsr_type_no_symmetry, &
                                  spin_key=ispin, &
                                  init_domains=.TRUE.)
@@ -2308,7 +2280,7 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="ERR_XX", &
-                                 size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_occ/), &
+                                 size_keys=[almo_mat_dim_aobasis, almo_mat_dim_occ], &
                                  symmetry_new=dbcsr_type_no_symmetry, &
                                  spin_key=ispin, &
                                  init_domains=.FALSE.)
@@ -2318,7 +2290,7 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="T_TR", &
-                                 size_keys=(/almo_mat_dim_occ, almo_mat_dim_aobasis/), &
+                                 size_keys=[almo_mat_dim_occ, almo_mat_dim_aobasis], &
                                  symmetry_new=dbcsr_type_no_symmetry, &
                                  spin_key=ispin, &
                                  init_domains=.FALSE.)
@@ -2327,7 +2299,7 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="SIG", &
-                                 size_keys=(/almo_mat_dim_occ, almo_mat_dim_occ/), &
+                                 size_keys=[almo_mat_dim_occ, almo_mat_dim_occ], &
                                  symmetry_new=dbcsr_type_symmetric, &
                                  spin_key=ispin, &
                                  init_domains=.FALSE.)
@@ -2336,7 +2308,7 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="SIG_BLK", &
-                                 size_keys=(/almo_mat_dim_occ, almo_mat_dim_occ/), &
+                                 size_keys=[almo_mat_dim_occ, almo_mat_dim_occ], &
                                  symmetry_new=dbcsr_type_symmetric, &
                                  spin_key=ispin, &
                                  init_domains=.TRUE.)
@@ -2345,7 +2317,7 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="SIGINV_BLK", &
-                                 size_keys=(/almo_mat_dim_occ, almo_mat_dim_occ/), &
+                                 size_keys=[almo_mat_dim_occ, almo_mat_dim_occ], &
                                  symmetry_new=dbcsr_type_symmetric, &
                                  spin_key=ispin, &
                                  init_domains=.TRUE.)
@@ -2355,7 +2327,7 @@ CONTAINS
             matrix_qs=matrix_s0, &
             almo_scf_env=almo_scf_env, &
             name_new="SIGINV", &
-            size_keys=(/almo_mat_dim_occ, almo_mat_dim_occ/), &
+            size_keys=[almo_mat_dim_occ, almo_mat_dim_occ], &
             symmetry_new=dbcsr_type_symmetric, &
             spin_key=ispin, &
             init_domains=.FALSE.)
@@ -2365,7 +2337,7 @@ CONTAINS
             matrix_qs=matrix_s0, &
             almo_scf_env=almo_scf_env, &
             name_new="T", &
-            size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_occ/), &
+            size_keys=[almo_mat_dim_aobasis, almo_mat_dim_occ], &
             symmetry_new=dbcsr_type_no_symmetry, &
             spin_key=ispin, &
             init_domains=.FALSE.)
@@ -2392,7 +2364,7 @@ CONTAINS
          ALLOCATE (almo_scf_env%matrix_sigma_vv_sqrt_inv(nspins))
          ALLOCATE (almo_scf_env%matrix_vv_full_blk(nspins))
 
-         IF (almo_scf_env%deloc_truncate_virt .NE. virt_full) THEN
+         IF (almo_scf_env%deloc_truncate_virt /= virt_full) THEN
             ALLOCATE (almo_scf_env%matrix_k_blk(nspins))
             ALLOCATE (almo_scf_env%matrix_k_blk_ones(nspins))
             ALLOCATE (almo_scf_env%matrix_k_tr(nspins))
@@ -2411,7 +2383,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="V_FULL_BLK", &
-                                    size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_virt_full/), &
+                                    size_keys=[almo_mat_dim_aobasis, almo_mat_dim_virt_full], &
                                     symmetry_new=dbcsr_type_no_symmetry, &
                                     spin_key=ispin, &
                                     init_domains=.FALSE.)
@@ -2419,7 +2391,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="V_BLK", &
-                                    size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_virt/), &
+                                    size_keys=[almo_mat_dim_aobasis, almo_mat_dim_virt], &
                                     symmetry_new=dbcsr_type_no_symmetry, &
                                     spin_key=ispin, &
                                     init_domains=.FALSE.)
@@ -2427,7 +2399,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="V", &
-                                    size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_virt/), &
+                                    size_keys=[almo_mat_dim_aobasis, almo_mat_dim_virt], &
                                     symmetry_new=dbcsr_type_no_symmetry, &
                                     spin_key=ispin, &
                                     init_domains=.FALSE.)
@@ -2435,7 +2407,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="OV_FULL", &
-                                    size_keys=(/almo_mat_dim_occ, almo_mat_dim_virt_full/), &
+                                    size_keys=[almo_mat_dim_occ, almo_mat_dim_virt_full], &
                                     symmetry_new=dbcsr_type_no_symmetry, &
                                     spin_key=ispin, &
                                     init_domains=.FALSE.)
@@ -2443,7 +2415,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="OV", &
-                                    size_keys=(/almo_mat_dim_occ, almo_mat_dim_virt/), &
+                                    size_keys=[almo_mat_dim_occ, almo_mat_dim_virt], &
                                     symmetry_new=dbcsr_type_no_symmetry, &
                                     spin_key=ispin, &
                                     init_domains=.FALSE.)
@@ -2451,7 +2423,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="VO", &
-                                    size_keys=(/almo_mat_dim_virt, almo_mat_dim_occ/), &
+                                    size_keys=[almo_mat_dim_virt, almo_mat_dim_occ], &
                                     symmetry_new=dbcsr_type_no_symmetry, &
                                     spin_key=ispin, &
                                     init_domains=.FALSE.)
@@ -2459,7 +2431,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="VO", &
-                                    size_keys=(/almo_mat_dim_virt, almo_mat_dim_occ/), &
+                                    size_keys=[almo_mat_dim_virt, almo_mat_dim_occ], &
                                     symmetry_new=dbcsr_type_no_symmetry, &
                                     spin_key=ispin, &
                                     init_domains=.FALSE.)
@@ -2467,7 +2439,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="SIG_VV", &
-                                    size_keys=(/almo_mat_dim_virt, almo_mat_dim_virt/), &
+                                    size_keys=[almo_mat_dim_virt, almo_mat_dim_virt], &
                                     symmetry_new=dbcsr_type_symmetric, &
                                     spin_key=ispin, &
                                     init_domains=.FALSE.)
@@ -2475,7 +2447,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="VV_FULL_BLK", &
-                                    size_keys=(/almo_mat_dim_virt_full, almo_mat_dim_virt_full/), &
+                                    size_keys=[almo_mat_dim_virt_full, almo_mat_dim_virt_full], &
                                     symmetry_new=dbcsr_type_no_symmetry, &
                                     spin_key=ispin, &
                                     init_domains=.TRUE.)
@@ -2483,7 +2455,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="SIG_VV_BLK", &
-                                    size_keys=(/almo_mat_dim_virt, almo_mat_dim_virt/), &
+                                    size_keys=[almo_mat_dim_virt, almo_mat_dim_virt], &
                                     symmetry_new=dbcsr_type_symmetric, &
                                     spin_key=ispin, &
                                     init_domains=.TRUE.)
@@ -2494,12 +2466,12 @@ CONTAINS
                               template=almo_scf_env%matrix_sigma_vv(ispin), &
                               matrix_type=dbcsr_type_no_symmetry)
 
-            IF (almo_scf_env%deloc_truncate_virt .NE. virt_full) THEN
+            IF (almo_scf_env%deloc_truncate_virt /= virt_full) THEN
                CALL matrix_almo_create(matrix_new=almo_scf_env%opt_k_t_rr(ispin), &
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="OPT_K_U_RR", &
-                                       size_keys=(/almo_mat_dim_virt, almo_mat_dim_virt/), &
+                                       size_keys=[almo_mat_dim_virt, almo_mat_dim_virt], &
                                        symmetry_new=dbcsr_type_no_symmetry, &
                                        spin_key=ispin, &
                                        init_domains=.FALSE.)
@@ -2507,7 +2479,7 @@ CONTAINS
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="VV_DISC", &
-                                       size_keys=(/almo_mat_dim_virt_disc, almo_mat_dim_virt_disc/), &
+                                       size_keys=[almo_mat_dim_virt_disc, almo_mat_dim_virt_disc], &
                                        symmetry_new=dbcsr_type_symmetric, &
                                        spin_key=ispin, &
                                        init_domains=.FALSE.)
@@ -2515,7 +2487,7 @@ CONTAINS
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="OPT_K_U_DD", &
-                                       size_keys=(/almo_mat_dim_virt_disc, almo_mat_dim_virt_disc/), &
+                                       size_keys=[almo_mat_dim_virt_disc, almo_mat_dim_virt_disc], &
                                        symmetry_new=dbcsr_type_no_symmetry, &
                                        spin_key=ispin, &
                                        init_domains=.FALSE.)
@@ -2523,7 +2495,7 @@ CONTAINS
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="VV_DISC_BLK", &
-                                       size_keys=(/almo_mat_dim_virt_disc, almo_mat_dim_virt_disc/), &
+                                       size_keys=[almo_mat_dim_virt_disc, almo_mat_dim_virt_disc], &
                                        symmetry_new=dbcsr_type_symmetric, &
                                        spin_key=ispin, &
                                        init_domains=.TRUE.)
@@ -2531,7 +2503,7 @@ CONTAINS
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="K_BLK", &
-                                       size_keys=(/almo_mat_dim_virt_disc, almo_mat_dim_virt/), &
+                                       size_keys=[almo_mat_dim_virt_disc, almo_mat_dim_virt], &
                                        symmetry_new=dbcsr_type_no_symmetry, &
                                        spin_key=ispin, &
                                        init_domains=.TRUE.)
@@ -2539,7 +2511,7 @@ CONTAINS
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="K_BLK_1", &
-                                       size_keys=(/almo_mat_dim_virt_disc, almo_mat_dim_virt/), &
+                                       size_keys=[almo_mat_dim_virt_disc, almo_mat_dim_virt], &
                                        symmetry_new=dbcsr_type_no_symmetry, &
                                        spin_key=ispin, &
                                        init_domains=.TRUE.)
@@ -2547,7 +2519,7 @@ CONTAINS
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="OPT_K_DENOM", &
-                                       size_keys=(/almo_mat_dim_virt_disc, almo_mat_dim_virt/), &
+                                       size_keys=[almo_mat_dim_virt_disc, almo_mat_dim_virt], &
                                        symmetry_new=dbcsr_type_no_symmetry, &
                                        spin_key=ispin, &
                                        init_domains=.FALSE.)
@@ -2555,7 +2527,7 @@ CONTAINS
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="K_TR", &
-                                       size_keys=(/almo_mat_dim_virt, almo_mat_dim_virt_disc/), &
+                                       size_keys=[almo_mat_dim_virt, almo_mat_dim_virt_disc], &
                                        symmetry_new=dbcsr_type_no_symmetry, &
                                        spin_key=ispin, &
                                        init_domains=.FALSE.)
@@ -2563,7 +2535,7 @@ CONTAINS
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="V_DISC_BLK", &
-                                       size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_virt_disc/), &
+                                       size_keys=[almo_mat_dim_aobasis, almo_mat_dim_virt_disc], &
                                        symmetry_new=dbcsr_type_no_symmetry, &
                                        spin_key=ispin, &
                                        init_domains=.FALSE.)
@@ -2571,7 +2543,7 @@ CONTAINS
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="V_DISC", &
-                                       size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_virt_disc/), &
+                                       size_keys=[almo_mat_dim_aobasis, almo_mat_dim_virt_disc], &
                                        symmetry_new=dbcsr_type_no_symmetry, &
                                        spin_key=ispin, &
                                        init_domains=.FALSE.)
@@ -2579,7 +2551,7 @@ CONTAINS
                                        matrix_qs=matrix_s0, &
                                        almo_scf_env=almo_scf_env, &
                                        name_new="OV_DISC", &
-                                       size_keys=(/almo_mat_dim_occ, almo_mat_dim_virt_disc/), &
+                                       size_keys=[almo_mat_dim_occ, almo_mat_dim_virt_disc], &
                                        symmetry_new=dbcsr_type_no_symmetry, &
                                        spin_key=ispin, &
                                        init_domains=.FALSE.)
@@ -2598,7 +2570,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="E_OCC", &
-                                    size_keys=(/almo_mat_dim_occ, almo_mat_dim_occ/), &
+                                    size_keys=[almo_mat_dim_occ, almo_mat_dim_occ], &
                                     symmetry_new=dbcsr_type_no_symmetry, &
                                     spin_key=ispin, &
                                     init_domains=.FALSE.)
@@ -2606,7 +2578,7 @@ CONTAINS
                                     matrix_qs=matrix_s0, &
                                     almo_scf_env=almo_scf_env, &
                                     name_new="E_VIRT", &
-                                    size_keys=(/almo_mat_dim_virt_full, almo_mat_dim_virt_full/), &
+                                    size_keys=[almo_mat_dim_virt_full, almo_mat_dim_virt_full], &
                                     symmetry_new=dbcsr_type_no_symmetry, &
                                     spin_key=ispin, &
                                     init_domains=.FALSE.)
@@ -2637,7 +2609,7 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="P_BLK", &
-                                 size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_aobasis/), &
+                                 size_keys=[almo_mat_dim_aobasis, almo_mat_dim_aobasis], &
                                  symmetry_new=dbcsr_type_symmetric, &
                                  spin_key=ispin, &
                                  init_domains=.TRUE.)
@@ -2645,7 +2617,7 @@ CONTAINS
                                  matrix_qs=matrix_s0, &
                                  almo_scf_env=almo_scf_env, &
                                  name_new="KS_BLK", &
-                                 size_keys=(/almo_mat_dim_aobasis, almo_mat_dim_aobasis/), &
+                                 size_keys=[almo_mat_dim_aobasis, almo_mat_dim_aobasis], &
                                  symmetry_new=dbcsr_type_symmetric, &
                                  spin_key=ispin, &
                                  init_domains=.TRUE.)
@@ -2685,10 +2657,10 @@ CONTAINS
       ! release matrices
       CALL dbcsr_release(almo_scf_env%matrix_s(1))
       CALL dbcsr_release(almo_scf_env%matrix_s_blk(1))
-      IF (almo_scf_env%almo_update_algorithm .EQ. almo_scf_diag) THEN
+      IF (almo_scf_env%almo_update_algorithm == almo_scf_diag) THEN
          CALL dbcsr_release(almo_scf_env%matrix_s_blk_sqrt_inv(1))
          CALL dbcsr_release(almo_scf_env%matrix_s_blk_sqrt(1))
-      ELSE IF (almo_scf_env%almo_update_algorithm .EQ. almo_scf_dm_sign) THEN
+      ELSE IF (almo_scf_env%almo_update_algorithm == almo_scf_dm_sign) THEN
          CALL dbcsr_release(almo_scf_env%matrix_s_blk_inv(1))
       END IF
       DO ispin = 1, almo_scf_env%nspins
@@ -2725,7 +2697,7 @@ CONTAINS
             CALL dbcsr_release(almo_scf_env%matrix_sigma_vv_sqrt(ispin))
             CALL dbcsr_release(almo_scf_env%matrix_sigma_vv_sqrt_inv(ispin))
             CALL dbcsr_release(almo_scf_env%matrix_vv_full_blk(ispin))
-            IF (almo_scf_env%deloc_truncate_virt .NE. virt_full) THEN
+            IF (almo_scf_env%deloc_truncate_virt /= virt_full) THEN
                CALL dbcsr_release(almo_scf_env%matrix_k_tr(ispin))
                CALL dbcsr_release(almo_scf_env%matrix_k_blk(ispin))
                CALL dbcsr_release(almo_scf_env%matrix_k_blk_ones(ispin))
@@ -2776,7 +2748,7 @@ CONTAINS
          DEALLOCATE (almo_scf_env%matrix_sigma_vv_sqrt)
          DEALLOCATE (almo_scf_env%matrix_sigma_vv_sqrt_inv)
          DEALLOCATE (almo_scf_env%matrix_vv_full_blk)
-         IF (almo_scf_env%deloc_truncate_virt .NE. virt_full) THEN
+         IF (almo_scf_env%deloc_truncate_virt /= virt_full) THEN
             DEALLOCATE (almo_scf_env%matrix_k_tr)
             DEALLOCATE (almo_scf_env%matrix_k_blk)
             DEALLOCATE (almo_scf_env%matrix_v_disc)

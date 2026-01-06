@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -292,8 +292,8 @@ CONTAINS
 ! size is product(mesh)
 
 ! the number of points in the reduced mesh
-      MARK_USED(grid_point)
-      MARK_USED(map)
+      grid_point = 0
+      map = 0
       MARK_USED(mesh)
       MARK_USED(is_shift)
       MARK_USED(is_time_reversal)

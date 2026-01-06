@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -317,7 +317,7 @@ CONTAINS
 !$OMP                 , ikind, jkind, iatom, jatom, cell_b           &
 !$OMP                 , basis_set_a, basis_set_b, img                &
 !$OMP                 , found, next_task                             &
-!$OMP                 , kkind, paw_atom                              &
+!$OMP                 , kkind, paw_atom, lock_num                    &
 !$OMP                 , iac, alist_ac, kac, n_cont_a, list_a         &
 !$OMP                 , ibc, alist_bc, kbc, n_cont_b, list_b         &
 !$OMP                 , katom, rho_at, nsoctot                       &
@@ -432,7 +432,7 @@ CONTAINS
                         IF (ALL(cell_b + alist_bc%clist(kbc)%cell - alist_ac%clist(kac)%cell == 0)) THEN
                            n_cont_a = alist_ac%clist(kac)%nsgf_cnt
                            n_cont_b = alist_bc%clist(kbc)%nsgf_cnt
-                           IF (n_cont_a .EQ. 0 .OR. n_cont_b .EQ. 0) CYCLE
+                           IF (n_cont_a == 0 .OR. n_cont_b == 0) CYCLE
 
                            list_a => alist_ac%clist(kac)%sgf_list
                            list_b => alist_bc%clist(kbc)%sgf_list

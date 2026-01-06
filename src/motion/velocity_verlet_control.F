@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -59,7 +59,7 @@ CONTAINS
       CALL get_md_env(md_env, force_env=force_env, simpar=simpar)
 
       ! RESPA implemented only for NVE
-      IF (simpar%do_respa .AND. nve_ensemble .NE. simpar%ensemble) THEN
+      IF (simpar%do_respa .AND. nve_ensemble /= simpar%ensemble) THEN
          CPABORT("RESPA integrator not implemented for this ensemble")
       END IF
 

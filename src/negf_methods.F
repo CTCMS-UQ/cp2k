@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -8,7 +8,6 @@
 ! **************************************************************************************************
 !> \brief NEGF based quantum transport calculations
 ! **************************************************************************************************
-
 MODULE negf_methods
    USE bibliography,                    ONLY: Bailey2006,&
                                               Papior2017,&
@@ -24,9 +23,9 @@ MODULE negf_methods
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: dbcsr_copy,&
                                               dbcsr_deallocate_matrix,&
-                                              dbcsr_dot,&
                                               dbcsr_init_p,&
                                               dbcsr_p_type
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_dot
    USE cp_dbcsr_operations,             ONLY: dbcsr_allocate_matrix_set
    USE cp_fm_basic_linalg,              ONLY: cp_fm_scale,&
                                               cp_fm_scale_and_add,&
@@ -34,13 +33,9 @@ MODULE negf_methods
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                               cp_fm_struct_release,&
                                               cp_fm_struct_type
-   USE cp_fm_types,                     ONLY: cp_fm_copy_general,&
-                                              cp_fm_create,&
-                                              cp_fm_get_info,&
-                                              cp_fm_release,&
-                                              cp_fm_set_all,&
-                                              cp_fm_to_fm,&
-                                              cp_fm_type
+   USE cp_fm_types,                     ONLY: &
+        cp_fm_add_to_element, cp_fm_copy_general, cp_fm_create, cp_fm_get_info, &
+        cp_fm_get_submatrix, cp_fm_release, cp_fm_set_all, cp_fm_to_fm, cp_fm_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
                                               cp_logger_type
@@ -112,6 +107,7 @@ MODULE negf_methods
                                               seconds
    USE qs_density_mixing_types,         ONLY: direct_mixing_nr,&
                                               gspace_mixing_nr
+   USE qs_energy_types,                 ONLY: qs_energy_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
    USE qs_gspace_mixing,                ONLY: gspace_mixing
@@ -150,7 +146,8 @@ CONTAINS
 !> \brief Perform NEGF calculation.
 !> \param force_env  Force environment
 !> \par History
-!>    * 01.2017 created [Sergey Chulkov]
+!>    * 01.2017 created  [Sergey Chulkov]
+!>    * 11.2025 modified [Dmitry Ryndyk]
 ! **************************************************************************************************
    SUBROUTINE do_negf(force_env)
       TYPE(force_env_type), POINTER                      :: force_env
@@ -161,7 +158,8 @@ CONTAINS
       INTEGER                                            :: handle, icontact, ispin, log_unit, &
                                                             ncontacts, npoints, nspins, &
                                                             print_level, print_unit
-      LOGICAL                                            :: should_output, verbose_output
+      LOGICAL                                            :: debug_output, should_output, &
+                                                            verbose_output
       REAL(kind=dp)                                      :: energy_max, energy_min
       REAL(kind=dp), DIMENSION(2)                        :: current
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -170,6 +168,7 @@ CONTAINS
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(force_env_p_type), DIMENSION(:), POINTER      :: sub_force_env
       TYPE(global_environment_type), POINTER             :: global_env
+      TYPE(mp_para_env_type), POINTER                    :: para_env_global
       TYPE(negf_control_type), POINTER                   :: negf_control
       TYPE(negf_env_type)                                :: negf_env
       TYPE(negf_subgroup_env_type)                       :: sub_env
@@ -189,7 +188,7 @@ CONTAINS
       CALL force_env_get(force_env, globenv=global_env, qs_env=qs_env, root_section=root_section, &
                          sub_force_env=sub_force_env, subsys=cp_subsys)
 
-      CALL get_qs_env(qs_env, blacs_env=blacs_env)
+      CALL get_qs_env(qs_env, blacs_env=blacs_env, para_env=para_env_global)
 
       negf_section => section_vals_get_subs_vals(root_section, "NEGF")
       negf_contact_section => section_vals_get_subs_vals(negf_section, "CONTACT")
@@ -198,40 +197,50 @@ CONTAINS
       NULLIFY (negf_control)
       CALL negf_control_create(negf_control)
       CALL read_negf_control(negf_control, root_section, cp_subsys)
+      CALL get_qs_env(qs_env, dft_control=dft_control)
 
       ! print unit, if log_unit > 0, otherwise no output
       log_unit = cp_print_key_unit_nr(logger, negf_section, "PRINT%PROGRAM_RUN_INFO", extension=".Log")
 
-      ! print levels, are used if log_unit > 0
       IF (log_unit > 0) THEN
-         CALL section_vals_val_get(negf_section, "PRINT%PROGRAM_RUN_INFO%PRINT_LEVEL", i_val=print_level)
-         SELECT CASE (print_level)
-         CASE (high_print_level, debug_print_level)
-            verbose_output = .TRUE.
-         CASE DEFAULT
-            verbose_output = .FALSE.
-         END SELECT
+         WRITE (log_unit, '(/,T2,79("-"))')
+         WRITE (log_unit, '(T27,A,T62)') "NEGF calculation is started"
+         WRITE (log_unit, '(T2,79("-"))')
       END IF
 
+      ! print levels, are used if log_unit > 0
+      ! defined for all parallel MPI processes
+      CALL section_vals_val_get(negf_section, "PRINT%PROGRAM_RUN_INFO%PRINT_LEVEL", i_val=print_level)
+      SELECT CASE (print_level)
+      CASE (high_print_level)
+         verbose_output = .TRUE.
+      CASE (debug_print_level)
+         verbose_output = .TRUE.
+         debug_output = .TRUE.
+      CASE DEFAULT
+         verbose_output = .FALSE.
+         debug_output = .FALSE.
+      END SELECT
+
       IF (log_unit > 0) THEN
-         WRITE (log_unit, '(/,T2,A,T62)') "COMPUTE THE RELEVANT HAMILTONIAN MATRICES"
+         WRITE (log_unit, "(/,' THE RELEVANT HAMILTONIAN AND OVERLAP MATRICES FROM DFT')")
+         WRITE (log_unit, "(  ' ------------------------------------------------------')")
       END IF
 
       CALL negf_sub_env_create(sub_env, negf_control, blacs_env, global_env%blacs_grid_layout, global_env%blacs_repeatable)
       CALL negf_env_create(negf_env, sub_env, negf_control, force_env, negf_mixing_section, log_unit)
 
-      IF (log_unit > 0 .AND. verbose_output) THEN
-         DO icontact = 1, SIZE(negf_control%contacts)
-            WRITE (log_unit, "(/,' NEGF| Atoms in the contact region',I2,':',I4)") &
-               icontact, SIZE(negf_control%contacts(icontact)%atomlist_bulk)
-            WRITE (log_unit, "(16I5)") negf_control%contacts(icontact)%atomlist_bulk
-         END DO
-         WRITE (log_unit, "(/,' NEGF| Atoms in the full scattering region:',I4)") SIZE(negf_control%atomlist_S_screening)
-         WRITE (log_unit, "(16I5)") negf_control%atomlist_S_screening
-         WRITE (log_unit, *)
+      IF (log_unit > 0) THEN
+         WRITE (log_unit, "(/,' NEGF| The initial Hamiltonian and Overlap matrices are calculated.')")
       END IF
 
-      ! compute contact Fermi level as well as requested properties
+      CALL negf_output_initial(log_unit, negf_env, sub_env, negf_control, dft_control, verbose_output, debug_output)
+
+      ! NEGF procedure
+      ! --------------
+
+      ! Compute contact Fermi levels as well as requested properties
+      ! ------------------------------------------------------------
       ncontacts = SIZE(negf_control%contacts)
       DO icontact = 1, ncontacts
          NULLIFY (qs_env)
@@ -240,6 +249,7 @@ CONTAINS
          ELSE
             CALL force_env_get(force_env, qs_env=qs_env)
          END IF
+
          CALL guess_fermi_level(icontact, negf_env, negf_control, sub_env, qs_env, log_unit)
 
          print_section => section_vals_get_subs_vals(negf_contact_section, "PRINT", i_rep_section=icontact)
@@ -255,22 +265,29 @@ CONTAINS
                                               extension=".dos", &
                                               middle_name=TRIM(ADJUSTL(contact_id_str)), &
                                               file_status="REPLACE")
-
             CALL negf_print_dos(print_unit, energy_min, energy_max, npoints, &
                                 v_shift=0.0_dp, negf_env=negf_env, negf_control=negf_control, &
                                 sub_env=sub_env, base_contact=icontact, just_contact=icontact)
-
             CALL cp_print_key_finished_output(print_unit, logger, print_section, "DOS")
          END IF
+
       END DO
 
+      ! Compute multi-terminal systems
+      ! ------------------------------
       IF (ncontacts > 1) THEN
          CALL force_env_get(force_env, qs_env=qs_env)
+
+         ! shift potential
+         ! ---------------
          CALL shift_potential(negf_env, negf_control, sub_env, qs_env, base_contact=1, log_unit=log_unit)
 
+         ! self-consistent density
+         ! -----------------------
          CALL converge_density(negf_env, negf_control, sub_env, qs_env, negf_control%v_shift, base_contact=1, log_unit=log_unit)
 
          ! current
+         ! -------
          CALL get_qs_env(qs_env, dft_control=dft_control)
 
          nspins = dft_control%nspins
@@ -300,6 +317,7 @@ CONTAINS
          END IF
 
          ! density of states
+         ! -----------------
          print_section => section_vals_get_subs_vals(negf_section, "PRINT")
          should_output = BTEST(cp_print_key_should_output(logger%iter_info, print_section, "DOS"), cp_p_file)
 
@@ -322,6 +340,7 @@ CONTAINS
          END IF
 
          ! transmission coefficient
+         ! ------------------------
          should_output = BTEST(cp_print_key_should_output(logger%iter_info, print_section, "TRANSMISSION"), cp_p_file)
 
          IF (should_output) THEN
@@ -344,9 +363,14 @@ CONTAINS
 
       END IF
 
+      IF (log_unit > 0) THEN
+         WRITE (log_unit, '(/,T2,79("-"))')
+         WRITE (log_unit, '(T27,A,T62)') "NEGF calculation is finished"
+         WRITE (log_unit, '(T2,79("-"))')
+      END IF
+
       CALL negf_env_release(negf_env)
       CALL negf_sub_env_release(sub_env)
-
       CALL negf_control_release(negf_control)
       CALL timestop(handle)
    END SUBROUTINE do_negf
@@ -360,11 +384,12 @@ CONTAINS
 !> \param qs_env        QuickStep environment
 !> \param log_unit      output unit
 !> \par History
-!>    * 10.2017 created [Sergey Chulkov]
+!>    * 10.2017 created  [Sergey Chulkov]
+!>    * 11.2025 modified [Dmitry Ryndyk]
 ! **************************************************************************************************
    SUBROUTINE guess_fermi_level(contact_id, negf_env, negf_control, sub_env, qs_env, log_unit)
       INTEGER, INTENT(in)                                :: contact_id
-      TYPE(negf_env_type), INTENT(in)                    :: negf_env
+      TYPE(negf_env_type), INTENT(inout)                 :: negf_env
       TYPE(negf_control_type), POINTER                   :: negf_control
       TYPE(negf_subgroup_env_type), INTENT(in)           :: sub_env
       TYPE(qs_environment_type), POINTER                 :: qs_env
@@ -380,9 +405,9 @@ CONTAINS
       INTEGER, ALLOCATABLE, DIMENSION(:, :)              :: index_to_cell
       INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
       LOGICAL                                            :: do_kpoints
-      REAL(kind=dp) :: delta_au, energy_ubound_minus_fermi, fermi_level_guess, fermi_level_max, &
-         fermi_level_min, nelectrons_guess, nelectrons_max, nelectrons_min, nelectrons_qs_cell0, &
-         nelectrons_qs_cell1, offset_au, rscale, t1, t2, trace
+      REAL(kind=dp) :: delta_au, delta_Ef, energy_ubound_minus_fermi, fermi_level_guess, &
+         fermi_level_max, fermi_level_min, nelectrons_guess, nelectrons_max, nelectrons_min, &
+         nelectrons_qs_cell0, nelectrons_qs_cell1, offset_au, rscale, t1, t2, trace
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env_global
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_fm_type)                                   :: rho_ao_fm
@@ -393,12 +418,21 @@ CONTAINS
       TYPE(integration_status_type)                      :: stats
       TYPE(kpoint_type), POINTER                         :: kpoints
       TYPE(mp_para_env_type), POINTER                    :: para_env_global
+      TYPE(qs_energy_type), POINTER                      :: energy
       TYPE(qs_rho_type), POINTER                         :: rho_struct
       TYPE(qs_subsys_type), POINTER                      :: subsys
 
       CALL timeset(routineN, handle)
 
+      IF (log_unit > 0) THEN
+         WRITE (temperature_str, '(F11.3)') negf_control%contacts(contact_id)%temperature*kelvin
+         WRITE (log_unit, '(/,T2,A,I3)') "FERMI LEVEL OF CONTACT ", contact_id
+         WRITE (log_unit, "(            ' --------------------------')")
+         WRITE (log_unit, '(A)') " Temperature "//TRIM(ADJUSTL(temperature_str))//" Kelvin"
+      END IF
+
       IF (negf_control%contacts(contact_id)%compute_fermi_level) THEN
+
          CALL get_qs_env(qs_env, &
                          blacs_env=blacs_env_global, &
                          dft_control=dft_control, &
@@ -458,52 +492,56 @@ CONTAINS
          ! compute the refence number of electrons using the electron density
          nelectrons_qs_cell0 = 0.0_dp
          nelectrons_qs_cell1 = 0.0_dp
-         DO image = 1, nimages
-            IF (index_to_cell(direction_axis_abs, image) == 0) THEN
-               DO ispin = 1, nspins
-                  CALL dbcsr_dot(rho_ao_qs_kp(ispin, image)%matrix, matrix_s_kp(1, image)%matrix, trace)
-                  nelectrons_qs_cell0 = nelectrons_qs_cell0 + trace
-               END DO
-            ELSE IF (ABS(index_to_cell(direction_axis_abs, image)) == 1) THEN
-               DO ispin = 1, nspins
-                  CALL dbcsr_dot(rho_ao_qs_kp(ispin, image)%matrix, matrix_s_kp(1, image)%matrix, trace)
-                  nelectrons_qs_cell1 = nelectrons_qs_cell1 + trace
-               END DO
-            END IF
-         END DO
+         IF (negf_control%contacts(contact_id)%force_env_index > 0) THEN
+            DO image = 1, nimages
+               IF (index_to_cell(direction_axis_abs, image) == 0) THEN
+                  DO ispin = 1, nspins
+                     CALL dbcsr_dot(rho_ao_qs_kp(ispin, image)%matrix, matrix_s_kp(1, image)%matrix, trace)
+                     nelectrons_qs_cell0 = nelectrons_qs_cell0 + trace
+                  END DO
+               ELSE IF (ABS(index_to_cell(direction_axis_abs, image)) == 1) THEN
+                  DO ispin = 1, nspins
+                     CALL dbcsr_dot(rho_ao_qs_kp(ispin, image)%matrix, matrix_s_kp(1, image)%matrix, trace)
+                     nelectrons_qs_cell1 = nelectrons_qs_cell1 + trace
+                  END DO
+               END IF
+            END DO
+         ELSE
+            DO ispin = 1, nspins
+               CALL cp_fm_trace(negf_env%contacts(contact_id)%rho_00(ispin), &
+                                negf_env%contacts(contact_id)%s_00, trace)
+               nelectrons_qs_cell0 = nelectrons_qs_cell0 + trace
+               CALL cp_fm_trace(negf_env%contacts(contact_id)%rho_01(ispin), &
+                                negf_env%contacts(contact_id)%s_01, trace)
+               nelectrons_qs_cell1 = nelectrons_qs_cell1 + 2.0_dp*trace
+            END DO
+         END IF
+
          DEALLOCATE (index_to_cell)
 
          IF (log_unit > 0) THEN
-            WRITE (temperature_str, '(F11.3)') negf_control%contacts(contact_id)%temperature*kelvin
-            WRITE (log_unit, '(/,T2,A,I0,A)') "COMPUTE FERMI LEVEL OF CONTACT ", &
-               contact_id, " AT "//TRIM(ADJUSTL(temperature_str))//" KELVIN"
-            WRITE (log_unit, '(/,T2,A,T60,F20.10,/)') "Electronic density of the isolated contact unit cell:", &
+            WRITE (log_unit, '(A)') " Computing the Fermi level of bulk electrode"
+            WRITE (log_unit, '(T2,A,T60,F20.10,/)') "Electronic density of the electrode unit cell:", &
                -1.0_dp*(nelectrons_qs_cell0 + nelectrons_qs_cell1)
             WRITE (log_unit, '(T3,A)') "Step     Integration method      Time      Fermi level   Convergence (density)"
             WRITE (log_unit, '(T3,78("-"))')
          END IF
 
-         nelectrons_qs_cell0 = 0.0_dp
-         DO ispin = 1, nspins
-            CALL cp_fm_trace(negf_env%contacts(contact_id)%rho_00(ispin), &
-                             negf_env%contacts(contact_id)%s_00, trace)
-            nelectrons_qs_cell0 = nelectrons_qs_cell0 + trace
-         END DO
-
-         ! Use orbital energies of HOMO and LUMO as reference points and then
-         ! refine the Fermi level by using a simple linear interpolation technique
+         ! Use the Fermi level given in the input file or the Fermi level of bulk electrodes as a reference point
+         ! and then refine the Fermi level by using a simple linear interpolation technique
+         CALL get_qs_env(qs_env, energy=energy)
          IF (negf_control%homo_lumo_gap > 0.0_dp) THEN
             IF (negf_control%contacts(contact_id)%refine_fermi_level) THEN
                fermi_level_min = negf_control%contacts(contact_id)%fermi_level
             ELSE
-               fermi_level_min = negf_env%contacts(contact_id)%homo_energy
+               fermi_level_min = energy%efermi
             END IF
             fermi_level_max = fermi_level_min + negf_control%homo_lumo_gap
          ELSE
             IF (negf_control%contacts(contact_id)%refine_fermi_level) THEN
                fermi_level_max = negf_control%contacts(contact_id)%fermi_level
             ELSE
-               fermi_level_max = negf_env%contacts(contact_id)%homo_energy
+               fermi_level_max = energy%efermi
             END IF
             fermi_level_min = fermi_level_max + negf_control%homo_lumo_gap
          END IF
@@ -633,13 +671,36 @@ CONTAINS
          CALL cp_fm_release(rho_ao_fm)
       END IF
 
+      IF (negf_control%contacts(contact_id)%shift_fermi_level) THEN
+         delta_Ef = negf_control%contacts(contact_id)%fermi_level_shifted - negf_control%contacts(contact_id)%fermi_level
+         IF (log_unit > 0) WRITE (log_unit, "(/,' The energies are shifted by (a.u.):',F18.8)") delta_Ef
+         IF (log_unit > 0) WRITE (log_unit, "('                               (eV):',F18.8)") delta_Ef*evolt
+         negf_control%contacts(contact_id)%fermi_level = negf_control%contacts(contact_id)%fermi_level_shifted
+         CALL get_qs_env(qs_env, dft_control=dft_control)
+         nspins = dft_control%nspins
+         CALL cp_fm_get_info(negf_env%contacts(contact_id)%s_00, nrow_global=nao)
+         DO ispin = 1, nspins
+            DO step = 1, nao
+               CALL cp_fm_add_to_element(negf_env%contacts(contact_id)%h_00(ispin), step, step, delta_Ef)
+            END DO
+         END DO
+      END IF
+
       IF (log_unit > 0) THEN
          WRITE (temperature_str, '(F11.3)') negf_control%contacts(contact_id)%temperature*kelvin
          WRITE (log_unit, '(/,T2,A,I0)') "NEGF| Contact No. ", contact_id
          WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|    Fermi level at "//TRIM(ADJUSTL(temperature_str))// &
             " Kelvin (a.u.):", negf_control%contacts(contact_id)%fermi_level
-         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|    Electric potential (V):", &
+         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|                                   (eV):", &
+            negf_control%contacts(contact_id)%fermi_level*evolt
+         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|    Electric potential (a.u.):", &
+            negf_control%contacts(contact_id)%v_external
+         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|                       (Volt):", &
             negf_control%contacts(contact_id)%v_external*evolt
+         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|    Electro-chemical potential Ef-|e|V (a.u.):", &
+            (negf_control%contacts(contact_id)%fermi_level - negf_control%contacts(contact_id)%v_external)
+         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|                                         (eV):", &
+            (negf_control%contacts(contact_id)%fermi_level - negf_control%contacts(contact_id)%v_external)*evolt
       END IF
 
       CALL timestop(handle)
@@ -653,6 +714,8 @@ CONTAINS
 !> \param qs_env        QuickStep environment
 !> \param base_contact  index of the reference contact
 !> \param log_unit      output unit
+!>    * 09.2017 created  [Sergey Chulkov]
+!>    * 11.2025 modified [Dmitry Ryndyk]
 ! **************************************************************************************************
    SUBROUTINE shift_potential(negf_env, negf_control, sub_env, qs_env, base_contact, log_unit)
       TYPE(negf_env_type), INTENT(in)                    :: negf_env
@@ -688,6 +751,7 @@ CONTAINS
       IF (.NOT. (ALLOCATED(negf_env%h_s) .AND. ALLOCATED(negf_env%h_sc) .AND. &
                  ASSOCIATED(negf_env%s_s) .AND. ALLOCATED(negf_env%s_sc))) RETURN
       IF (ncontacts < 2) RETURN
+      IF (negf_control%v_shift_maxiters == 0) RETURN
 
       CALL timeset(routineN, handle)
 
@@ -746,6 +810,7 @@ CONTAINS
 
       IF (log_unit > 0) THEN
          WRITE (log_unit, '(/,T2,A)') "COMPUTE SHIFT IN HARTREE POTENTIAL"
+         WRITE (log_unit, "(         ' ----------------------------------')")
          WRITE (log_unit, '(/,T2,A,T55,F25.14,/)') "Initial electronic density of the scattering region:", -1.0_dp*nelectrons_ref
          WRITE (log_unit, '(T3,A)') "Step     Integration method      Time        V shift     Convergence (density)"
          WRITE (log_unit, '(T3,78("-"))')
@@ -881,7 +946,8 @@ CONTAINS
       negf_control%v_shift = v_shift_guess
 
       IF (log_unit > 0) THEN
-         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|    Shift in Hartree potential", negf_control%v_shift
+         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|    Shift in Hartree potential (a.u.):", negf_control%v_shift
+         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|                                 (eV):", negf_control%v_shift*evolt
       END IF
 
       DO ispin = nspins, 1, -1
@@ -910,7 +976,8 @@ CONTAINS
 !> \param base_contact  index of the reference contact
 !> \param log_unit      output unit
 !> \par History
-!>    * 06.2017 created [Sergey Chulkov]
+!>    * 06.2017 created  [Sergey Chulkov]
+!>    * 11.2025 modified [Dmitry Ryndyk]
 ! **************************************************************************************************
    SUBROUTINE converge_density(negf_env, negf_control, sub_env, qs_env, v_shift, base_contact, log_unit)
       TYPE(negf_env_type), INTENT(in)                    :: negf_env
@@ -929,9 +996,9 @@ CONTAINS
                                                             iter_count, nao, ncontacts, nimages, &
                                                             nspins
       LOGICAL                                            :: do_kpoints
-      REAL(kind=dp)                                      :: iter_delta, mu_base, nelectrons, &
+      REAL(kind=dp)                                      :: delta, iter_delta, mu_base, nelectrons, &
                                                             nelectrons_diff, t1, t2, temperature, &
-                                                            trace, v_base, v_contact
+                                                            trace, v_base
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: rho_ao_delta_fm, rho_ao_new_fm
@@ -949,10 +1016,15 @@ CONTAINS
       TYPE(qs_subsys_type), POINTER                      :: subsys
 
       ncontacts = SIZE(negf_control%contacts)
+      ! the current subroutine works for the general case as well, but the Poisson solver does not
+      IF (ncontacts > 2) THEN
+         CPABORT("Poisson solver does not support the general NEGF setup (>2 contacts).")
+      END IF
       ! nothing to do
       IF (.NOT. (ALLOCATED(negf_env%h_s) .AND. ALLOCATED(negf_env%h_sc) .AND. &
                  ASSOCIATED(negf_env%s_s) .AND. ALLOCATED(negf_env%s_sc))) RETURN
       IF (ncontacts < 2) RETURN
+      IF (negf_control%max_scf == 0) RETURN
 
       CALL timeset(routineN, handle)
 
@@ -989,12 +1061,7 @@ CONTAINS
       nimages = dft_control%nimages
 
       v_base = negf_control%contacts(base_contact)%v_external
-      mu_base = negf_control%contacts(base_contact)%fermi_level + v_base
-
-      ! the current subroutine works for the general case as well, but the Poisson solver does not
-      IF (ncontacts > 2) THEN
-         CPABORT("Poisson solver does not support the general NEGF setup (>2 contacts).")
-      END IF
+      mu_base = negf_control%contacts(base_contact)%fermi_level - v_base
 
       ! keep the initial charge density matrix and Kohn-Sham matrix
       CALL qs_rho_get(rho_struct, rho_ao_kp=rho_ao_qs_kp)
@@ -1049,6 +1116,7 @@ CONTAINS
 
       IF (log_unit > 0) THEN
          WRITE (log_unit, '(/,T2,A)') "NEGF SELF-CONSISTENT PROCEDURE"
+         WRITE (log_unit, "(         ' ------------------------------')")
          WRITE (log_unit, '(/,T2,A,T55,F25.14,/)') "Initial electronic density of the scattering region:", -1.0_dp*nelectrons
          WRITE (log_unit, '(T3,A)') "Step     Integration method      Time     Electronic density      Convergence"
          WRITE (log_unit, '(T3,78("-"))')
@@ -1056,201 +1124,208 @@ CONTAINS
 
       temperature = negf_control%contacts(base_contact)%temperature
 
-      DO icontact = 1, ncontacts
-         IF (icontact /= base_contact) THEN
-            v_contact = negf_control%contacts(icontact)%v_external
+      ! integration limits: C-path (arch)
+      lbound_cpath = CMPLX(negf_control%energy_lbound, negf_control%eta, kind=dp)
+      ubound_cpath = CMPLX(mu_base - REAL(negf_control%gamma_kT, kind=dp)*temperature, &
+                           REAL(negf_control%delta_npoles, kind=dp)*twopi*temperature, kind=dp)
 
-            ! integration limits: C-path (arch)
-            lbound_cpath = CMPLX(negf_control%energy_lbound, negf_control%eta, kind=dp)
-            ubound_cpath = CMPLX(mu_base - REAL(negf_control%gamma_kT, kind=dp)*temperature, &
-                                 REAL(negf_control%delta_npoles, kind=dp)*twopi*temperature, kind=dp)
+      ! integration limits: L-path (linear)
+      ubound_lpath = CMPLX(mu_base - LOG(negf_control%conv_density)*temperature, &
+                           REAL(negf_control%delta_npoles, kind=dp)*twopi*temperature, kind=dp)
 
-            ! integration limits: L-path (linear)
-            ubound_lpath = CMPLX(mu_base - LOG(negf_control%conv_density)*temperature, &
-                                 REAL(negf_control%delta_npoles, kind=dp)*twopi*temperature, kind=dp)
+      ALLOCATE (g_surf_circular(nspins), g_surf_linear(nspins), g_surf_nonequiv(nspins))
 
-            ALLOCATE (g_surf_circular(nspins), g_surf_linear(nspins), g_surf_nonequiv(nspins))
+      !--- main SCF cycle -------------------------------------------------------------------!
+      DO iter_count = 1, negf_control%max_scf
+         ! compute an updated density matrix
+         CALL integration_status_reset(stats)
 
-            DO iter_count = 1, negf_control%max_scf
-               ! compute an updated density matrix
-               CALL integration_status_reset(stats)
+         DO ispin = 1, nspins
+            ! closed contour: residuals
+            CALL negf_init_rho_equiv_residuals(rho_ao_fm=rho_ao_new_fm(ispin), &
+                                               v_shift=v_shift, &
+                                               ignore_bias=.FALSE., &
+                                               negf_env=negf_env, &
+                                               negf_control=negf_control, &
+                                               sub_env=sub_env, &
+                                               ispin=ispin, &
+                                               base_contact=base_contact)
 
-               DO ispin = 1, nspins
-                  ! closed contour: residuals
-                  CALL negf_init_rho_equiv_residuals(rho_ao_fm=rho_ao_new_fm(ispin), &
-                                                     v_shift=v_shift, &
-                                                     ignore_bias=.FALSE., &
-                                                     negf_env=negf_env, &
-                                                     negf_control=negf_control, &
-                                                     sub_env=sub_env, &
-                                                     ispin=ispin, &
-                                                     base_contact=base_contact)
-
-                  ! closed contour: C-path
-                  CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_new_fm(ispin), &
-                                              stats=stats, &
-                                              v_shift=v_shift, &
-                                              ignore_bias=.FALSE., &
-                                              negf_env=negf_env, &
-                                              negf_control=negf_control, &
-                                              sub_env=sub_env, &
-                                              ispin=ispin, &
-                                              base_contact=base_contact, &
-                                              integr_lbound=lbound_cpath, &
-                                              integr_ubound=ubound_cpath, &
-                                              matrix_s_global=matrix_s_fm, &
-                                              is_circular=.TRUE., &
-                                              g_surf_cache=g_surf_circular(ispin))
-                  IF (negf_control%disable_cache) &
-                     CALL green_functions_cache_release(g_surf_circular(ispin))
-
-                  ! closed contour: L-path
-                  CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_new_fm(ispin), &
-                                              stats=stats, &
-                                              v_shift=v_shift, &
-                                              ignore_bias=.FALSE., &
-                                              negf_env=negf_env, &
-                                              negf_control=negf_control, &
-                                              sub_env=sub_env, &
-                                              ispin=ispin, &
-                                              base_contact=base_contact, &
-                                              integr_lbound=ubound_cpath, &
-                                              integr_ubound=ubound_lpath, &
-                                              matrix_s_global=matrix_s_fm, &
-                                              is_circular=.FALSE., &
-                                              g_surf_cache=g_surf_linear(ispin))
-                  IF (negf_control%disable_cache) &
-                     CALL green_functions_cache_release(g_surf_linear(ispin))
-
-                  ! non-equilibrium part
-                  IF (ABS(negf_control%contacts(icontact)%v_external - &
-                          negf_control%contacts(base_contact)%v_external) >= threshold) THEN
-                     CALL negf_add_rho_nonequiv(rho_ao_fm=rho_ao_new_fm(ispin), &
-                                                stats=stats, &
-                                                v_shift=v_shift, &
-                                                negf_env=negf_env, &
-                                                negf_control=negf_control, &
-                                                sub_env=sub_env, &
-                                                ispin=ispin, &
-                                                base_contact=base_contact, &
-                                                matrix_s_global=matrix_s_fm, &
-                                                g_surf_cache=g_surf_nonequiv(ispin))
-                     IF (negf_control%disable_cache) &
-                        CALL green_functions_cache_release(g_surf_nonequiv(ispin))
-                  END IF
-               END DO
-
-               IF (nspins == 1) CALL cp_fm_scale(2.0_dp, rho_ao_new_fm(1))
-
-               nelectrons = 0.0_dp
-               nelectrons_diff = 0.0_dp
-               DO ispin = 1, nspins
-                  CALL cp_fm_trace(rho_ao_new_fm(ispin), matrix_s_fm, trace)
-                  nelectrons = nelectrons + trace
-
-                  ! rho_ao_delta_fm contains the original (non-mixed) density matrix from the previous iteration
-                  CALL cp_fm_scale_and_add(1.0_dp, rho_ao_delta_fm(ispin), -1.0_dp, rho_ao_new_fm(ispin))
-                  CALL cp_fm_trace(rho_ao_delta_fm(ispin), matrix_s_fm, trace)
-                  nelectrons_diff = nelectrons_diff + trace
-
-                  ! rho_ao_new_fm -> rho_ao_delta_fm
-                  CALL cp_fm_to_fm(rho_ao_new_fm(ispin), rho_ao_delta_fm(ispin))
-               END DO
-
-               t2 = m_walltime()
-
-               IF (log_unit > 0) THEN
-                  WRITE (log_unit, '(T2,I5,T12,A,T32,F8.1,T43,F20.8,T65,ES15.5E2)') &
-                     iter_count, get_method_description_string(stats, negf_control%integr_method), &
-                     t2 - t1, -1.0_dp*nelectrons, nelectrons_diff
-               END IF
-
-               IF (ABS(nelectrons_diff) < negf_control%conv_scf) EXIT
-
-               t1 = t2
-
-               ! mix density matrices
-               IF (negf_env%mixing_method == direct_mixing_nr) THEN
-                  DO image = 1, nimages
-                     DO ispin = 1, nspins
-                        CALL dbcsr_copy(matrix_b=rho_ao_new_kp(ispin, image)%matrix, &
-                                        matrix_a=rho_ao_initial_kp(ispin, image)%matrix)
-                     END DO
-                  END DO
-
-                  DO ispin = 1, nspins
-                     CALL negf_copy_fm_submat_to_dbcsr(fm=rho_ao_new_fm(ispin), &
-                                                       matrix=rho_ao_new_kp(ispin, 1)%matrix, &
-                                                       atomlist_row=negf_control%atomlist_S_screening, &
-                                                       atomlist_col=negf_control%atomlist_S_screening, &
-                                                       subsys=subsys)
-                  END DO
-
-                  CALL scf_env_density_mixing(rho_ao_new_kp, negf_env%mixing_storage, rho_ao_qs_kp, &
-                                              para_env, iter_delta, iter_count)
-
-                  DO image = 1, nimages
-                     DO ispin = 1, nspins
-                        CALL dbcsr_copy(rho_ao_qs_kp(ispin, image)%matrix, rho_ao_new_kp(ispin, image)%matrix)
-                     END DO
-                  END DO
-               ELSE
-                  ! store the updated density matrix directly into the variable 'rho_ao_qs_kp'
-                  ! (which is qs_env%rho%rho_ao_kp); density mixing will be done on an inverse-space grid
-                  DO image = 1, nimages
-                     DO ispin = 1, nspins
-                        CALL dbcsr_copy(matrix_b=rho_ao_qs_kp(ispin, image)%matrix, &
-                                        matrix_a=rho_ao_initial_kp(ispin, image)%matrix)
-                     END DO
-                  END DO
-
-                  DO ispin = 1, nspins
-                     CALL negf_copy_fm_submat_to_dbcsr(fm=rho_ao_new_fm(ispin), &
-                                                       matrix=rho_ao_qs_kp(ispin, 1)%matrix, &
-                                                       atomlist_row=negf_control%atomlist_S_screening, &
-                                                       atomlist_col=negf_control%atomlist_S_screening, &
-                                                       subsys=subsys)
-                  END DO
-               END IF
-
-               CALL qs_rho_update_rho(rho_struct, qs_env=qs_env)
-
-               IF (negf_env%mixing_method >= gspace_mixing_nr) THEN
-                  CALL gspace_mixing(qs_env, negf_env%mixing_method, negf_env%mixing_storage, &
-                                     rho_struct, para_env, iter_count)
-               END IF
-
-               ! update KS-matrix
-               CALL qs_ks_build_kohn_sham_matrix(qs_env, calculate_forces=.FALSE., just_energy=.FALSE.)
-
-               ! extract blocks from the updated Kohn-Sham matrix
-               DO ispin = 1, nspins
-                  CALL negf_copy_sym_dbcsr_to_fm_submat(matrix=matrix_ks_qs_kp(ispin, 1)%matrix, &
-                                                        fm=negf_env%h_s(ispin), &
-                                                        atomlist_row=negf_control%atomlist_S_screening, &
-                                                        atomlist_col=negf_control%atomlist_S_screening, &
-                                                        subsys=subsys, mpi_comm_global=para_env, &
-                                                        do_upper_diag=.TRUE., do_lower=.TRUE.)
-
-               END DO
-            END DO
-
-            IF (log_unit > 0) THEN
-               IF (iter_count <= negf_control%max_scf) THEN
-                  WRITE (log_unit, '(/,T11,1X,A,I0,A)') "*** NEGF run converged in ", iter_count, " iteration(s) ***"
-               ELSE
-                  WRITE (log_unit, '(/,T11,1X,A,I0,A)') "*** NEGF run did NOT converge after ", iter_count - 1, " iteration(s) ***"
-               END IF
-            END IF
-
-            DO ispin = nspins, 1, -1
+            ! closed contour: C-path
+            CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_new_fm(ispin), &
+                                        stats=stats, &
+                                        v_shift=v_shift, &
+                                        ignore_bias=.FALSE., &
+                                        negf_env=negf_env, &
+                                        negf_control=negf_control, &
+                                        sub_env=sub_env, &
+                                        ispin=ispin, &
+                                        base_contact=base_contact, &
+                                        integr_lbound=lbound_cpath, &
+                                        integr_ubound=ubound_cpath, &
+                                        matrix_s_global=matrix_s_fm, &
+                                        is_circular=.TRUE., &
+                                        g_surf_cache=g_surf_circular(ispin))
+            IF (negf_control%disable_cache) &
                CALL green_functions_cache_release(g_surf_circular(ispin))
+
+            ! closed contour: L-path
+            CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_new_fm(ispin), &
+                                        stats=stats, &
+                                        v_shift=v_shift, &
+                                        ignore_bias=.FALSE., &
+                                        negf_env=negf_env, &
+                                        negf_control=negf_control, &
+                                        sub_env=sub_env, &
+                                        ispin=ispin, &
+                                        base_contact=base_contact, &
+                                        integr_lbound=ubound_cpath, &
+                                        integr_ubound=ubound_lpath, &
+                                        matrix_s_global=matrix_s_fm, &
+                                        is_circular=.FALSE., &
+                                        g_surf_cache=g_surf_linear(ispin))
+            IF (negf_control%disable_cache) &
                CALL green_functions_cache_release(g_surf_linear(ispin))
-               CALL green_functions_cache_release(g_surf_nonequiv(ispin))
+
+            ! non-equilibrium part
+            delta = 0.0_dp
+            DO icontact = 1, ncontacts
+               IF (icontact /= base_contact) THEN
+                  delta = delta + ABS(negf_control%contacts(icontact)%v_external - &
+                                      negf_control%contacts(base_contact)%v_external) + &
+                          ABS(negf_control%contacts(icontact)%fermi_level - &
+                              negf_control%contacts(base_contact)%fermi_level) + &
+                          ABS(negf_control%contacts(icontact)%temperature - &
+                              negf_control%contacts(base_contact)%temperature)
+               END IF
             END DO
-            DEALLOCATE (g_surf_circular, g_surf_linear, g_surf_nonequiv)
+            IF (delta >= threshold) THEN
+               CALL negf_add_rho_nonequiv(rho_ao_fm=rho_ao_new_fm(ispin), &
+                                          stats=stats, &
+                                          v_shift=v_shift, &
+                                          negf_env=negf_env, &
+                                          negf_control=negf_control, &
+                                          sub_env=sub_env, &
+                                          ispin=ispin, &
+                                          base_contact=base_contact, &
+                                          matrix_s_global=matrix_s_fm, &
+                                          g_surf_cache=g_surf_nonequiv(ispin))
+               IF (negf_control%disable_cache) &
+                  CALL green_functions_cache_release(g_surf_nonequiv(ispin))
+            END IF
+         END DO
+
+         IF (nspins == 1) CALL cp_fm_scale(2.0_dp, rho_ao_new_fm(1))
+
+         nelectrons = 0.0_dp
+         nelectrons_diff = 0.0_dp
+         DO ispin = 1, nspins
+            CALL cp_fm_trace(rho_ao_new_fm(ispin), matrix_s_fm, trace)
+            nelectrons = nelectrons + trace
+
+            ! rho_ao_delta_fm contains the original (non-mixed) density matrix from the previous iteration
+            CALL cp_fm_scale_and_add(1.0_dp, rho_ao_delta_fm(ispin), -1.0_dp, rho_ao_new_fm(ispin))
+            CALL cp_fm_trace(rho_ao_delta_fm(ispin), matrix_s_fm, trace)
+            nelectrons_diff = nelectrons_diff + trace
+
+            ! rho_ao_new_fm -> rho_ao_delta_fm
+            CALL cp_fm_to_fm(rho_ao_new_fm(ispin), rho_ao_delta_fm(ispin))
+         END DO
+
+         t2 = m_walltime()
+
+         IF (log_unit > 0) THEN
+            WRITE (log_unit, '(T2,I5,T12,A,T32,F8.1,T43,F20.8,T65,ES15.5E2)') &
+               iter_count, get_method_description_string(stats, negf_control%integr_method), &
+               t2 - t1, -1.0_dp*nelectrons, nelectrons_diff
          END IF
+
+         IF (ABS(nelectrons_diff) < negf_control%conv_scf) EXIT
+
+         t1 = t2
+
+         ! mix density matrices
+         IF (negf_env%mixing_method == direct_mixing_nr) THEN
+            DO image = 1, nimages
+               DO ispin = 1, nspins
+                  CALL dbcsr_copy(matrix_b=rho_ao_new_kp(ispin, image)%matrix, &
+                                  matrix_a=rho_ao_initial_kp(ispin, image)%matrix)
+               END DO
+            END DO
+
+            DO ispin = 1, nspins
+               CALL negf_copy_fm_submat_to_dbcsr(fm=rho_ao_new_fm(ispin), &
+                                                 matrix=rho_ao_new_kp(ispin, 1)%matrix, &
+                                                 atomlist_row=negf_control%atomlist_S_screening, &
+                                                 atomlist_col=negf_control%atomlist_S_screening, &
+                                                 subsys=subsys)
+            END DO
+
+            CALL scf_env_density_mixing(rho_ao_new_kp, negf_env%mixing_storage, rho_ao_qs_kp, &
+                                        para_env, iter_delta, iter_count)
+
+            DO image = 1, nimages
+               DO ispin = 1, nspins
+                  CALL dbcsr_copy(rho_ao_qs_kp(ispin, image)%matrix, rho_ao_new_kp(ispin, image)%matrix)
+               END DO
+            END DO
+         ELSE
+            ! store the updated density matrix directly into the variable 'rho_ao_qs_kp'
+            ! (which is qs_env%rho%rho_ao_kp); density mixing will be done on an inverse-space grid
+            DO image = 1, nimages
+               DO ispin = 1, nspins
+                  CALL dbcsr_copy(matrix_b=rho_ao_qs_kp(ispin, image)%matrix, &
+                                  matrix_a=rho_ao_initial_kp(ispin, image)%matrix)
+               END DO
+            END DO
+
+            DO ispin = 1, nspins
+               CALL negf_copy_fm_submat_to_dbcsr(fm=rho_ao_new_fm(ispin), &
+                                                 matrix=rho_ao_qs_kp(ispin, 1)%matrix, &
+                                                 atomlist_row=negf_control%atomlist_S_screening, &
+                                                 atomlist_col=negf_control%atomlist_S_screening, &
+                                                 subsys=subsys)
+            END DO
+         END IF
+
+         CALL qs_rho_update_rho(rho_struct, qs_env=qs_env)
+
+         IF (negf_env%mixing_method >= gspace_mixing_nr) THEN
+            CALL gspace_mixing(qs_env, negf_env%mixing_method, negf_env%mixing_storage, &
+                               rho_struct, para_env, iter_count)
+         END IF
+
+         ! update KS-matrix
+         CALL qs_ks_build_kohn_sham_matrix(qs_env, calculate_forces=.FALSE., just_energy=.FALSE.)
+
+         ! extract blocks from the updated Kohn-Sham matrix
+         DO ispin = 1, nspins
+            CALL negf_copy_sym_dbcsr_to_fm_submat(matrix=matrix_ks_qs_kp(ispin, 1)%matrix, &
+                                                  fm=negf_env%h_s(ispin), &
+                                                  atomlist_row=negf_control%atomlist_S_screening, &
+                                                  atomlist_col=negf_control%atomlist_S_screening, &
+                                                  subsys=subsys, mpi_comm_global=para_env, &
+                                                  do_upper_diag=.TRUE., do_lower=.TRUE.)
+
+         END DO
       END DO
+
+      !--------------------------------------------------------------------------------------!
+
+      IF (log_unit > 0) THEN
+         IF (iter_count <= negf_control%max_scf) THEN
+            WRITE (log_unit, '(/,T11,1X,A,I0,A)') "*** NEGF run converged in ", iter_count, " iteration(s) ***"
+         ELSE
+            WRITE (log_unit, '(/,T11,1X,A,I0,A)') "*** NEGF run did NOT converge after ", iter_count - 1, " iteration(s) ***"
+         END IF
+      END IF
+
+      DO ispin = nspins, 1, -1
+         CALL green_functions_cache_release(g_surf_circular(ispin))
+         CALL green_functions_cache_release(g_surf_linear(ispin))
+         CALL green_functions_cache_release(g_surf_nonequiv(ispin))
+      END DO
+      DEALLOCATE (g_surf_circular, g_surf_linear, g_surf_nonequiv)
 
       CALL cp_fm_release(rho_ao_new_fm)
       CALL cp_fm_release(rho_ao_delta_fm)
@@ -1321,7 +1396,7 @@ CONTAINS
          END IF
          CALL cp_cfm_create(g_surf(ipoint), fm_struct)
 
-         CALL do_sancho(g_surf(ipoint), omega(ipoint) - v_external, &
+         CALL do_sancho(g_surf(ipoint), omega(ipoint) + v_external, &
                         h0, s0, h1, s1, conv, transp, work)
       END DO
 
@@ -1528,7 +1603,7 @@ CONTAINS
                   IF (.NOT. ignore_bias) v_external = negf_control%contacts(icontact)%v_external
 
                   CALL negf_contact_self_energy(self_energy_c=self_energy_contacts(icontact), &
-                                                omega=omega(ipoint) - v_external, &
+                                                omega=omega(ipoint) + v_external, &
                                                 g_surf_c=g_surf_contacts(icontact, ipoint), &
                                                 h_sc0=negf_env%h_sc(ispin, icontact), &
                                                 s_sc0=negf_env%s_sc(icontact), &
@@ -1673,7 +1748,6 @@ CONTAINS
       IF (PRESENT(gret_gamma_gadv)) THEN
          IF (sub_env%ngroups > 1) THEN
             NULLIFY (para_env)
-
             pnt2: DO ipoint = 1, npoints
                DO icontact = 1, ncontacts
                   IF (ASSOCIATED(gret_gamma_gadv(icontact, ipoint)%matrix_struct)) THEN
@@ -1886,7 +1960,7 @@ CONTAINS
          mu_base = negf_control%contacts(base_contact)%fermi_level
          v_external = 0.0_dp
       ELSE
-         mu_base = negf_control%contacts(base_contact)%fermi_level + negf_control%contacts(base_contact)%v_external
+         mu_base = negf_control%contacts(base_contact)%fermi_level - negf_control%contacts(base_contact)%v_external
       END IF
 
       pi_temperature = pi*temperature
@@ -2034,7 +2108,7 @@ CONTAINS
          mu_base = negf_control%contacts(base_contact)%fermi_level
          v_external = 0.0_dp
       ELSE
-         mu_base = negf_control%contacts(base_contact)%fermi_level + negf_control%contacts(base_contact)%v_external
+         mu_base = negf_control%contacts(base_contact)%fermi_level - negf_control%contacts(base_contact)%v_external
       END IF
 
       min_points = negf_control%integr_min_points
@@ -2351,6 +2425,7 @@ CONTAINS
       TYPE(cp_cfm_type), ALLOCATABLE, DIMENSION(:, :)    :: zdata
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_fm_type)                                   :: integral_real
+      TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(simpsonrule_type)                             :: sr_env
 
       CALL timeset(routineN, handle)
@@ -2363,7 +2438,7 @@ CONTAINS
          CPABORT("Poisson solver does not support the general NEGF setup (>2 contacts).")
       END IF
 
-      mu_base = negf_control%contacts(base_contact)%fermi_level + negf_control%contacts(base_contact)%v_external
+      mu_base = negf_control%contacts(base_contact)%fermi_level - negf_control%contacts(base_contact)%v_external
       min_points = negf_control%integr_min_points
       max_points = negf_control%integr_max_points
       temperature_base = negf_control%contacts(base_contact)%temperature
@@ -2377,7 +2452,7 @@ CONTAINS
 
       DO icontact = 1, ncontacts
          IF (icontact /= base_contact) THEN
-            mu_contact = negf_control%contacts(icontact)%fermi_level + negf_control%contacts(icontact)%v_external
+            mu_contact = negf_control%contacts(icontact)%fermi_level - negf_control%contacts(icontact)%v_external
             temperature_contact = negf_control%contacts(icontact)%temperature
 
             integr_lbound = CMPLX(MIN(mu_base + ln_conv_density*temperature_base, &
@@ -2394,9 +2469,8 @@ CONTAINS
             END IF
             npoints_total = 0
 
-            CALL cp_fm_get_info(rho_ao_fm, matrix_struct=fm_struct)
-
-            ALLOCATE (xnodes(npoints), zdata(ncontacts, npoints))
+            ALLOCATE (xnodes(npoints))
+            CALL cp_fm_get_info(rho_ao_fm, para_env=para_env, matrix_struct=fm_struct)
 
             IF (do_surface_green) THEN
                CALL simpsonrule_init(sr_env, xnodes, npoints, integr_lbound, integr_ubound, &
@@ -2407,6 +2481,7 @@ CONTAINS
             END IF
 
             DO WHILE (npoints > 0 .AND. npoints_total < max_points)
+
                IF (do_surface_green) THEN
                   CALL green_functions_cache_expand(g_surf_cache, ncontacts, npoints)
 
@@ -2423,7 +2498,10 @@ CONTAINS
                   END DO
                END IF
 
+               ALLOCATE (zdata(ncontacts, npoints))
+
                DO ipoint = 1, npoints
+                  CALL cp_cfm_create(zdata(base_contact, ipoint), fm_struct)
                   CALL cp_cfm_create(zdata(icontact, ipoint), fm_struct)
                END DO
 
@@ -2449,6 +2527,12 @@ CONTAINS
 
                CALL simpsonrule_refine_integral(sr_env, zdata(icontact, 1:npoints))
 
+               DO ipoint = 1, npoints
+                  CALL cp_cfm_release(zdata(base_contact, ipoint))
+                  CALL cp_cfm_release(zdata(icontact, ipoint))
+               END DO
+               DEALLOCATE (zdata)
+
                IF (sr_env%error <= conv_integr) EXIT
 
                ! not enought cached points to achieve target accuracy
@@ -2459,6 +2543,7 @@ CONTAINS
                IF (npoints > SIZE(xnodes)) npoints = SIZE(xnodes)
 
                CALL simpsonrule_get_next_nodes(sr_env, xnodes, npoints)
+
             END DO
 
             CALL cp_fm_create(integral_real, fm_struct)
@@ -2468,7 +2553,7 @@ CONTAINS
 
             CALL cp_fm_release(integral_real)
 
-            DEALLOCATE (xnodes, zdata)
+            DEALLOCATE (xnodes)
 
             stats%error = stats%error + sr_env%error*0.5_dp/pi
             stats%npoints = stats%npoints + npoints_total
@@ -2581,9 +2666,9 @@ CONTAINS
       CPASSERT(contact_id1 /= contact_id2)
 
       v_contact1 = negf_control%contacts(contact_id1)%v_external
-      mu_contact1 = negf_control%contacts(contact_id1)%fermi_level + v_contact1
+      mu_contact1 = negf_control%contacts(contact_id1)%fermi_level - v_contact1
       v_contact2 = negf_control%contacts(contact_id2)%v_external
-      mu_contact2 = negf_control%contacts(contact_id2)%fermi_level + v_contact2
+      mu_contact2 = negf_control%contacts(contact_id2)%fermi_level - v_contact2
 
       IF (ABS(mu_contact1 - mu_contact2) < threshold) THEN
          CALL timestop(handle)
@@ -2671,7 +2756,7 @@ CONTAINS
 
       CALL cp_cfm_get_submatrix(sr_env%integral, transmission)
 
-      current = 0.5_dp/pi*REAL(transmission(1, 1), kind=dp)*e_charge/seconds
+      current = -0.5_dp/pi*REAL(transmission(1, 1), kind=dp)*e_charge/seconds
 
       CALL cp_fm_release(weights)
       CALL cp_fm_struct_release(fm_struct_single)
@@ -2979,4 +3064,153 @@ CONTAINS
       DEALLOCATE (transm_coeff, xnodes)
       CALL timestop(handle)
    END SUBROUTINE negf_print_transmission
+
+! **************************************************************************************************
+!> \brief Print the initial info and Hamiltonian / overlap matrices.
+!> \param log_unit ...
+!> \param negf_env ...
+!> \param sub_env ...
+!> \param negf_control ...
+!> \param dft_control ...
+!> \param verbose_output ...
+!> \param debug_output ...
+!> \par History
+!>    * 11.2025 created [Dmitry Ryndyk]
+! **************************************************************************************************
+   SUBROUTINE negf_output_initial(log_unit, negf_env, sub_env, negf_control, dft_control, verbose_output, &
+                                  debug_output)
+      INTEGER, INTENT(in)                                :: log_unit
+      TYPE(negf_env_type), INTENT(in)                    :: negf_env
+      TYPE(negf_subgroup_env_type), INTENT(in)           :: sub_env
+      TYPE(negf_control_type), POINTER                   :: negf_control
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      LOGICAL, INTENT(in)                                :: verbose_output, debug_output
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'negf_output_initial'
+
+      CHARACTER(len=100)                                 :: sfmt
+      INTEGER                                            :: handle, i, icontact, j, k, n, nrow
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: target_m
+
+      CALL timeset(routineN, handle)
+
+      ! Electrodes
+      DO icontact = 1, SIZE(negf_control%contacts)
+         IF (log_unit > 0) THEN
+            WRITE (log_unit, "(/,' The electrode',I5)") icontact
+            WRITE (log_unit, "(  ' ------------------')")
+            WRITE (log_unit, "(' From the force environment:',I16)") negf_control%contacts(icontact)%force_env_index
+            WRITE (log_unit, "(' Number of atoms:',I27)") SIZE(negf_control%contacts(icontact)%atomlist_bulk)
+            IF (verbose_output) WRITE (log_unit, "(' Atoms belonging to a contact (from the entire system):')")
+            IF (verbose_output) WRITE (log_unit, "(16I5)") negf_control%contacts(icontact)%atomlist_bulk
+            WRITE (log_unit, "(' Number of atoms in a primary unit cell:',I4)") &
+               SIZE(negf_env%contacts(icontact)%atomlist_cell0)
+         END IF
+         IF (log_unit > 0 .AND. verbose_output) THEN
+            WRITE (log_unit, "(' Atoms belonging to a primary unit cell (from the entire system):')")
+            WRITE (log_unit, "(16I5)") negf_env%contacts(icontact)%atomlist_cell0
+            WRITE (log_unit, "(' Direction of an electrode: ',I16)") negf_env%contacts(icontact)%direction_axis
+         END IF
+         ! print the electrode Hamiltonians for check and debuging
+         IF (debug_output) THEN
+            CALL cp_fm_get_info(negf_env%contacts(icontact)%s_00, nrow_global=nrow)
+            ALLOCATE (target_m(nrow, nrow))
+            IF (log_unit > 0) WRITE (log_unit, "(' The number of atomic orbitals:',I13)") nrow
+            DO k = 1, dft_control%nspins
+               CALL cp_fm_get_submatrix(negf_env%contacts(icontact)%h_00(k), target_m)
+               IF (log_unit > 0) THEN
+                  WRITE (sfmt, "('(',i0,'(E15.5))')") nrow
+                  WRITE (log_unit, "(' The H_00 electrode Hamiltonian for spin',I2)") k
+                  DO i = 1, nrow
+                     WRITE (log_unit, sfmt) (target_m(i, j), j=1, nrow)
+                  END DO
+               END IF
+               CALL cp_fm_get_submatrix(negf_env%contacts(icontact)%h_01(k), target_m)
+               IF (log_unit > 0) THEN
+                  WRITE (log_unit, "(' The H_01 electrode Hamiltonian for spin',I2)") k
+                  DO i = 1, nrow
+                     WRITE (log_unit, sfmt) (target_m(i, j), j=1, nrow)
+                  END DO
+               END IF
+            END DO
+            CALL cp_fm_get_submatrix(negf_env%contacts(icontact)%s_00, target_m)
+            IF (log_unit > 0) THEN
+               WRITE (log_unit, "(' The S_00 overlap matrix')")
+               DO i = 1, nrow
+                  WRITE (log_unit, sfmt) (target_m(i, j), j=1, nrow)
+               END DO
+            END IF
+            CALL cp_fm_get_submatrix(negf_env%contacts(icontact)%s_01, target_m)
+            IF (log_unit > 0) THEN
+               WRITE (log_unit, "(' The S_01 overlap matrix')")
+               DO i = 1, nrow
+                  WRITE (log_unit, sfmt) (target_m(i, j), j=1, nrow)
+               END DO
+            END IF
+            DEALLOCATE (target_m)
+         END IF
+      END DO
+
+      ! Scattering region and contacts
+      IF (log_unit > 0) THEN
+         WRITE (log_unit, "(/,' The full scattering region')")
+         WRITE (log_unit, "(  ' --------------------------')")
+         WRITE (log_unit, "(' Number of atoms:',I27)") SIZE(negf_control%atomlist_S_screening)
+         IF (verbose_output) WRITE (log_unit, "(' Atoms belonging to a full scattering region:')")
+         IF (verbose_output) WRITE (log_unit, "(16I5)") negf_control%atomlist_S_screening
+      END IF
+      ! print the full scattering region Hamiltonians for check and debuging
+      IF (debug_output) THEN
+         CALL cp_fm_get_info(negf_env%s_s, nrow_global=n)
+         ALLOCATE (target_m(n, n))
+         WRITE (sfmt, "('(',i0,'(E15.5))')") n
+         IF (log_unit > 0) WRITE (log_unit, "(' The number of atomic orbitals:',I14)") n
+         DO k = 1, dft_control%nspins
+            IF (log_unit > 0) WRITE (log_unit, "(' The H_s Hamiltonian for spin',I2)") k
+            CALL cp_fm_get_submatrix(negf_env%h_s(k), target_m)
+            DO i = 1, n
+               IF (log_unit > 0) WRITE (log_unit, sfmt) (target_m(i, j), j=1, n)
+            END DO
+         END DO
+         IF (log_unit > 0) WRITE (log_unit, "(' The S_s overlap matrix')")
+         CALL cp_fm_get_submatrix(negf_env%s_s, target_m)
+         DO i = 1, n
+            IF (log_unit > 0) WRITE (log_unit, sfmt) (target_m(i, j), j=1, n)
+         END DO
+         DEALLOCATE (target_m)
+         IF (log_unit > 0) WRITE (log_unit, "(/,' Scattering region - electrode contacts')")
+         IF (log_unit > 0) WRITE (log_unit, "(  ' ---------------------------------------')")
+         ALLOCATE (target_m(n, nrow))
+         DO icontact = 1, SIZE(negf_control%contacts)
+            IF (log_unit > 0) WRITE (log_unit, "(/,' The contact',I5)") icontact
+            IF (log_unit > 0) WRITE (log_unit, "(  ' ----------------')")
+            DO k = 1, dft_control%nspins
+               CALL cp_fm_get_submatrix(negf_env%h_sc(k, icontact), target_m)
+               IF (log_unit > 0) THEN
+                  WRITE (log_unit, "(' The H_sc Hamiltonian for spin',I2)") k
+                  DO i = 1, n
+                     WRITE (log_unit, sfmt) (target_m(i, j), j=1, nrow)
+                  END DO
+               END IF
+            END DO
+            CALL cp_fm_get_submatrix(negf_env%s_sc(icontact), target_m)
+            IF (log_unit > 0) THEN
+               WRITE (log_unit, "(' The S_sc overlap matrix')")
+               DO i = 1, n
+                  WRITE (log_unit, sfmt) (target_m(i, j), j=1, nrow)
+               END DO
+            END IF
+         END DO
+         DEALLOCATE (target_m)
+      END IF
+
+      IF (log_unit > 0) THEN
+         WRITE (log_unit, "(/,' NEGF| Number of MPI processes:                     ',I5)") sub_env%mpi_comm_global%num_pe
+         WRITE (log_unit, "(' NEGF| Maximal number of processes per energy point:',I5)") negf_control%nprocs
+         WRITE (log_unit, "(' NEGF| Number of parallel MPI (energy) groups:      ',I5)") sub_env%ngroups
+      END IF
+
+      CALL timestop(handle)
+   END SUBROUTINE negf_output_initial
+
 END MODULE negf_methods

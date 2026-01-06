@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -15,7 +15,8 @@
 MODULE cp_fm_types
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_blacs_types,                  ONLY: cp_blacs_type
-   USE cp_fm_struct,                    ONLY: cp_fm_struct_equivalent,&
+   USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
+                                              cp_fm_struct_equivalent,&
                                               cp_fm_struct_get,&
                                               cp_fm_struct_release,&
                                               cp_fm_struct_retain,&
@@ -42,7 +43,7 @@ MODULE cp_fm_types
    LOGICAL, PARAMETER          :: debug_this_module = .TRUE.
    INTEGER, PARAMETER :: src_tag = 3, dest_tag = 5, send_tag = 7, recv_tag = 11
 
-   INTEGER, PRIVATE :: mm_type = 1
+   INTEGER, PRIVATE :: cp_fm_mm_type = 1
 
    PUBLIC :: cp_fm_type, &
              cp_fm_p_type, copy_info_type
@@ -55,6 +56,7 @@ MODULE cp_fm_types
              cp_fm_get_element, &
              cp_fm_get_diag, & ! get diagonal
              cp_fm_set_all, & ! set all elements and diagonal
+             cp_fm_set_all_submatrix, & ! set a submatrix to a given value
              cp_fm_set_submatrix, & ! set a submatrix to given values
              cp_fm_get_submatrix, & ! get a submatrix of given values
              cp_fm_init_random, &
@@ -154,54 +156,80 @@ CONTAINS
 !> \param matrix_struct the structure of matrix
 !> \param name ...
 !> \param use_sp ...
+!> \param nrow ...
+!> \param ncol ...
+!> \param set_zero ...
 !> \par History
 !>      08.2002 created [fawzi]
 !> \author Fawzi Mohamed
 !> \note
 !>      preferred allocation routine
 ! **************************************************************************************************
-   SUBROUTINE cp_fm_create(matrix, matrix_struct, name, use_sp)
+   SUBROUTINE cp_fm_create(matrix, matrix_struct, name, use_sp, nrow, ncol, set_zero)
       TYPE(cp_fm_type), INTENT(OUT)                      :: matrix
       TYPE(cp_fm_struct_type), INTENT(IN), TARGET        :: matrix_struct
-      CHARACTER(len=*), INTENT(in), OPTIONAL             :: name
+      CHARACTER(LEN=*), INTENT(in), OPTIONAL             :: name
       LOGICAL, INTENT(in), OPTIONAL                      :: use_sp
+      INTEGER, INTENT(IN), OPTIONAL                      :: nrow, ncol
+      LOGICAL, INTENT(in), OPTIONAL                      :: set_zero
 
-      CHARACTER(len=*), PARAMETER                        :: routineN = 'cp_fm_create'
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'cp_fm_create'
 
-      INTEGER                                            :: handle, ncol_local, npcol, nprow, &
-                                                            nrow_local
+      INTEGER                                            :: handle, ncol_global, ncol_local, &
+                                                            nrow_global, nrow_local
       TYPE(cp_blacs_env_type), POINTER                   :: context
+      TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
 
       CALL timeset(routineN, handle)
 
-      context => matrix_struct%context
-      matrix%matrix_struct => matrix_struct
-      CALL cp_fm_struct_retain(matrix%matrix_struct)
+      IF (PRESENT(nrow) .OR. PRESENT(ncol)) THEN
+         CALL cp_fm_struct_get(matrix_struct, nrow_global=nrow_global, ncol_global=ncol_global)
+         IF (PRESENT(nrow)) nrow_global = nrow
+         IF (PRESENT(ncol)) ncol_global = ncol
+         CALL cp_fm_struct_create(fm_struct, template_fmstruct=matrix_struct, &
+                                  nrow_global=nrow_global, ncol_global=ncol_global)
+
+         context => fm_struct%context
+         matrix%matrix_struct => fm_struct
+         CALL cp_fm_struct_retain(matrix%matrix_struct)
+
+         nrow_local = fm_struct%local_leading_dimension
+         ncol_local = MAX(1, fm_struct%ncol_locals(context%mepos(2)))
+
+         CALL cp_fm_struct_release(fm_struct)
+      ELSE
+
+         context => matrix_struct%context
+         matrix%matrix_struct => matrix_struct
+         CALL cp_fm_struct_retain(matrix%matrix_struct)
+
+         ! OK, we allocate here at least a 1 x 1 matrix
+         ! this must (and is) compatible with the descinit call
+         ! in cp_fm_struct
+         nrow_local = matrix_struct%local_leading_dimension
+         ncol_local = MAX(1, matrix_struct%ncol_locals(context%mepos(2)))
+      END IF
 
       matrix%use_sp = .FALSE.
       IF (PRESENT(use_sp)) matrix%use_sp = use_sp
 
-      nprow = context%num_pe(1)
-      npcol = context%num_pe(2)
       NULLIFY (matrix%local_data)
       NULLIFY (matrix%local_data_sp)
 
-      ! OK, we allocate here at least a 1 x 1 matrix
-      ! this must (and is) compatible with the descinit call
-      ! in cp_fm_struct
-      nrow_local = matrix_struct%local_leading_dimension
-      ncol_local = MAX(1, matrix_struct%ncol_locals(context%mepos(2)))
       IF (matrix%use_sp) THEN
          ALLOCATE (matrix%local_data_sp(nrow_local, ncol_local))
       ELSE
          ALLOCATE (matrix%local_data(nrow_local, ncol_local))
       END IF
 
-      ! JVDV we should remove this, as it is up to the user to zero afterwards
-      IF (matrix%use_sp) THEN
-         matrix%local_data_sp(1:nrow_local, 1:ncol_local) = 0.0_sp
-      ELSE
-         matrix%local_data(1:nrow_local, 1:ncol_local) = 0.0_dp
+      IF (PRESENT(set_zero)) THEN
+         IF (set_zero) THEN
+            IF (matrix%use_sp) THEN
+               matrix%local_data_sp(1:nrow_local, 1:ncol_local) = 0.0_sp
+            ELSE
+               matrix%local_data(1:nrow_local, 1:ncol_local) = 0.0_dp
+            END IF
+         END IF
       END IF
 
       IF (PRESENT(name)) THEN
@@ -445,7 +473,7 @@ CONTAINS
       TYPE(cp_fm_type), INTENT(IN)                       :: matrix
       INTEGER, INTENT(IN), OPTIONAL                      :: ncol, start_col
 
-      CHARACTER(len=*), PARAMETER                        :: routineN = 'cp_fm_init_random'
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'cp_fm_init_random'
 
       INTEGER :: handle, icol_global, icol_local, irow_local, my_ncol, my_start_col, ncol_global, &
          ncol_local, nrow_global, nrow_local
@@ -454,7 +482,7 @@ CONTAINS
       REAL(KIND=dp), CONTIGUOUS, DIMENSION(:, :), &
          POINTER                                         :: local_data
       REAL(KIND=dp), DIMENSION(3, 2), SAVE :: &
-         seed = RESHAPE((/1.0_dp, 2.0_dp, 3.0_dp, 4.0_dp, 5.0_dp, 6.0_dp/), (/3, 2/))
+         seed = RESHAPE([1.0_dp, 2.0_dp, 3.0_dp, 4.0_dp, 5.0_dp, 6.0_dp], [3, 2])
       TYPE(rng_stream_type)                              :: rng
 
       CALL timeset(routineN, handle)
@@ -530,7 +558,7 @@ CONTAINS
       REAL(KIND=dp), INTENT(IN)                          :: alpha
       REAL(KIND=dp), INTENT(IN), OPTIONAL                :: beta
 
-      CHARACTER(len=*), PARAMETER                        :: routineN = 'cp_fm_set_all'
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'cp_fm_set_all'
 
       INTEGER                                            :: handle, i, n
 
@@ -805,7 +833,7 @@ CONTAINS
       IF (al == 1.0 .AND. be == 0.0) THEN
          DO j = 1, ncol_local
             this_col = col_indices(j) - j0 + 1
-            IF (this_col .GE. 1 .AND. this_col .LE. ncol) THEN
+            IF (this_col >= 1 .AND. this_col <= ncol) THEN
                IF (tr_a) THEN
                   IF (i0 == 1 .AND. nrow_global == nrow) THEN
                      DO i = 1, nrow_local
@@ -838,7 +866,7 @@ CONTAINS
       ELSE
          DO j = 1, ncol_local
             this_col = col_indices(j) - j0 + 1
-            IF (this_col .GE. 1 .AND. this_col .LE. ncol) THEN
+            IF (this_col >= 1 .AND. this_col <= ncol) THEN
                IF (tr_a) THEN
                   DO i = 1, nrow_local
                      this_row = row_indices(i) - i0 + 1
@@ -863,6 +891,56 @@ CONTAINS
       ! CALL timestop(handle)
 
    END SUBROUTINE cp_fm_set_submatrix
+
+! **************************************************************************************************
+!> \brief sets a submatrix of a full matrix to a given value
+!>       fm(start_row:start_row+n_rows,start_col:start_col+n_cols) = value
+!> \param fm the full to change
+!> \param new_value  ...
+!> \param start_row the starting row of matrix
+!> \param start_col the starting col of matrix
+!> \param n_rows the number of rows to change
+!> \param n_cols the number of columns to change
+!> \par History
+!>      07.2002 created borrowing from Joost's blacs_replicated_copy [fawzi]
+!>      12.2025 created from cp_fm_set_submatrix
+!> \author JGH
+! **************************************************************************************************
+   SUBROUTINE cp_fm_set_all_submatrix(fm, new_value, start_row, start_col, n_rows, n_cols)
+      TYPE(cp_fm_type), INTENT(IN)                       :: fm
+      REAL(KIND=dp), INTENT(in)                          :: new_value
+      INTEGER, INTENT(in)                                :: start_row, start_col, n_rows, n_cols
+
+      INTEGER                                            :: i, i0, j, j0, ncol_global, ncol_local, &
+                                                            nrow_global, nrow_local, this_col, &
+                                                            this_row
+      INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: full_block
+
+      CPASSERT(.NOT. fm%use_sp)
+
+      full_block => fm%local_data
+
+      CALL cp_fm_get_info(matrix=fm, &
+                          nrow_global=nrow_global, ncol_global=ncol_global, &
+                          nrow_local=nrow_local, ncol_local=ncol_local, &
+                          row_indices=row_indices, col_indices=col_indices)
+
+      i0 = start_row
+      j0 = start_col
+      DO j = 1, ncol_local
+         this_col = col_indices(j) - j0 + 1
+         IF (this_col >= 1 .AND. this_col <= n_cols) THEN
+            DO i = 1, nrow_local
+               this_row = row_indices(i) - i0 + 1
+               IF (this_row >= 1 .AND. this_row <= n_rows) THEN
+                  full_block(i, j) = new_value
+               END IF
+            END DO
+         END IF
+      END DO
+
+   END SUBROUTINE cp_fm_set_all_submatrix
 
 ! **************************************************************************************************
 !> \brief gets a submatrix of a full matrix
@@ -896,7 +974,7 @@ CONTAINS
       INTEGER, INTENT(in), OPTIONAL                      :: start_row, start_col, n_rows, n_cols
       LOGICAL, INTENT(in), OPTIONAL                      :: transpose
 
-      CHARACTER(len=*), PARAMETER :: routineN = 'cp_fm_get_submatrix'
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_fm_get_submatrix'
 
       INTEGER                                            :: handle, i, i0, j, j0, ncol, ncol_global, &
                                                             ncol_local, nrow, nrow_global, &
@@ -942,7 +1020,7 @@ CONTAINS
 
       DO j = 1, ncol_local
          this_col = col_indices(j) - j0 + 1
-         IF (this_col .GE. 1 .AND. this_col .LE. ncol) THEN
+         IF (this_col >= 1 .AND. this_col <= ncol) THEN
             IF (tr_a) THEN
                IF (i0 == 1 .AND. nrow_global == nrow) THEN
                   DO i = 1, nrow_local
@@ -1058,7 +1136,7 @@ CONTAINS
       REAL(KIND=dp), INTENT(OUT)                         :: a_max
       INTEGER, INTENT(OUT), OPTIONAL                     :: ir_max, ic_max
 
-      CHARACTER(len=*), PARAMETER                        :: routineN = 'cp_fm_maxabsval'
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'cp_fm_maxabsval'
 
       INTEGER                                            :: handle, i, ic_max_local, ir_max_local, &
                                                             j, mepos, ncol_local, nrow_local, &
@@ -1159,7 +1237,7 @@ CONTAINS
       TYPE(cp_fm_type), INTENT(IN)                       :: matrix
       REAL(KIND=dp), INTENT(OUT)                         :: a_max
 
-      CHARACTER(len=*), PARAMETER :: routineN = 'cp_fm_maxabsrownorm'
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_fm_maxabsrownorm'
 
       INTEGER                                            :: handle, i, j, ncol_local, nrow_global, &
                                                             nrow_local
@@ -1189,7 +1267,7 @@ CONTAINS
       DEALLOCATE (values)
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE cp_fm_maxabsrownorm
 
 ! **************************************************************************************************
 !> \brief find the inorm of each column norm_{j}= sqrt( \sum_{i} A_{ij}*A_{ij} )
@@ -1200,7 +1278,7 @@ CONTAINS
       TYPE(cp_fm_type), INTENT(IN)                       :: matrix
       REAL(KIND=dp), DIMENSION(:), INTENT(OUT)           :: norm_array
 
-      CHARACTER(len=*), PARAMETER                        :: routineN = 'cp_fm_vectorsnorm'
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'cp_fm_vectorsnorm'
 
       INTEGER                                            :: handle, i, j, ncol_global, ncol_local, &
                                                             nrow_local
@@ -1227,7 +1305,7 @@ CONTAINS
       norm_array = SQRT(norm_array)
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE cp_fm_vectorsnorm
 
 ! **************************************************************************************************
 !> \brief summing up all the elements along the matrix's i-th index
@@ -1246,7 +1324,7 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(:), INTENT(OUT)           :: sum_array
       CHARACTER(LEN=1), INTENT(IN), OPTIONAL             :: dir
 
-      CHARACTER(len=*), PARAMETER                        :: routineN = 'cp_fm_vectorssum'
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'cp_fm_vectorssum'
 
       INTEGER                                            :: handle, i, j, ncol_local, nrow_local
       INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
@@ -1292,7 +1370,7 @@ CONTAINS
       CALL matrix%matrix_struct%para_env%sum(sum_array)
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE cp_fm_vectorssum
 
 ! **************************************************************************************************
 !> \brief copy one identically sized matrix in the other
@@ -1421,11 +1499,12 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE cp_fm_to_fm_triangular(msource, mtarget, uplo)
 
-      TYPE(cp_fm_type), INTENT(IN)          :: msource, mtarget
-      CHARACTER(LEN=*), INTENT(IN)             :: uplo
+      TYPE(cp_fm_type), INTENT(IN)             :: msource, mtarget
+      CHARACTER(LEN=1), OPTIONAL, INTENT(IN)   :: uplo
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_fm_to_fm_triangular'
 
+      CHARACTER(LEN=1)                         :: myuplo
       INTEGER                                  :: handle, ncol, nrow
       REAL(KIND=dp), DIMENSION(:, :), POINTER  :: a, b
 #if defined(__parallel)
@@ -1433,6 +1512,9 @@ CONTAINS
 #endif
 
       CALL timeset(routineN, handle)
+
+      myuplo = 'U'
+      IF (PRESENT(uplo)) myuplo = uplo
 
       nrow = msource%matrix_struct%nrow_global
       ncol = msource%matrix_struct%ncol_global
@@ -1443,9 +1525,9 @@ CONTAINS
 #if defined(__parallel)
       desca(:) = msource%matrix_struct%descriptor(:)
       descb(:) = mtarget%matrix_struct%descriptor(:)
-      CALL pdlacpy(uplo, nrow, ncol, a(1, 1), 1, 1, desca, b(1, 1), 1, 1, descb)
+      CALL pdlacpy(myuplo, nrow, ncol, a(1, 1), 1, 1, desca, b(1, 1), 1, 1, descb)
 #else
-      CALL dlacpy(uplo, nrow, ncol, a(1, 1), nrow, b(1, 1), nrow)
+      CALL dlacpy(myuplo, nrow, ncol, a(1, 1), nrow, b(1, 1), nrow)
 #endif
 
       CALL timestop(handle)
@@ -1630,9 +1712,9 @@ CONTAINS
 
          CALL para_env%allgather(send_rank, all_ranks)
          IF (ASSOCIATED(recv_dist)) THEN
-            ALLOCATE (source2global(0:COUNT(all_ranks .NE. mp_proc_null) - 1))
+            ALLOCATE (source2global(0:COUNT(all_ranks /= mp_proc_null) - 1))
             DO i = 0, global_size - 1
-               IF (all_ranks(i) .NE. mp_proc_null) THEN
+               IF (all_ranks(i) /= mp_proc_null) THEN
                   source2global(all_ranks(i)) = i
                END IF
             END DO
@@ -1640,9 +1722,9 @@ CONTAINS
 
          CALL para_env%allgather(recv_rank, all_ranks)
          IF (ASSOCIATED(send_dist)) THEN
-            ALLOCATE (dest2global(0:COUNT(all_ranks .NE. mp_proc_null) - 1))
+            ALLOCATE (dest2global(0:COUNT(all_ranks /= mp_proc_null) - 1))
             DO i = 0, global_size - 1
-               IF (all_ranks(i) .NE. mp_proc_null) THEN
+               IF (all_ranks(i) /= mp_proc_null) THEN
                   dest2global(all_ranks(i)) = i
                END IF
             END DO
@@ -1663,17 +1745,17 @@ CONTAINS
          END IF
 
          IF (ASSOCIATED(send_dist)) THEN
-            IF ((send_rank .EQ. 0)) THEN
+            IF ((send_rank == 0)) THEN
                ! need to use separate buffers here in case this is actually global rank 0
-               src_block_tmp = (/send_dist%nrow_block, send_dist%ncol_block/)
+               src_block_tmp = [send_dist%nrow_block, send_dist%ncol_block]
                CALL para_env%isend(src_block_tmp, 0, send_req(1), tag=src_tag)
                CALL para_env%isend(send_dist%context%num_pe, 0, send_req(2), tag=src_tag)
             END IF
          END IF
 
          IF (ASSOCIATED(recv_dist)) THEN
-            IF ((recv_rank .EQ. 0)) THEN
-               dest_block_tmp = (/recv_dist%nrow_block, recv_dist%ncol_block/)
+            IF ((recv_rank == 0)) THEN
+               dest_block_tmp = [recv_dist%nrow_block, recv_dist%ncol_block]
                CALL para_env%isend(dest_block_tmp, 0, send_req(3), tag=dest_tag)
                CALL para_env%isend(recv_dist%context%num_pe, 0, send_req(4), tag=dest_tag)
             END IF
@@ -1690,13 +1772,13 @@ CONTAINS
          END IF
 
          IF (ASSOCIATED(send_dist)) THEN
-            IF ((send_rank .EQ. 0)) THEN
+            IF ((send_rank == 0)) THEN
                CALL para_env%isend(send_dist%context%blacs2mpi(:, :), 0, send_req(5), tag=src_tag)
             END IF
          END IF
 
          IF (ASSOCIATED(recv_dist)) THEN
-            IF ((recv_rank .EQ. 0)) THEN
+            IF ((recv_rank == 0)) THEN
                CALL para_env%isend(recv_dist%context%blacs2mpi(:, :), 0, send_req(6), tag=dest_tag)
             END IF
          END IF
@@ -1712,7 +1794,7 @@ CONTAINS
          CALL para_env%bcast(dest_num_pe, 0)
          info%src_num_pe(1:2) = src_num_pe(1:2)
          info%nblock_src(1:2) = src_block(1:2)
-         IF (global_rank .NE. 0) THEN
+         IF (global_rank /= 0) THEN
             ALLOCATE (info%src_blacs2mpi(0:src_num_pe(1) - 1, 0:src_num_pe(2) - 1), &
                       dest_blacs2mpi(0:dest_num_pe(1) - 1, 0:dest_num_pe(2) - 1) &
                       )
@@ -1769,9 +1851,9 @@ CONTAINS
             ! src_p/q now contains the process row/column ID that will send data to that row/column
 
             DO q = 0, src_num_pe(2) - 1
-               ncols = COUNT(src_q .EQ. q)
+               ncols = COUNT(src_q == q)
                DO p = 0, src_num_pe(1) - 1
-                  nrows = COUNT(src_p .EQ. p)
+                  nrows = COUNT(src_p == p)
                   ! Use the send_dist here as we are looking up the processes where the data comes from
                   recv_count(info%src_blacs2mpi(p, q)) = nrows*ncols
                END DO
@@ -1788,7 +1870,7 @@ CONTAINS
 
             ! Issue receive calls on ranks which expect data
             DO k = 0, send_size - 1
-               IF (recv_count(k) .GT. 0) THEN
+               IF (recv_count(k) > 0) THEN
                   CALL para_env%irecv(info%recv_buf(info%recv_disp(k) + 1:info%recv_disp(k) + recv_count(k)), &
                                       source2global(k), info%recv_request(k))
                END IF
@@ -1823,9 +1905,9 @@ CONTAINS
             ! dest_p/q now contain the process row/column ID that will receive data from that row/column
 
             DO q = 0, dest_num_pe(2) - 1
-               ncols = COUNT(dest_q .EQ. q)
+               ncols = COUNT(dest_q == q)
                DO p = 0, dest_num_pe(1) - 1
-                  nrows = COUNT(dest_p .EQ. p)
+                  nrows = COUNT(dest_p == p)
                   send_count(dest_blacs2mpi(p, q)) = nrows*ncols
                END DO
             END DO
@@ -1853,7 +1935,7 @@ CONTAINS
 
             ! For each non-zero send_count, call mpi_isend
             DO k = 0, recv_size - 1
-               IF (send_count(k) .GT. 0) THEN
+               IF (send_count(k) > 0) THEN
                   CALL para_env%isend(info%send_buf(send_disp(k) + 1:send_disp(k) + send_count(k)), &
                                       dest2global(k), info%send_request(k))
                END IF
@@ -2032,9 +2114,9 @@ CONTAINS
          IF (ASSOCIATED(source%matrix_struct)) THEN
             desca = source%matrix_struct%descriptor
             IF (source%use_sp) CPABORT("only DP kind implemented")
-            IF (nrows .GT. source%matrix_struct%nrow_global) &
+            IF (nrows > source%matrix_struct%nrow_global) &
                CPABORT("nrows is greater than nrow_global of source")
-            IF (ncols .GT. source%matrix_struct%ncol_global) &
+            IF (ncols > source%matrix_struct%ncol_global) &
                CPABORT("ncols is greater than ncol_global of source")
             smat => source%local_data
          ELSE
@@ -2045,9 +2127,9 @@ CONTAINS
          IF (ASSOCIATED(destination%matrix_struct)) THEN
             descb = destination%matrix_struct%descriptor
             IF (destination%use_sp) CPABORT("only DP kind implemented")
-            IF (nrows .GT. destination%matrix_struct%nrow_global) &
+            IF (nrows > destination%matrix_struct%nrow_global) &
                CPABORT("nrows is greater than nrow_global of destination")
-            IF (ncols .GT. destination%matrix_struct%ncol_global) &
+            IF (ncols > destination%matrix_struct%ncol_global) &
                CPABORT("ncols is greater than ncol_global of destination")
             dmat => destination%local_data
          ELSE
@@ -2142,7 +2224,7 @@ CONTAINS
       TYPE(cp_fm_type), INTENT(IN)             :: fm
       INTEGER, INTENT(IN)                      :: unit
 
-      CHARACTER(len=*), PARAMETER :: routineN = 'cp_fm_write_unformatted'
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_fm_write_unformatted'
 
       INTEGER                                  :: handle, j, max_block, &
                                                   ncol_global, nrow_global
@@ -2247,7 +2329,7 @@ CONTAINS
       INTEGER, INTENT(IN)                      :: unit
       CHARACTER(LEN=*), INTENT(IN), OPTIONAL   :: header, value_format
 
-      CHARACTER(len=*), PARAMETER :: routineN = 'cp_fm_write_formatted'
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_fm_write_formatted'
 
       CHARACTER(LEN=21)                        :: my_value_format
       INTEGER                                  :: handle, i, j, max_block, &
@@ -2373,7 +2455,7 @@ CONTAINS
       TYPE(cp_fm_type), INTENT(INOUT)          :: fm
       INTEGER, INTENT(IN)                      :: unit
 
-      CHARACTER(len=*), PARAMETER :: routineN = 'cp_fm_read_unformatted'
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'cp_fm_read_unformatted'
 
       INTEGER                                  :: handle, j, max_block, &
                                                   ncol_global, nrow_global
@@ -2423,12 +2505,12 @@ CONTAINS
 
 ! **************************************************************************************************
 !> \brief ...
-!> \param mult_type ...
+!> \param mm_type ...
 ! **************************************************************************************************
-   SUBROUTINE cp_fm_setup(mult_type)
-      INTEGER, INTENT(IN)                                :: mult_type
+   SUBROUTINE cp_fm_setup(mm_type)
+      INTEGER, INTENT(IN)                                :: mm_type
 
-      mm_type = mult_type
+      cp_fm_mm_type = mm_type
    END SUBROUTINE cp_fm_setup
 
 ! **************************************************************************************************
@@ -2438,8 +2520,8 @@ CONTAINS
    FUNCTION cp_fm_get_mm_type() RESULT(res)
       INTEGER                                            :: res
 
-      res = mm_type
-   END FUNCTION
+      res = cp_fm_mm_type
+   END FUNCTION cp_fm_get_mm_type
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2460,6 +2542,6 @@ CONTAINS
       res = -1
 #endif
 
-   END FUNCTION
+   END FUNCTION cp_fm_pilaenv
 
 END MODULE cp_fm_types

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -509,7 +509,7 @@ CONTAINS
             rcf(:) = rc(:) - rf(:)
          ELSE
             raf(:) = -rac
-            rcf(:) = (/0._dp, 0._dp, 0._dp/)
+            rcf(:) = [0._dp, 0._dp, 0._dp]
          END IF
 
          dac = NORM2(rac)

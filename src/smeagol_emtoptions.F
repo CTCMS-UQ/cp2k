@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -203,17 +203,17 @@ MODULE smeagol_emtoptions
          IF (.NOT. smeagol_control%aux%isexplicit_RGlymin) smeagol_control%aux%RGlymin = 0.0_dp
          IF (.NOT. smeagol_control%aux%isexplicit_RGlzmin) smeagol_control%aux%RGlzmin = 0.0_dp
          IF (.NOT. smeagol_control%aux%isexplicit_RGlxmax) THEN
-            coord_scaled(:) = (/1.0_dp, 0.0_dp, 0.0_dp/)
+            coord_scaled(:) = [1.0_dp, 0.0_dp, 0.0_dp]
             CALL scaled_to_real(coord_real, coord_scaled, ucell)
             smeagol_control%aux%RGlxmax = coord_real(1)
          END IF
          IF (.NOT. smeagol_control%aux%isexplicit_RGlymax) THEN
-            coord_scaled(:) = (/0.0_dp, 1.0_dp, 0.0_dp/)
+            coord_scaled(:) = [0.0_dp, 1.0_dp, 0.0_dp]
             CALL scaled_to_real(coord_real, coord_scaled, ucell)
             smeagol_control%aux%RGlymax = coord_real(2)
          END IF
          IF (.NOT. smeagol_control%aux%isexplicit_RGlzmax) THEN
-            coord_scaled(:) = (/0.0_dp, 0.0_dp, 1.0_dp/)
+            coord_scaled(:) = [0.0_dp, 0.0_dp, 1.0_dp]
             CALL scaled_to_real(coord_real, coord_scaled, ucell)
             smeagol_control%aux%RGlzmax = coord_real(3)
          END IF

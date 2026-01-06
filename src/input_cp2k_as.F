@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -20,11 +20,12 @@ MODULE input_cp2k_as
                                               medium_print_level,&
                                               silent_print_level
    USE input_constants,                 ONLY: &
-        casci_canonical, dmft_model, eri_method_full_gpw, eri_method_gpw_ht, eri_operator_coulomb, &
-        eri_operator_erf, eri_operator_erfc, eri_operator_gaussian, eri_operator_trunc, &
-        eri_operator_yukawa, gaussian, hf_model, manual_selection, mao_projection, no_solver, &
-        qiskit_solver, rsdft_model, wannier_projection
+        casci_canonical, eri_method_full_gpw, eri_method_gpw_ht, eri_operator_coulomb, &
+        eri_operator_erf, eri_operator_erfc, eri_operator_gaussian, eri_operator_lr_trunc, &
+        eri_operator_trunc, eri_operator_yukawa, gaussian, manual_selection, mao_projection, &
+        no_solver, qiskit_solver, wannier_projection
    USE input_cp2k_loc,                  ONLY: create_localize_section
+   USE input_cp2k_xc,                   ONLY: create_xc_section
    USE input_keyword_types,             ONLY: keyword_create,&
                                               keyword_release,&
                                               keyword_type
@@ -82,18 +83,6 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-      CALL keyword_create(keyword, __LOCATION__, name="MODEL", &
-                          description="Model used to calculate active space interaction Hamiltonian.", &
-                          usage="MODEL HARTREE-FOCK", &
-                          default_i_val=hf_model, &
-                          enum_c_vals=s2a("HARTREE-FOCK", "RSDFT", "DMFT"), &
-                          enum_i_vals=(/hf_model, rsdft_model, dmft_model/), &
-                          enum_desc=s2a("Hartree-Fock model for interaction Hamiltonian", &
-                                        "Range-separated DFT model for interaction Hamiltonian", &
-                                        "DMFT model Hamiltonian"))
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
       CALL keyword_create(keyword, __LOCATION__, name="ACTIVE_ELECTRONS", &
                           description="The number of active electrons in the CAS space", &
                           usage="ACTIVE_ELECTRONS 4", n_var=1, default_i_val=-1, type_of_var=integer_t)
@@ -108,14 +97,8 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, name="ACTIVE_ORBITAL_INDICES", &
                           description="The indices of the active orbitals. Requires ORBITAL_SELECTION MANUAL!", &
-                          usage="ACTIVE_ORBITAL_INDICES 2 3 {...}", n_var=-1, default_i_vals=(/-1/), &
+                          usage="ACTIVE_ORBITAL_INDICES 2 3 {...}", n_var=-1, default_i_vals=[-1], &
                           type_of_var=integer_t)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, __LOCATION__, name="ISOLATED_SYSTEM", &
-                          description="System is treated without any periodic boundary conditions.", &
-                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -130,7 +113,7 @@ CONTAINS
                           usage="ORBITAL_SELECTION CANONICAL", &
                           default_i_val=casci_canonical, &
                           enum_c_vals=s2a("CANONICAL", "WANNIER_PROJECTION", "MAO", "MANUAL"), &
-                          enum_i_vals=(/casci_canonical, wannier_projection, mao_projection, manual_selection/), &
+                          enum_i_vals=[casci_canonical, wannier_projection, mao_projection, manual_selection], &
                           enum_desc=s2a("Select orbitals using energy ordering of canoncial orbitals", &
                                         "Select orbitals from projected Wannier functions", &
                                         "Select orbitals from modified atomic orbitals", &
@@ -172,7 +155,7 @@ CONTAINS
                           usage="AS_SOLVER QISKIT", &
                           default_i_val=no_solver, &
                           enum_c_vals=s2a("NONE", "QISKIT"), &
-                          enum_i_vals=(/no_solver, qiskit_solver/), &
+                          enum_i_vals=[no_solver, qiskit_solver], &
                           enum_desc=s2a("NO solver, used to produce FCIDUMP/QCSchema files", &
                                         "QISKIT active space solver"))
       CALL section_add_keyword(section, keyword)
@@ -182,6 +165,13 @@ CONTAINS
                           description="Energy convergence threshold of the DFT embedding scheme.", &
                           usage="EPS_ITER 1.0E-6 ", type_of_var=real_t, &
                           default_r_val=1.0E-6_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="ALPHA", &
+                          description="Fraction of new density to be mixed with previous one in SCF embedding.", &
+                          usage="ALPHA 0.25", type_of_var=real_t, &
+                          default_r_val=0.8_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -209,6 +199,10 @@ CONTAINS
       CALL section_release(subsection)
 
       CALL create_socket_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+      CALL create_xc_section(subsection)
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
@@ -276,14 +270,14 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, name="ALIST", &
                           description="List of alpha orbitals to be printed. -1 defaults to all values", &
-                          usage="ALIST {1 2 3 ...}", n_var=-1, default_i_vals=(/-1/), &
+                          usage="ALIST {1 2 3 ...}", n_var=-1, default_i_vals=[-1], &
                           lone_keyword_i_val=-1, type_of_var=integer_t)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="BLIST", &
                           description="List of beta orbitals to be printed. -1 defaults to all values", &
-                          usage="ALIST {1 2 3 ...}", n_var=-1, default_i_vals=(/-1/), &
+                          usage="BLIST {1 2 3 ...}", n_var=-1, default_i_vals=[-1], &
                           lone_keyword_i_val=-1, type_of_var=integer_t)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -292,7 +286,7 @@ CONTAINS
                           description="The stride (X,Y,Z) used to write the cube file"// &
                           " (larger values result in smaller cube files)."// &
                           " You can provide 3 numbers (for X,Y,Z) or 1 number valid for all components", &
-                          usage="STRIDE {2 2 2}", n_var=-1, default_i_vals=(/2, 2, 2/), &
+                          usage="STRIDE {2 2 2}", n_var=-1, default_i_vals=[2, 2, 2], &
                           type_of_var=integer_t)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -324,7 +318,7 @@ CONTAINS
                           description="Method used in ERI calculation.", &
                           usage="METHOD FULL_GPW", &
                           enum_c_vals=s2a("FULL_GPW", "GPW_HALF_TRANSFORM"), &
-                          enum_i_vals=(/eri_method_full_gpw, eri_method_gpw_ht/), &
+                          enum_i_vals=[eri_method_full_gpw, eri_method_gpw_ht], &
                           enum_desc=s2a("Use the GPW approach with MOs", &
                                         "Use the GPW approach for half-transformed MO ERIs"), &
                           default_i_val=eri_method_full_gpw)
@@ -333,39 +327,43 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, name="OPERATOR", &
                           description="Operator used in ERI calculation.", &
-                          usage="OPERATOR <1/R>", &
-                          enum_c_vals=s2a("<1/R>", "<EXP(-A*R)/R>", "<ERF(A*R)/R>", &
-                                          "<ERFC(A*R)/R>", "<EXP(-A*R2)/R>", "<H(A-R)/R>"), &
-                          enum_i_vals=(/eri_operator_coulomb, eri_operator_yukawa, &
-                                        eri_operator_erf, eri_operator_erfc, eri_operator_gaussian, eri_operator_trunc/), &
-                          enum_desc=s2a("Coulomb operator", &
-                                        "Yukawa potential operator", &
-                                        "Error function potential operator", &
-                                        "Complementary error function potential operator", &
-                                        "Gaussian potential operator", &
-                                        "Truncated Coulomb potential"), &
+                          usage="OPERATOR LONGRANGE", &
+                          enum_c_vals=s2a("COULOMB", "YUKAWA", "LONGRANGE", &
+                                          "SHORTRANGE", "GAUSSIAN", "TRUNCATED", "LR_TRUNC"), &
+                          enum_i_vals=[eri_operator_coulomb, eri_operator_yukawa, &
+                                       eri_operator_erf, eri_operator_erfc, eri_operator_gaussian, &
+                                       eri_operator_trunc, eri_operator_lr_trunc], &
+                          enum_desc=s2a("Coulomb operator: 1/r", &
+                                        "Yukawa operator: exp(-omega*R)/R", &
+                                        "Longrange operator: erf(omega*R)/R", &
+                                        "Shortrange operator: erfc(omega*R)/R", &
+                                        "Gaussian operator: exp(-omega*R2)/R", &
+                                        "Truncated Coulomb operator: if (R < R_c) 1/R else 0)", &
+                                        "Truncated longrange operator: if (R < R_c) erf(omega*R)/R else 0"), &
                           default_i_val=eri_operator_coulomb)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, __LOCATION__, name="OPERATOR_PARAMETER", &
-                          description="Range parameter for ERI operator.", &
-                          usage="OPERATOR_PARAMETER 4.0", type_of_var=real_t, &
-                          default_r_val=0.5_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="PERIODICITY", &
                           description="Periodicity used for operators in ERI calclulation.", &
-                          usage="PERIODICITY {1 1 1}", n_var=-1, default_i_vals=(/1, 1, 1/), &
+                          usage="PERIODICITY 1 1 1", n_var=-1, default_i_vals=[0, 0, 0], &
                           type_of_var=integer_t)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, __LOCATION__, name="OMEGA", &
+                          description="Range-separation parameter for ERI operator.", &
+                          usage="OMEGA 0.25", type_of_var=real_t, &
+                          default_r_val=0.4_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, __LOCATION__, name="CUTOFF_RADIUS", &
-                          description="Radius of operator interactions in non-periodic cases.", &
-                          usage="CUTOFF_RADIUS 20", type_of_var=real_t, &
-                          default_r_val=-1.0_dp)
+                          description="Cutoff radius (in Angstroms) for the truncated 1/r and "// &
+                          "longrange potentials. "// &
+                          "Only valid when doing truncated calculations.", &
+                          usage="CUTOFF_RADIUS 10.0", type_of_var=real_t, &
+                          unit_str="angstrom", default_r_val=0.0_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -417,7 +415,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="REL_CUTOFF", &
-                          variants=(/"RELATIVE_CUTOFF"/), &
+                          variants=["RELATIVE_CUTOFF"], &
                           description="Determines the grid at which a Gaussian is mapped.", &
                           usage="REL_CUTOFF 50", type_of_var=real_t, &
                           default_r_val=50.0_dp)
@@ -425,7 +423,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="STORE_WFN", &
-                          variants=(/"STORE_WAVEFUNCTION"/), &
+                          variants=["STORE_WAVEFUNCTION"], &
                           description="Store wavefunction in real space representation for integration.", &
                           usage="STORE_WFN  T", type_of_var=logical_t, &
                           default_l_val=.TRUE., lone_keyword_l_val=.TRUE.)
@@ -444,7 +442,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="PRINT_LEVEL", &
-                          variants=(/"IOLEVEL"/), &
+                          variants=["IOLEVEL"], &
                           description="How much output is written by the individual groups.", &
                           usage="PRINT_LEVEL HIGH", &
                           default_i_val=silent_print_level, enum_c_vals= &
@@ -452,8 +450,8 @@ CONTAINS
                           enum_desc=s2a("Almost no output", &
                                         "Little output", "Quite some output", "Lots of output", &
                                         "Everything is written out, useful for debugging purposes only"), &
-                          enum_i_vals=(/silent_print_level, low_print_level, medium_print_level, &
-                                        high_print_level, debug_print_level/))
+                          enum_i_vals=[silent_print_level, low_print_level, medium_print_level, &
+                                       high_print_level, debug_print_level])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

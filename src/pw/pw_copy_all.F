@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -14,6 +14,7 @@
 ! **************************************************************************************************
 MODULE pw_copy_all
    USE kinds,                           ONLY: dp
+   USE mathconstants,                   ONLY: z_zero
    USE message_passing,                 ONLY: mp_comm_type
    USE pw_grid_types,                   ONLY: pw_grid_type
    USE pw_types,                        ONLY: pw_c1d_gs_type
@@ -67,7 +68,7 @@ CONTAINS
       ngm = MAXVAL(ngr)
       ALLOCATE (cc(ngm))
       cc(1:ng1) = pw1%array(1:ng1)
-      cc(ng1 + 1:ngm) = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+      cc(ng1 + 1:ngm) = z_zero
 
       ALLOCATE (g_hat(3, ngm))
       g_hat = 0

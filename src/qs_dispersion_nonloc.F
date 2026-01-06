@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -27,10 +27,11 @@ MODULE qs_dispersion_nonloc
                                               vdw_nl_LMKLL,&
                                               vdw_nl_RVV10,&
                                               xc_vdw_fun_nonloc
-   USE kinds,                           ONLY: default_string_length,&
+   USE kinds,                           ONLY: default_path_length,&
                                               dp
    USE mathconstants,                   ONLY: pi,&
-                                              rootpi
+                                              rootpi,&
+                                              z_zero
    USE message_passing,                 ONLY: mp_para_env_type
    USE pw_grid_types,                   ONLY: HALFSPACE,&
                                               pw_grid_type
@@ -69,7 +70,7 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'qs_dispersion_nonloc_init'
 
-      CHARACTER(LEN=default_string_length)               :: filename
+      CHARACTER(LEN=default_path_length)                 :: filename
       INTEGER                                            :: funit, handle, nqs, nr_points, q1_i, &
                                                             q2_i, vdw_type
 
@@ -172,7 +173,7 @@ CONTAINS
       TYPE(virial_type), OPTIONAL, POINTER               :: virial
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'calculate_dispersion_nonloc'
-      INTEGER, DIMENSION(3, 3), PARAMETER :: nd = RESHAPE((/1, 0, 0, 0, 1, 0, 0, 0, 1/), (/3, 3/))
+      INTEGER, DIMENSION(3, 3), PARAMETER :: nd = RESHAPE([1, 0, 0, 0, 1, 0, 0, 0, 1], [3, 3])
 
       INTEGER                                            :: handle, i, i_grid, idir, ispin, nl_type, &
                                                             np, nspin, p, q, r, s
@@ -358,7 +359,7 @@ CONTAINS
 !$OMP PARALLEL DO DEFAULT( NONE )                                  &
 !$OMP             SHARED( np, rho, dispersion_env, thetas, const ) &
 !$OMP             PRIVATE( i )                                     &
-!$OMP             SCHEDULE(DYNAMIC)    ! use dynamic to allow for possibility of cases having   (rho(i_grid) .LE. epsr)
+!$OMP             SCHEDULE(DYNAMIC)    ! use dynamic to allow for possibility of cases having   (rho(i_grid) <= epsr)
          DO i_grid = 1, np
             IF (rho(i_grid) > epsr) THEN
                DO i = 1, dispersion_env%nqs
@@ -610,7 +611,7 @@ CONTAINS
 
       IF (.NOT. energy_only) THEN
          ALLOCATE (u_vdW(grid%ngpts_cut_local, nqs))
-         u_vdW(:, :) = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+         u_vdW(:, :) = z_zero
       END IF
 
 !$OMP PARALLEL DEFAULT( NONE )                                             &
@@ -643,7 +644,7 @@ CONTAINS
             theta(iq) = thetas_g(iq)%array(ig)
          END DO
          DO q2_i = 1, nqs
-            uu = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+            uu = z_zero
             DO q1_i = 1, nqs
                uu = uu + kernel_of_k(q2_i, q1_i)*theta(q1_i)
             END DO
@@ -838,7 +839,7 @@ CONTAINS
                   prefactor = 0.0_dp
                END IF
             END SELECT
-            IF (q0(i_grid) .NE. q_mesh(nqs)) THEN
+            IF (q0(i_grid) /= q_mesh(nqs)) THEN
                h_prefactor(i_grid) = h_prefactor(i_grid) + prefactor
             END IF
 

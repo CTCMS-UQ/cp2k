@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -306,10 +306,10 @@ CONTAINS
 
       CALL writebuffer(sockfd, msg, msglength)
 
-      cell_data = RESHAPE(TRANSPOSE(subsys%cell%hmat), (/9/))
+      cell_data = RESHAPE(TRANSPOSE(subsys%cell%hmat), [9])
       CALL writebuffer(sockfd, cell_data, 9)
 
-      icell_data = RESHAPE(TRANSPOSE(subsys%cell%h_inv), (/9/))
+      icell_data = RESHAPE(TRANSPOSE(subsys%cell%h_inv), [9])
       CALL writebuffer(sockfd, icell_data, 9)
 
       nAtom = subsys%particles%n_els

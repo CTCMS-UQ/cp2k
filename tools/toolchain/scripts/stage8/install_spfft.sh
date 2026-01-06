@@ -6,8 +6,8 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-spfft_ver="1.1.0"
-spfft_sha256="d4673b3135aebfa1c440723226fe976d518ff881285b3d4787f1aa8210eac81e"
+spfft_ver="1.1.1"
+spfft_sha256="675a048124a96b8c7f89d59d3ac0355833e28b38622e76c4d478ee91b25d766c"
 source "${SCRIPT_DIR}"/common_vars.sh
 source "${SCRIPT_DIR}"/tool_kit.sh
 source "${SCRIPT_DIR}"/signal_trap.sh
@@ -21,7 +21,7 @@ cd "${BUILDDIR}"
 
 case "${with_spfft}" in
   __INSTALL__)
-    echo "==================== Installing spfft ===================="
+    echo "==================== Installing SpFFT ===================="
     pkg_install_dir="${INSTALLDIR}/SpFFT-${spfft_ver}"
     install_lock_file="$pkg_install_dir/install_successful"
     if verify_checksums "${install_lock_file}"; then
@@ -141,13 +141,13 @@ case "${with_spfft}" in
       fi
       write_checksums "${install_lock_file}" "${SCRIPT_DIR}/stage8/$(basename ${SCRIPT_NAME})"
     fi
-    SPFFT_ROOT="${pkg_install_dir}"
+    SpFFT_ROOT="${pkg_install_dir}"
     SPFFT_CFLAGS="-I'${pkg_install_dir}/include'"
     SPFFT_LDFLAGS="-L'${pkg_install_dir}/lib' -Wl,-rpath,'${pkg_install_dir}/lib'"
     SPFFT_CUDA_LDFLAGS="-L'${pkg_install_dir}/lib/cuda' -Wl,-rpath,'${pkg_install_dir}/lib/cuda'"
     ;;
   __SYSTEM__)
-    echo "==================== Finding spfft from system paths ===================="
+    echo "==================== Finding SpFFT from system paths ===================="
     check_command pkg-config --modversion spfft
     add_include_from_paths SPFFT_CFLAGS "spfft.h" $INCLUDE_PATHS
     add_lib_from_paths SPFFT_LDFLAGS "libspfft.*" $LIB_PATHS
@@ -156,7 +156,7 @@ case "${with_spfft}" in
     # Nothing to do
     ;;
   *)
-    echo "==================== Linking spfft to user paths ===================="
+    echo "==================== Linking SpFFT to user paths ===================="
     pkg_install_dir="$with_spfft"
 
     # use the lib64 directory if present (multi-abi distros may link lib/ to lib32/ instead)
@@ -179,7 +179,7 @@ prepend_path LIBRARY_PATH "$pkg_install_dir/lib"
 prepend_path CPATH "$pkg_install_dir/include"
 export SPFFT_INCLUDE_DIR="$pkg_install_dir/include"
 export SPFFT_LIBS="-lspfft"
-export SPFFT_ROOT="${pkg_install_dir}"
+export SpFFT_ROOT="${pkg_install_dir}"
 prepend_path PKG_CONFIG_PATH "${pkg_install_dir}/lib/pkgconfig"
 prepend_path CMAKE_PREFIX_PATH "${pkg_install_dir}"
 EOF
@@ -193,7 +193,7 @@ export CP_DFLAGS="\${CP_DFLAGS} IF_MPI(-D__SPFFT|)"
 export CP_CFLAGS="\${CP_CFLAGS} ${SPFFT_CFLAGS}"
 export CP_LDFLAGS="\${CP_LDFLAGS} IF_CUDA(${SPFFT_CUDA_LDFLAGS}|${SPFFT_LDFLAGS})"
 export SPFFT_LIBRARY="-lspfft"
-export SPFFT_ROOT="${pkg_install_dir}"
+export SpFFT_ROOT="${pkg_install_dir}"
 export SPFFT_INCLUDE_DIR="${pkg_install_dir}/include"
 export CP_LIBS="IF_MPI(${SPFFT_LIBS}|) \${CP_LIBS}"
 EOF

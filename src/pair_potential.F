@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -29,10 +29,11 @@ MODULE pair_potential
                                               default_string_length,&
                                               dp
    USE pair_potential_types,            ONLY: &
-        allegro_type, b4_type, bm_type, compare_pot, deepmd_type, ea_type, ft_type, ftd_type, &
-        gal21_type, gal_type, gp_type, gw_type, ip_type, list_pot, lj_charmm_type, lj_type, &
-        multi_type, nequip_type, nn_type, pair_potential_pp_type, pair_potential_single_type, &
-        potential_single_allocation, quip_type, siepmann_type, tab_type, tersoff_type, wl_type
+        ace_type, allegro_type, b4_type, bm_type, compare_pot, deepmd_type, ea_type, ft_type, &
+        ftd_type, gal21_type, gal_type, gp_type, gw_type, ip_type, list_pot, lj_charmm_type, &
+        lj_type, multi_type, nequip_type, nn_type, pair_potential_pp_type, &
+        pair_potential_single_type, potential_single_allocation, siepmann_type, tab_type, &
+        tersoff_type, wl_type
    USE pair_potential_util,             ONLY: ener_pot,&
                                               ener_zbl,&
                                               zbl_matching_polinomial
@@ -131,9 +132,9 @@ CONTAINS
 !> \par History
 !>      Teo 2006.05 : Improved speed and accuracy. Linear scaling of the setup
 ! **************************************************************************************************
-   SUBROUTINE spline_nonbond_control(spline_env, potparm, atomic_kind_set, &
-                                     eps_spline, max_energy, rlow_nb, emax_spline, npoints, iw, iw2, iw3, do_zbl, &
-                                     shift_cutoff, nonbonded_type)
+   SUBROUTINE spline_nonbond_control(spline_env, potparm, atomic_kind_set, eps_spline, &
+                                     max_energy, rlow_nb, emax_spline, npoints, iw, iw2, iw3, &
+                                     do_zbl, shift_cutoff, nonbonded_type)
 
       TYPE(spline_environment_type), POINTER             :: spline_env
       TYPE(pair_potential_pp_type), POINTER              :: potparm
@@ -152,11 +153,12 @@ CONTAINS
       REAL(KIND=dp)                                      :: energy_cutoff, hicut, hicut0, locut
       TYPE(pair_potential_single_type), POINTER          :: pot
 
+      CALL timeset(routineN, handle)
+
       n = 0
       ncount = 0
-
       ntype = SIZE(atomic_kind_set)
-      CALL timeset(routineN, handle)
+
       IF (iw3 > 0) THEN
          WRITE (iw3, "(/,T2,A,I0,A,I0,A)") &
             "SPLINE_INFO| Generating ", (ntype*(ntype + 1))/2, " splines for "// &
@@ -186,7 +188,7 @@ CONTAINS
             DO k = 1, SIZE(pot%type)
                SELECT CASE (pot%type(k))
                CASE (lj_type, lj_charmm_type, wl_type, gw_type, ft_type, ftd_type, ip_type, &
-                     b4_type, bm_type, gp_type, ea_type, quip_type, nequip_type, allegro_type, tab_type, deepmd_type)
+                     b4_type, bm_type, gp_type, ea_type, nequip_type, allegro_type, tab_type, deepmd_type, ace_type)
                   pot%no_pp = .FALSE.
                CASE (tersoff_type)
                   pot%no_mb = .FALSE.
@@ -204,7 +206,7 @@ CONTAINS
                END SELECT
                ! Special case for EAM
                SELECT CASE (pot%type(k))
-               CASE (ea_type, quip_type, nequip_type, allegro_type, deepmd_type)
+               CASE (ea_type, nequip_type, allegro_type, deepmd_type, ace_type)
                   pot%no_mb = .FALSE.
                END SELECT
             END DO
@@ -254,13 +256,12 @@ CONTAINS
       CALL finalizef()
 
       IF (iw > 0) THEN
-         WRITE (iw, '(/,T2,A,I0)') &
+         WRITE (UNIT=iw, FMT='(/,T2,A,I0)') &
             "SPLINE_INFO| Number of pair potential splines allocated:   ", MAXVAL(spline_env%spltab)
       END IF
       IF (iw3 > 0) THEN
-         WRITE (iw3, '(/,T2,A,I0,/,T2,A)') &
-            "SPLINE_INFO| Number of unique splines computed:            ", MAXVAL(spline_env%spltab), &
-            "SPLINE_INFO| Done"
+         WRITE (UNIT=iw3, FMT='(/,T2,A,I0)') &
+            "SPLINE_INFO| Number of unique splines computed:            ", MAXVAL(spline_env%spltab)
       END IF
 
       CALL timestop(handle)
@@ -604,12 +605,12 @@ CONTAINS
             nvar = 5 + nvar
          CASE (ea_type)
             nvar = 4 + nvar
-         CASE (quip_type)
-            nvar = 1 + nvar
          CASE (nequip_type)
             nvar = 1 + nvar
          CASE (allegro_type)
             nvar = 1 + nvar
+         CASE (ace_type)
+            nvar = 2 + nvar
          CASE (deepmd_type)
             nvar = 2 + nvar
          CASE (ft_type)
@@ -687,17 +688,16 @@ CONTAINS
                         pot_par(nk, 2) = potparm%pot(i, j)%pot%set(1)%eam%drhoar
                         pot_par(nk, 3) = potparm%pot(i, j)%pot%set(1)%eam%acutal
                         pot_par(nk, 4) = potparm%pot(i, j)%pot%set(1)%eam%npoints
-                     CASE (quip_type)
-                        pot_par(nk, 1) = str2id( &
-                                         TRIM(potparm%pot(i, j)%pot%set(1)%quip%quip_file_name)// &
-                                         TRIM(potparm%pot(i, j)%pot%set(1)%quip%init_args)// &
-                                         TRIM(potparm%pot(i, j)%pot%set(1)%quip%calc_args))
                      CASE (nequip_type)
                         pot_par(nk, 1) = str2id( &
                                          TRIM(potparm%pot(i, j)%pot%set(1)%nequip%nequip_file_name))
                      CASE (allegro_type)
                         pot_par(nk, 1) = str2id( &
                                          TRIM(potparm%pot(i, j)%pot%set(1)%allegro%allegro_file_name))
+                     CASE (ace_type)
+                        pot_par(nk, 1) = str2id( &
+                                         TRIM(potparm%pot(i, j)%pot%set(1)%ace%ace_file_name))
+                        pot_par(nk, 2) = potparm%pot(i, j)%pot%set(1)%ace%atom_ace_type
                      CASE (deepmd_type)
                         pot_par(nk, 1) = str2id( &
                                          TRIM(potparm%pot(i, j)%pot%set(1)%deepmd%deepmd_file_name))
@@ -887,7 +887,6 @@ CONTAINS
                locij = my_index(j)
                CALL get_indexes(locij, ntype, tmpij)
                SELECT CASE (pot_target)
-                  !NB should do something about QUIP here?
                CASE (ea_type, ip_type)
                   ! check the array components
                   CALL compare_pot(potparm%pot(tmpij(1), tmpij(2))%pot, &
@@ -960,7 +959,7 @@ CONTAINS
             tmp_index(i, j) = nunique
             tmp_index(j, i) = nunique
             !
-            CALL set_potparm_index(potparm, (/n/), multi_type, ntype, tmpij, &
+            CALL set_potparm_index(potparm, [n], multi_type, ntype, tmpij, &
                                    atomic_kind_set, shift_cutoff, do_zbl)
          END DO
       END DO

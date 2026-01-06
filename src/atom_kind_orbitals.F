@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -492,7 +492,7 @@ CONTAINS
       INTEGER, DIMENSION(0:lmat)                         :: starti
       INTEGER, DIMENSION(0:lmat, 10)                     :: ncalc, ncore, nelem
       INTEGER, DIMENSION(:), POINTER                     :: econf
-      LOGICAL                                            :: do_basopt, ecp_semi_local
+      LOGICAL                                            :: do_basopt, ecp_semi_local, monovalent
       REAL(KIND=dp)                                      :: al, aval, cc, cval, ear, rk, xx, zeff
       REAL(KIND=dp), DIMENSION(num_gto+2)                :: results
       TYPE(all_potential_type), POINTER                  :: all_potential
@@ -513,7 +513,8 @@ CONTAINS
       CALL get_qs_kind(qs_kind, zeff=zeff, &
                        all_potential=all_potential, &
                        gth_potential=gth_potential, &
-                       sgp_potential=sgp_potential)
+                       sgp_potential=sgp_potential, &
+                       monovalent=monovalent)
 
       IF (PRESENT(iunit)) THEN
          iw = iunit
@@ -656,7 +657,10 @@ CONTAINS
       nelem = 0
       ncore = 0
       ncalc = 0
-      IF (ASSOCIATED(gth_potential)) THEN
+      IF (monovalent) THEN
+         ncalc(0, 1) = 1
+         nelem(0, 1) = 1
+      ELSE IF (ASSOCIATED(gth_potential)) THEN
          CALL get_potential(gth_potential, elec_conf=econf)
          CALL set_pseudo_state(econf, z, ncalc, ncore, nelem)
       ELSE IF (ASSOCIATED(sgp_potential)) THEN
@@ -1104,11 +1108,12 @@ CONTAINS
                                                             nexp_nlcc
       INTEGER, DIMENSION(:), POINTER                     :: nct_lpot, nct_lsd, nct_nlcc, nppnl, &
                                                             ppeconf
-      LOGICAL                                            :: lpot_present, lsd_present, nlcc_present
+      LOGICAL                                            :: lpot_present, lsd_present, nlcc_present, &
+                                                            soc_present
       REAL(KIND=dp)                                      :: ac, zeff
       REAL(KIND=dp), DIMENSION(:), POINTER               :: alpha_lpot, alpha_lsd, alpha_nlcc, ap, ce
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: cval_lpot, cval_lsd, cval_nlcc
-      REAL(KIND=dp), DIMENSION(:, :, :), POINTER         :: hp
+      REAL(KIND=dp), DIMENSION(:, :, :), POINTER         :: hp, kp
 
       CALL get_potential(gth_potential, &
                          zeff=zeff, &
@@ -1119,6 +1124,7 @@ CONTAINS
                          lppnl=lm, &
                          nprj_ppnl=nppnl, &
                          alpha_ppnl=ap, &
+                         kprj_ppnl=kp, &
                          hprj_ppnl=hp)
 
       gth_atompot%zion = zeff
@@ -1186,6 +1192,17 @@ CONTAINS
          gth_atompot%rcnl(l) = SQRT(0.5_dp/ap(l))
          gth_atompot%hnl(1:n, 1:n, l) = hp(1:n, 1:n, l)
       END DO
+
+      ! SOC
+      CALL get_potential(gth_potential, soc_present=soc_present)
+      gth_atompot%soc = soc_present
+      gth_atompot%knl = 0.0_dp
+      IF (soc_present) THEN
+         DO l = 1, lm
+            n = nppnl(l)
+            gth_atompot%knl(1:n, 1:n, l) = kp(1:n, 1:n, l)
+         END DO
+      END IF
 
       IF (nlcc_present) THEN
          CALL get_potential(gth_potential, &
@@ -1282,7 +1299,7 @@ CONTAINS
                          elec_conf=ppeconf)
       ecp_atompot%zion = zeff
       ecp_atompot%econf(0:3) = ppeconf(0:3)
-      CALL get_potential(sgp_potential, lmax=ecp_atompot%lmax)
+      CALL get_potential(sgp_potential, sl_lmax=ecp_atompot%lmax)
       ! local
       CALL get_potential(sgp_potential, nloc=ecp_atompot%nloc, nrloc=ecp_atompot%nrloc, &
                          aloc=ecp_atompot%aloc, bloc=ecp_atompot%bloc)

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -28,7 +28,8 @@ MODULE ewalds
    USE kinds,                           ONLY: dp
    USE mathconstants,                   ONLY: fourpi,&
                                               oorootpi,&
-                                              pi
+                                              pi,&
+                                              z_zero
    USE message_passing,                 ONLY: mp_comm_type
    USE particle_types,                  ONLY: particle_type
    USE pw_grid_types,                   ONLY: pw_grid_type
@@ -169,7 +170,7 @@ CONTAINS
          END IF
       END DO
 
-      summe(:) = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+      summe(:) = z_zero
       ! looping over the positive g-vectors
       DO gpt = 1, pw_grid%ngpts_cut_local
 

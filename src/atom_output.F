@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -37,6 +37,11 @@ MODULE atom_output
    USE xc_derivatives,                  ONLY: xc_functional_get_info
    USE xc_libxc,                        ONLY: libxc_check_existence_in_libxc,&
                                               libxc_get_reference_length
+   USE xmgrace,                         ONLY: xm_graph_data,&
+                                              xm_graph_info,&
+                                              xm_write_defaults,&
+                                              xm_write_frame,&
+                                              xm_write_frameport
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -84,7 +89,7 @@ CONTAINS
       INTEGER, INTENT(IN)                                :: iw
 
       CHARACTER(LEN=1), DIMENSION(0:7), PARAMETER :: &
-         label = (/"S", "P", "D", "F", "G", "H", "I", "K"/)
+         label = ["S", "P", "D", "F", "G", "H", "I", "K"]
 
       INTEGER                                            :: j, l, mc, mlc, mlo, mm(0:lmat), mo
 
@@ -683,6 +688,22 @@ CONTAINS
                END DO
             END IF
          END DO
+         IF (potential%gth_pot%soc) THEN
+            WRITE (iw, '(T10,A)') " Spin-orbit coupling parameters "
+            DO l = 1, lmat
+               IF (potential%gth_pot%nl(l) > 0) THEN
+                  WRITE (iw, '(T10,A,T76,I5)') " Angular momentum ", l
+                  WRITE (iw, '(T10,A,T66,F15.6)') " Rcnl ", potential%gth_pot%rcnl(l)
+                  WRITE (iw, '(T10,A,T76,I5)') " Nl ", potential%gth_pot%nl(l)
+                  WRITE (pline, '(5F12.6)') (potential%gth_pot%knl(1, j, l), j=1, potential%gth_pot%nl(l))
+                  WRITE (iw, '(T10,A,T21,A60)') " Hnl ", ADJUSTR(pline)
+                  DO i = 2, potential%gth_pot%nl(l)
+                     WRITE (pline, '(T21,5F12.6)') (potential%gth_pot%knl(i, j, l), j=i, potential%gth_pot%nl(l))
+                     WRITE (iw, '(T21,A60)') ADJUSTR(pline)
+                  END DO
+               END IF
+            END DO
+         END IF
       CASE (upf_pseudo)
          WRITE (iw, '(/," ",29("*"),A,29("*"))') " UPF Pseudopotential "
          DO k = 1, potential%upf_pot%maxinfo
@@ -736,14 +757,16 @@ CONTAINS
 !> \brief Print GTH pseudo-potential parameters.
 !> \param gthpot  pseudo-potential
 !> \param iunit   output file unit
+!> \param fopt ...
 !> \par History
 !>    * 09.2012 created [Juerg Hutter]
 !> \note  The pseudo-potential is written into the 'iunit' file unit or as the file 'GTH-PARAMETER'
 !>        inside the current working directory if the I/O unit is not given explicitly.
 ! **************************************************************************************************
-   SUBROUTINE atom_write_pseudo_param(gthpot, iunit)
+   SUBROUTINE atom_write_pseudo_param(gthpot, iunit, fopt)
       TYPE(atom_gthpot_type), INTENT(INOUT)              :: gthpot
       INTEGER, INTENT(IN), OPTIONAL                      :: iunit
+      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: fopt
 
       INTEGER                                            :: i, iw, j, k, n
 
@@ -752,7 +775,11 @@ CONTAINS
       ELSE
          CALL open_file(file_name="GTH-PARAMETER", file_status="UNKNOWN", file_action="WRITE", unit_number=iw)
       END IF
-      WRITE (iw, '(A2,A)') gthpot%symbol, ADJUSTL(TRIM(gthpot%pname))
+      IF (PRESENT(fopt)) THEN
+         WRITE (iw, '(A,F30.8)') "# "//TRIM(ADJUSTL(gthpot%symbol)), fopt
+      ELSE
+         WRITE (iw, '(A)') TRIM(ADJUSTL(gthpot%symbol))//" "//TRIM(ADJUSTL(gthpot%pname))
+      END IF
       WRITE (iw, '(4I5)') gthpot%econf(0:3)
       WRITE (iw, '(F20.14,I8,5F20.14)') gthpot%rc, gthpot%ncl, (gthpot%cl(i), i=1, gthpot%ncl)
       IF (gthpot%lpotextended) THEN
@@ -798,6 +825,22 @@ CONTAINS
             END DO
          END SELECT
       END DO
+      IF (gthpot%soc) THEN
+         DO i = 1, n - 1
+            WRITE (iw, '(T29,5F20.14)') (gthpot%hnl(1, k, i), k=1, gthpot%nl(i))
+            SELECT CASE (gthpot%nl(i))
+            CASE (2)
+               WRITE (iw, '(T49,F20.14)') gthpot%knl(2, 2, i)
+            CASE (3)
+               WRITE (iw, '(T49,2F20.14)') gthpot%knl(2, 2, i), gthpot%knl(2, 3, i)
+               WRITE (iw, '(T69,F20.14)') gthpot%knl(3, 3, i)
+            CASE DEFAULT
+               DO j = 2, gthpot%nl(i)
+                  WRITE (iw, '(T29,5F20.14)') (gthpot%knl(j, k, i), k=j, gthpot%nl(i))
+               END DO
+            END SELECT
+         END DO
+      END IF
       IF (.NOT. PRESENT(iunit)) CALL close_file(unit_number=iw)
 
    END SUBROUTINE atom_write_pseudo_param
@@ -806,12 +849,18 @@ CONTAINS
 !> \brief Print atomic orbitals.
 !> \param atom  information about the atomic kind
 !> \param iw    output file unit
+!> \param xmgrace ...
 !> \par History
 !>    * 04.2013 created [Juerg Hutter]
 ! **************************************************************************************************
-   SUBROUTINE atom_print_orbitals(atom, iw)
+   SUBROUTINE atom_print_orbitals(atom, iw, xmgrace)
       TYPE(atom_type), POINTER                           :: atom
       INTEGER, INTENT(IN)                                :: iw
+      LOGICAL, INTENT(IN), OPTIONAL                      :: xmgrace
+
+      CHARACTER(LEN=40)                                  :: fnbody
+      INTEGER                                            :: z
+      LOGICAL                                            :: graph
 
       SELECT CASE (atom%method_type)
       CASE DEFAULT
@@ -829,6 +878,29 @@ CONTAINS
       CASE (do_rohf_atom)
          CPABORT("")
       END SELECT
+
+      graph = .FALSE.
+      IF (PRESENT(xmgrace)) graph = xmgrace
+      IF (graph .AND. iw > 0) THEN
+         z = atom%z
+         fnbody = TRIM(ptable(z)%symbol)//"_PPorbital"
+         SELECT CASE (atom%method_type)
+         CASE DEFAULT
+            CPABORT("")
+         CASE (do_rks_atom)
+            CALL atom_orbitals_grace(atom, atom%orbitals%wfn, fnbody)
+         CASE (do_uks_atom)
+            CALL atom_orbitals_grace(atom, atom%orbitals%wfna, TRIM(fnbody)//"alpha")
+            CALL atom_orbitals_grace(atom, atom%orbitals%wfnb, TRIM(fnbody)//"beta")
+         CASE (do_rhf_atom)
+            CALL atom_orbitals_grace(atom, atom%orbitals%wfn, fnbody)
+         CASE (do_uhf_atom)
+            CALL atom_orbitals_grace(atom, atom%orbitals%wfna, TRIM(fnbody)//"alpha")
+            CALL atom_orbitals_grace(atom, atom%orbitals%wfnb, TRIM(fnbody)//"beta")
+         CASE (do_rohf_atom)
+            CPABORT("")
+         END SELECT
+      END IF
 
    END SUBROUTINE atom_print_orbitals
 
@@ -867,5 +939,71 @@ CONTAINS
          END IF
       END DO
    END SUBROUTINE atom_print_orbitals_helper
+
+! **************************************************************************************************
+!> \brief Print atomic orbitals of the given spin.
+!> \param atom         information about the atomic kind
+!> \param wfn          atomic orbitals
+!> \param fnbody       body of file name
+!> \par History
+!>    * 02.2025 created [Juerg Hutter]
+! **************************************************************************************************
+   SUBROUTINE atom_orbitals_grace(atom, wfn, fnbody)
+      TYPE(atom_type), POINTER                           :: atom
+      REAL(KIND=dp), DIMENSION(:, :, 0:), INTENT(INOUT)  :: wfn
+      CHARACTER(len=*), INTENT(IN)                       :: fnbody
+
+      CHARACTER(LEN=1), DIMENSION(0:8)                   :: lname
+      CHARACTER(LEN=1), DIMENSION(1:9)                   :: wnum
+      CHARACTER(LEN=40)                                  :: fname, legend
+      INTEGER                                            :: b, i, iw, l, m, maxl, nb, nv, v
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: gdata, wfnr
+      REAL(KIND=dp), DIMENSION(4)                        :: world_coord
+
+      lname = ['s', 'p', 'd', 'f', 'g', 'h', 'j', 'k', 'l']
+      wnum = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
+      m = atom%basis%grid%nr
+      maxl = atom%state%maxl_calc
+      DO l = 0, maxl
+         fname = TRIM(fnbody)//"_"//lname(l)//".agr"
+         nb = atom%basis%nbas(l)
+         nv = atom%state%maxn_calc(l)
+         IF (nb > 0 .AND. nv > 0) THEN
+            CALL open_file(file_name=fname, file_status="UNKNOWN", file_action="WRITE", unit_number=iw)
+            nv = MIN(nv, SIZE(wfn, 2))
+            ALLOCATE (wfnr(m, nv))
+            wfnr = 0.0_dp
+            DO v = 1, nv
+               DO b = 1, nb
+                  wfnr(:, v) = wfnr(:, v) + wfn(b, v, l)*atom%basis%bf(:, b, l)
+               END DO
+            END DO
+            world_coord(1) = 0.0_dp
+            world_coord(2) = MINVAL(wfnr) - 0.5_dp
+            world_coord(3) = 15.0_dp
+            world_coord(4) = MAXVAL(wfnr) + 0.5_dp
+            !
+            CALL xm_write_defaults(iw)
+            CALL xm_write_frameport(iw)
+            CALL xm_write_frame(iw, world_coord, &
+                                title="PP Radial Wavefunction", &
+                                subtitle=lname(l)//"-Quantum Number", &
+                                xlabel="Radius [Bohr]", &
+                                ylabel="")
+            DO i = 0, nv - 1
+               legend = "WFN "//wnum(i + 1)
+               CALL xm_graph_info(iw, i, 2.5_dp, legend)
+            END DO
+            ALLOCATE (gdata(m, 2))
+            gdata(1:m, 1) = atom%basis%grid%rad(1:m)
+            DO i = 0, nv - 1
+               gdata(1:m, 2) = wfnr(1:m, i + 1)
+               CALL xm_graph_data(iw, i, gdata)
+            END DO
+            DEALLOCATE (gdata, wfnr)
+            CALL close_file(iw)
+         END IF
+      END DO
+   END SUBROUTINE atom_orbitals_grace
 
 END MODULE atom_output

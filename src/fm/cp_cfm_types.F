@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -11,7 +11,8 @@
 ! **************************************************************************************************
 MODULE cp_cfm_types
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
-   USE cp_fm_struct,                    ONLY: cp_fm_struct_equivalent,&
+   USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
+                                              cp_fm_struct_equivalent,&
                                               cp_fm_struct_get,&
                                               cp_fm_struct_release,&
                                               cp_fm_struct_retain,&
@@ -114,37 +115,63 @@ CONTAINS
 !> \param matrix        matrix to be created
 !> \param matrix_struct structure of the matrix
 !> \param name          name of the matrix
+!> \param nrow ...
+!> \param ncol ...
+!> \param set_zero ...
 !> \note
 !>      preferred allocation routine
 ! **************************************************************************************************
-   SUBROUTINE cp_cfm_create(matrix, matrix_struct, name)
+   SUBROUTINE cp_cfm_create(matrix, matrix_struct, name, nrow, ncol, set_zero)
       TYPE(cp_cfm_type), INTENT(OUT)                     :: matrix
       TYPE(cp_fm_struct_type), INTENT(IN), TARGET        :: matrix_struct
       CHARACTER(len=*), INTENT(in), OPTIONAL             :: name
+      INTEGER, INTENT(IN), OPTIONAL                      :: nrow, ncol
+      LOGICAL, INTENT(IN), OPTIONAL                      :: set_zero
 
-      INTEGER                                            :: ncol_local, npcol, nprow, nrow_local
+      INTEGER                                            :: ncol_global, ncol_local, nrow_global, &
+                                                            nrow_local
       TYPE(cp_blacs_env_type), POINTER                   :: context
+      TYPE(cp_fm_struct_type), POINTER                   :: cfm_struct
 
-      context => matrix_struct%context
-      matrix%matrix_struct => matrix_struct
-      CALL cp_fm_struct_retain(matrix%matrix_struct)
+      IF (PRESENT(nrow) .OR. PRESENT(ncol)) THEN
+         CALL cp_fm_struct_get(matrix_struct, nrow_global=nrow_global, ncol_global=ncol_global)
+         IF (PRESENT(nrow)) nrow_global = nrow
+         IF (PRESENT(ncol)) ncol_global = ncol
+         CALL cp_fm_struct_create(cfm_struct, template_fmstruct=matrix_struct, &
+                                  nrow_global=nrow_global, ncol_global=ncol_global)
 
-      nprow = context%num_pe(1)
-      npcol = context%num_pe(2)
+         context => cfm_struct%context
+         matrix%matrix_struct => cfm_struct
+         CALL cp_fm_struct_retain(matrix%matrix_struct)
+
+         nrow_local = cfm_struct%local_leading_dimension
+         ncol_local = MAX(1, cfm_struct%ncol_locals(context%mepos(2)))
+
+         CALL cp_fm_struct_release(cfm_struct)
+      ELSE
+         context => matrix_struct%context
+         matrix%matrix_struct => matrix_struct
+         CALL cp_fm_struct_retain(matrix%matrix_struct)
+
+         nrow_local = matrix_struct%local_leading_dimension
+         ncol_local = MAX(1, matrix_struct%ncol_locals(context%mepos(2)))
+      END IF
+
       NULLIFY (matrix%local_data)
-
-      nrow_local = matrix_struct%local_leading_dimension
-      ncol_local = MAX(1, matrix_struct%ncol_locals(context%mepos(2)))
       ALLOCATE (matrix%local_data(nrow_local, ncol_local))
 
-      ! do not initialise created matrix as it is up to the user to do so
-      !CALL zcopy(nrow_local*ncol_local, z_zero, 0, matrix%local_data, 1)
+      IF (PRESENT(set_zero)) THEN
+         IF (set_zero) THEN
+            matrix%local_data(1:nrow_local, 1:ncol_local) = z_zero
+         END IF
+      END IF
 
       IF (PRESENT(name)) THEN
          matrix%name = name
       ELSE
          matrix%name = 'full complex matrix'
       END IF
+
    END SUBROUTINE cp_cfm_create
 
 ! **************************************************************************************************
@@ -774,8 +801,8 @@ CONTAINS
       IF (PRESENT(mtargetr)) THEN
          rmat => mtargetr%local_data
          IF ((.NOT. cp_fm_struct_equivalent(mtargetr%matrix_struct, msource%matrix_struct)) .OR. &
-             (SIZE(rmat, 1) .NE. SIZE(zmat, 1)) .OR. &
-             (SIZE(rmat, 2) .NE. SIZE(zmat, 2))) THEN
+             (SIZE(rmat, 1) /= SIZE(zmat, 1)) .OR. &
+             (SIZE(rmat, 2) /= SIZE(zmat, 2))) THEN
             CPABORT("size of local_data of mtargetr differ to msource")
          END IF
          ! copy local data
@@ -786,8 +813,8 @@ CONTAINS
       IF (PRESENT(mtargeti)) THEN
          imat => mtargeti%local_data
          IF ((.NOT. cp_fm_struct_equivalent(mtargeti%matrix_struct, msource%matrix_struct)) .OR. &
-             (SIZE(imat, 1) .NE. SIZE(zmat, 1)) .OR. &
-             (SIZE(imat, 2) .NE. SIZE(zmat, 2))) THEN
+             (SIZE(imat, 1) /= SIZE(zmat, 1)) .OR. &
+             (SIZE(imat, 2) /= SIZE(zmat, 2))) THEN
             CPABORT("size of local_data of mtargeti differ to msource")
          END IF
          ! copy local data
@@ -826,8 +853,8 @@ CONTAINS
       IF (PRESENT(msourcer)) THEN
          rmat => msourcer%local_data
          IF ((.NOT. cp_fm_struct_equivalent(msourcer%matrix_struct, mtarget%matrix_struct)) .OR. &
-             (SIZE(rmat, 1) .NE. SIZE(zmat, 1)) .OR. &
-             (SIZE(rmat, 2) .NE. SIZE(zmat, 2))) THEN
+             (SIZE(rmat, 1) /= SIZE(zmat, 1)) .OR. &
+             (SIZE(rmat, 2) /= SIZE(zmat, 2))) THEN
             CPABORT("size of local_data of msourcer differ to mtarget")
          END IF
          mode = mode + 1
@@ -837,8 +864,8 @@ CONTAINS
       IF (PRESENT(msourcei)) THEN
          imat => msourcei%local_data
          IF ((.NOT. cp_fm_struct_equivalent(msourcei%matrix_struct, mtarget%matrix_struct)) .OR. &
-             (SIZE(imat, 1) .NE. SIZE(zmat, 1)) .OR. &
-             (SIZE(imat, 2) .NE. SIZE(zmat, 2))) THEN
+             (SIZE(imat, 1) /= SIZE(zmat, 1)) .OR. &
+             (SIZE(imat, 2) /= SIZE(zmat, 2))) THEN
             CPABORT("size of local_data of msourcei differ to mtarget")
          END IF
          mode = mode + 2
@@ -938,9 +965,9 @@ CONTAINS
 
          CALL para_env%allgather(send_rank, all_ranks)
          IF (ASSOCIATED(destination%matrix_struct)) THEN
-            ALLOCATE (source2global(0:COUNT(all_ranks .NE. mp_proc_null) - 1))
+            ALLOCATE (source2global(0:COUNT(all_ranks /= mp_proc_null) - 1))
             DO i = 0, global_size - 1
-               IF (all_ranks(i) .NE. mp_proc_null) THEN
+               IF (all_ranks(i) /= mp_proc_null) THEN
                   source2global(all_ranks(i)) = i
                END IF
             END DO
@@ -948,9 +975,9 @@ CONTAINS
 
          CALL para_env%allgather(recv_rank, all_ranks)
          IF (ASSOCIATED(source%matrix_struct)) THEN
-            ALLOCATE (dest2global(0:COUNT(all_ranks .NE. mp_proc_null) - 1))
+            ALLOCATE (dest2global(0:COUNT(all_ranks /= mp_proc_null) - 1))
             DO i = 0, global_size - 1
-               IF (all_ranks(i) .NE. mp_proc_null) THEN
+               IF (all_ranks(i) /= mp_proc_null) THEN
                   dest2global(all_ranks(i)) = i
                END IF
             END DO
@@ -973,7 +1000,7 @@ CONTAINS
          IF (ASSOCIATED(source%matrix_struct)) THEN
             IF ((send_rank == 0)) THEN
                ! need to use separate buffers here in case this is actually global rank 0
-               src_block_tmp = (/send_dist%nrow_block, send_dist%ncol_block/)
+               src_block_tmp = [send_dist%nrow_block, send_dist%ncol_block]
                CALL para_env%isend(src_block_tmp, 0, send_req(1), tag=src_tag)
                CALL para_env%isend(send_dist%context%num_pe, 0, send_req(2), tag=src_tag)
             END IF
@@ -981,7 +1008,7 @@ CONTAINS
 
          IF (ASSOCIATED(destination%matrix_struct)) THEN
             IF ((recv_rank == 0)) THEN
-               dest_block_tmp = (/recv_dist%nrow_block, recv_dist%ncol_block/)
+               dest_block_tmp = [recv_dist%nrow_block, recv_dist%ncol_block]
                CALL para_env%isend(dest_block_tmp, 0, send_req(3), tag=dest_tag)
                CALL para_env%isend(recv_dist%context%num_pe, 0, send_req(4), tag=dest_tag)
             END IF
@@ -1074,9 +1101,9 @@ CONTAINS
             ! src_p/q now contains the process row/column ID that will send data to that row/column
 
             DO q = 0, src_num_pe(2) - 1
-               ncols = COUNT(src_q .EQ. q)
+               ncols = COUNT(src_q == q)
                DO p = 0, src_num_pe(1) - 1
-                  nrows = COUNT(src_p .EQ. p)
+                  nrows = COUNT(src_p == p)
                   ! Use the send_dist here as we are looking up the processes where the data comes from
                   recv_count(info%src_blacs2mpi(p, q)) = nrows*ncols
                END DO
@@ -1093,7 +1120,7 @@ CONTAINS
 
             ! Issue receive calls on ranks which expect data
             DO k = 0, send_size - 1
-               IF (recv_count(k) .GT. 0) THEN
+               IF (recv_count(k) > 0) THEN
                   CALL para_env%irecv(info%recv_buf(info%recv_disp(k) + 1:info%recv_disp(k) + recv_count(k)), &
                                       source2global(k), info%recv_request(k))
                ELSE
@@ -1129,9 +1156,9 @@ CONTAINS
             ! dest_p/q now contain the process row/column ID that will receive data from that row/column
 
             DO q = 0, dest_num_pe(2) - 1
-               ncols = COUNT(dest_q .EQ. q)
+               ncols = COUNT(dest_q == q)
                DO p = 0, dest_num_pe(1) - 1
-                  nrows = COUNT(dest_p .EQ. p)
+                  nrows = COUNT(dest_p == p)
                   send_count(dest_blacs2mpi(p, q)) = nrows*ncols
                END DO
             END DO
@@ -1159,7 +1186,7 @@ CONTAINS
 
             ! For each non-zero send_count, call mpi_isend
             DO k = 0, recv_size - 1
-               IF (send_count(k) .GT. 0) THEN
+               IF (send_count(k) > 0) THEN
                   CALL para_env%isend(info%send_buf(send_disp(k) + 1:send_disp(k) + send_count(k)), &
                                       dest2global(k), info%send_request(k))
                ELSE

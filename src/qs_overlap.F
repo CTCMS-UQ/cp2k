@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -73,10 +73,10 @@ MODULE qs_overlap
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_overlap'
 
    ! should be a parameter, but this triggers a bug in OMPed code with gfortran 4.9
-   INTEGER, DIMENSION(1:56), SAVE :: ndod = (/0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, &
-                                              1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, &
-                                              0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, &
-                                              1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1/)
+   INTEGER, DIMENSION(1:56), SAVE :: ndod = [0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, &
+                                             1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, &
+                                             0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, &
+                                             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 
    INTERFACE create_sab_matrix
       MODULE PROCEDURE create_sab_matrix_1d, create_sab_matrix_2d
@@ -305,7 +305,7 @@ CONTAINS
 !$OMP         matrix_s, matrix_p,basis_set_list_a, basis_set_list_b, cell_to_index, &
 !$OMP         matrixkp_s, matrixkp_p, locks, natom)  &
 !$OMP PRIVATE (oint, owork, pmat, sint, ikind, jkind, iatom, jatom, rab, cell, &
-!$OMP          basis_set_a, basis_set_b, &
+!$OMP          basis_set_a, basis_set_b, lock_num, &
 !$OMP          first_sgfa, la_max, la_min, npgfa, nsgfa, nseta, rpgfa, set_radius_a, ncoa, ncob, force_a, &
 !$OMP          zeta, first_sgfb, lb_max, lb_min, npgfb, nsetb, rpgfb, set_radius_b, nsgfb, p_block, dab, f,  &
 !$OMP          zetb, scon_a, scon_b, ic, irow, icol, f0, ff, found, trans, rab2, n1, n2, sgfa, sgfb, iset, jset, &
@@ -1084,8 +1084,7 @@ CONTAINS
          CALL dbcsr_create(matrix=matrix_s(i)%matrix, &
                            name=TRIM(name), &
                            dist=dbcsr_dist, matrix_type=symmetry_string, &
-                           row_blk_size=row_blk_sizes, col_blk_size=col_blk_sizes, &
-                           nze=0)
+                           row_blk_size=row_blk_sizes, col_blk_size=col_blk_sizes)
          CALL cp_dbcsr_alloc_block_from_nbl(matrix_s(i)%matrix, sab_nl)
       END DO
 
@@ -1174,8 +1173,7 @@ CONTAINS
             CALL dbcsr_create(matrix=matrix_s(i1, i2)%matrix, &
                               name=TRIM(name), &
                               dist=dbcsr_dist, matrix_type=symmetry_string, &
-                              row_blk_size=row_blk_sizes, col_blk_size=col_blk_sizes, &
-                              nze=0)
+                              row_blk_size=row_blk_sizes, col_blk_size=col_blk_sizes)
             CALL cp_dbcsr_alloc_block_from_nbl(matrix_s(i1, i2)%matrix, sab_nl)
          END DO
       END DO

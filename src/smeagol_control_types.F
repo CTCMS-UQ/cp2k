@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -310,10 +310,10 @@ CONTAINS
 
       ! SMEAGOL project name
       CALL section_vals_val_get(smeagol_section, "PROJECT_NAME", c_val=project_name)
-      smeagol_control%project_name = project_name
+      smeagol_control%project_name = project_name(:20)
       IF (smeagol_control%smeagol_enabled .AND. smeagol_control%project_name /= project_name) THEN
          CALL cp_warn(__LOCATION__, &
-                      "SMEAGOL limits the length of the project name by 20 characters. "// &
+                      "SMEAGOL limits the length of the project name to 20 characters. "// &
                       "The project name is truncated to '"//TRIM(smeagol_control%project_name)//"'.")
       END IF
 

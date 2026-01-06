@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -16,9 +16,8 @@ MODULE mscfg_types
         dbcsr_add, dbcsr_complete_redistribute, dbcsr_create, dbcsr_distribution_get, &
         dbcsr_distribution_new, dbcsr_distribution_release, dbcsr_distribution_type, &
         dbcsr_finalize, dbcsr_get_info, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
-        dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_nfullcols_total, &
-        dbcsr_nfullrows_total, dbcsr_release, dbcsr_reserve_block2d, dbcsr_set, dbcsr_type, &
-        dbcsr_type_no_symmetry, dbcsr_work_create
+        dbcsr_iterator_readonly_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_put_block, &
+        dbcsr_release, dbcsr_set, dbcsr_type, dbcsr_type_no_symmetry, dbcsr_work_create
    USE kinds,                           ONLY: dp
 #include "./base/base_uses.f90"
 
@@ -51,7 +50,7 @@ MODULE mscfg_types
       INTEGER, DIMENSION(:), ALLOCATABLE                :: nmosets_of_frag
       TYPE(dbcsr_type), DIMENSION(:, :), ALLOCATABLE  :: mos_of_frag
 
-   END TYPE
+   END TYPE molecular_scf_guess_env_type
 
 CONTAINS
 
@@ -76,7 +75,7 @@ CONTAINS
 !ENDIF
 
       env%nfrags = nfrags
-      IF (nfrags .GT. 0) THEN
+      IF (nfrags > 0) THEN
          ALLOCATE (env%energy_of_frag(nfrags))
          ALLOCATE (env%nmosets_of_frag(nfrags))
          ALLOCATE (env%mos_of_frag(nfrags, mscfg_max_moset_size))
@@ -135,15 +134,13 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CPASSERT(iset .LE. mscfg_max_moset_size)
+      CPASSERT(iset <= mscfg_max_moset_size)
 
       CALL dbcsr_create(matrix_temp, &
                         template=matrix_out, &
                         matrix_type=dbcsr_type_no_symmetry)
       CALL dbcsr_set(matrix_out, 0.0_dp)
-
-      matrix_size(1) = dbcsr_nfullrows_total(matrix_out)
-      matrix_size(2) = dbcsr_nfullcols_total(matrix_out)
+      CALL dbcsr_get_info(matrix_out, nfullrows_total=matrix_size(1), nfullcols_total=matrix_size(2))
 
       ! assume that the initial offset is zero
       offset(1) = 0
@@ -151,11 +148,10 @@ CONTAINS
 
       DO ifrag = 1, mscfg_env%nfrags
 
-         CPASSERT(iset .LE. mscfg_env%nmosets_of_frag(ifrag))
+         CPASSERT(iset <= mscfg_env%nmosets_of_frag(ifrag))
 
-         submatrix_size(1) = dbcsr_nfullrows_total(mscfg_env%mos_of_frag(ifrag, iset))
-         submatrix_size(2) = dbcsr_nfullcols_total(mscfg_env%mos_of_frag(ifrag, iset))
-
+         CALL dbcsr_get_info(mscfg_env%mos_of_frag(ifrag, iset), &
+                             nfullrows_total=submatrix_size(1), nfullcols_total=submatrix_size(2))
          CALL copy_submatrix_into_matrix(mscfg_env%mos_of_frag(ifrag, iset), &
                                          matrix_temp, offset, submatrix_size, matrix_size)
 
@@ -170,8 +166,8 @@ CONTAINS
       ! is exactly the same as the size of the big matrix
       ! This is to prevent unexpected conversion errors
       ! If however such conversion is intended - remove these safeguards
-      CPASSERT(offset(1) .EQ. matrix_size(1))
-      CPASSERT(offset(2) .EQ. matrix_size(2))
+      CPASSERT(offset(1) == matrix_size(1))
+      CPASSERT(offset(2) == matrix_size(2))
 
       CALL dbcsr_release(matrix_temp)
 
@@ -203,7 +199,7 @@ CONTAINS
       INTEGER, DIMENSION(2)                              :: add_blocks_before
       INTEGER, DIMENSION(:), POINTER :: blk_distr, blk_sizes, block_sizes_new, col_distr_new, &
          col_sizes_new, distr_new_array, row_distr_new, row_sizes_new
-      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: data_p, p_new_block
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: data_p
       TYPE(dbcsr_distribution_type)                      :: dist_new, dist_qs
       TYPE(dbcsr_iterator_type)                          :: iter
       TYPE(dbcsr_type)                                   :: matrix_new
@@ -218,11 +214,11 @@ CONTAINS
          add_blocks_after = 0
          start_index = 1
          trailing_size = matrix_size(dimen) - offset(dimen) - submatrix_size(dimen)
-         IF (offset(dimen) .GT. 0) THEN
+         IF (offset(dimen) > 0) THEN
             add_blocks_before(dimen) = add_blocks_before(dimen) + 1
             start_index = 2
          END IF
-         IF (trailing_size .GT. 0) THEN
+         IF (trailing_size > 0) THEN
             add_blocks_after = add_blocks_after + 1
          END IF
 
@@ -241,7 +237,7 @@ CONTAINS
          !IF (ASSOCIATED(cluster_distr)) THEN
          !ALLOCATE (cluster_distr_new(nblocks_new))
          !END IF
-         IF (add_blocks_before(dimen) .GT. 0) THEN
+         IF (add_blocks_before(dimen) > 0) THEN
             block_sizes_new(1) = offset(dimen)
             distr_new_array(1) = 0
             !IF (ASSOCIATED(cluster_distr)) THEN
@@ -253,7 +249,7 @@ CONTAINS
          !IF (ASSOCIATED(cluster_distr)) THEN
          !cluster_distr_new(start_index:nblocks+start_index-1) = cluster_distr(1:nblocks)
          !END IF
-         IF (add_blocks_after .GT. 0) THEN
+         IF (add_blocks_after > 0) THEN
             block_sizes_new(nblocks_new) = trailing_size
             distr_new_array(nblocks_new) = 0
             !IF (ASSOCIATED(cluster_distr)) THEN
@@ -293,7 +289,7 @@ CONTAINS
       CALL dbcsr_work_create(matrix_new, work_mutable=.TRUE.)
 
       ! iterate over local blocks of the small matrix
-      CALL dbcsr_iterator_start(iter, submatrix_in)
+      CALL dbcsr_iterator_readonly_start(iter, submatrix_in)
 
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
@@ -303,17 +299,10 @@ CONTAINS
          ! that of the small matrix but has the same number of columns and rows
          ! as the super-system matrix. this is necessary for complete redistribute
          ! to work
-         NULLIFY (p_new_block)
-         CALL dbcsr_reserve_block2d(matrix_new, &
-                                    iblock_row + add_blocks_before(1), &
-                                    iblock_col + add_blocks_before(2), &
-                                    p_new_block)
-
-         CPASSERT(ASSOCIATED(p_new_block))
-         CPASSERT(SIZE(p_new_block, 1) .EQ. SIZE(data_p, 1))
-         CPASSERT(SIZE(p_new_block, 2) .EQ. SIZE(data_p, 2))
-
-         p_new_block(:, :) = data_p(:, :)
+         CALL dbcsr_put_block(matrix_new, &
+                              row=iblock_row + add_blocks_before(1), &
+                              col=iblock_col + add_blocks_before(2), &
+                              block=data_p)
 
       END DO
       CALL dbcsr_iterator_stop(iter)

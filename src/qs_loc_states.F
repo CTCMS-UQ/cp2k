@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -194,7 +194,7 @@ CONTAINS
          ! Compute all the second moments of the Wannier states
          IF (section_get_lval(loc_print_section, "WANNIER_SPREADS%SECOND_MOMENTS")) THEN
             IF (section_get_lval(loc_print_section, "WANNIER_SPREADS%PERIODIC")) THEN
-               IF (dft_control%qs_control%gapw_control%lmax_sphere .LT. 6) THEN
+               IF (dft_control%qs_control%gapw_control%lmax_sphere < 6) THEN
                   CPABORT("Periodic second moments require LMAXN1>=6 In QS section")
                END IF
                CALL centers_second_moments_berry(qs_env, qs_loc_env, loc_print_section, ispin)

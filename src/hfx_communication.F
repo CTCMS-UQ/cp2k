@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -85,8 +85,8 @@ CONTAINS
       TYPE(dbcsr_type), OPTIONAL, POINTER                :: rho_beta
       LOGICAL, INTENT(IN)                                :: antisymmetric
 
-      INTEGER :: blk, block_size, data_from, dest, i, iatom, icpu, ikind, iset, jatom, jkind, &
-         jset, mepos, ncpu, nseta, nsetb, pa, pa1, pb, pb1, source, source_cpu
+      INTEGER :: block_size, data_from, dest, i, iatom, icpu, ikind, iset, jatom, jkind, jset, &
+         mepos, ncpu, nseta, nsetb, pa, pa1, pb, pb1, source, source_cpu
       INTEGER, DIMENSION(:), POINTER                     :: nsgfa, nsgfb
       LOGICAL                                            :: found
       REAL(dp)                                           :: symmfac
@@ -98,12 +98,14 @@ CONTAINS
       full_density = 0.0_dp
       ALLOCATE (sendbuffer(number_of_p_entries))
       ALLOCATE (recbuffer(number_of_p_entries))
+      sendbuffer = 0.0_dp
+      recbuffer = 0.0_dp
 
       i = 1
       CALL dbcsr_iterator_start(iter, rho, shared=.FALSE.)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
-         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block, blk)
-         ! the resulting vector will eb only the upper triangle.
+         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block)
+         ! the resulting vector will be only the upper triangle.
          ! in case of antisymmetry take care to change signs if a lower block gets copied
          symmfac = 1.0_dp
          IF (antisymmetric .AND. iatom > jatom) symmfac = -1.0_dp
@@ -156,7 +158,7 @@ CONTAINS
       dest = MODULO(mepos + 1, ncpu)
       source = MODULO(mepos - 1, ncpu)
       DO icpu = 0, ncpu - 1
-         IF (icpu .NE. ncpu - 1) THEN
+         IF (icpu /= ncpu - 1) THEN
             CALL para_env%isendrecv(sendbuffer, dest, recbuffer, source, &
                                     req(1), req(2), 13)
          END IF
@@ -165,7 +167,7 @@ CONTAINS
          block_size = block_offset(source_cpu + 1) - block_offset(source_cpu)
          full_density(block_offset(source_cpu):block_offset(source_cpu) + block_size - 1) = sendbuffer(1:block_size)
 
-         IF (icpu .NE. ncpu - 1) THEN
+         IF (icpu /= ncpu - 1) THEN
             CALL mp_waitall(req)
          END IF
          swapbuffer => sendbuffer
@@ -208,8 +210,8 @@ CONTAINS
       TYPE(hfx_basis_type), DIMENSION(:), POINTER        :: basis_parameter
       REAL(dp), INTENT(IN), OPTIONAL                     :: off_diag_fac, diag_fac
 
-      INTEGER :: blk, block_size, data_to, dest, dest_cpu, i, iatom, icpu, ikind, iset, jatom, &
-         jkind, jset, mepos, ncpu, nseta, nsetb, pa, pa1, pb, pb1, source
+      INTEGER :: block_size, data_to, dest, dest_cpu, i, iatom, icpu, ikind, iset, jatom, jkind, &
+         jset, mepos, ncpu, nseta, nsetb, pa, pa1, pb, pb1, source
       INTEGER, DIMENSION(:), POINTER                     :: nsgfa, nsgfb
       REAL(dp)                                           :: my_fac, myd_fac
       REAL(dp), DIMENSION(:), POINTER                    :: recbuffer, sendbuffer, swapbuffer
@@ -239,7 +241,7 @@ CONTAINS
          dest_cpu = MODULO(data_to, ncpu) + 1
          block_size = block_offset(dest_cpu + 1) - block_offset(dest_cpu)
        sendbuffer(1:block_size) = sendbuffer(1:block_size) + full_ks(block_offset(dest_cpu):block_offset(dest_cpu) + block_size - 1)
-         IF (icpu .EQ. ncpu) EXIT
+         IF (icpu == ncpu) EXIT
          CALL para_env%isendrecv(sendbuffer, dest, recbuffer, source, &
                                  req(1), req(2), 13)
 
@@ -254,7 +256,7 @@ CONTAINS
       i = 1
       CALL dbcsr_iterator_start(iter, ks_matrix, shared=.FALSE.)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
-         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block, blk)
+         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block)
 
          ikind = kind_of(iatom)
          nseta = basis_parameter(ikind)%nset
@@ -437,8 +439,8 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'get_atomic_block_maps'
 
-      INTEGER :: blk, handle, iatom, ibuf, icpu, ikind, ilist, iset, itask, jatom, jkind, jset, &
-         natom, ncpu, nseta, nsetb, number_of_p_blocks, offset, tmp(2)
+      INTEGER :: handle, iatom, ibuf, icpu, ikind, ilist, iset, itask, jatom, jkind, jset, natom, &
+         ncpu, nseta, nsetb, number_of_p_blocks, offset, tmp(2)
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: buffer_in, buffer_out, counter, rcount, &
                                                             rdispl
       INTEGER, DIMENSION(:), POINTER                     :: iatom_list, jatom_list, nsgfa, nsgfb
@@ -456,7 +458,7 @@ CONTAINS
       !
       CALL dbcsr_iterator_start(iter, matrix, shared=.FALSE.)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
-         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block, blk)
+         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block)
          ikind = kind_of(iatom)
          jkind = kind_of(jatom)
          number_of_p_blocks = number_of_p_blocks + 1
@@ -465,7 +467,7 @@ CONTAINS
       END DO
       CALL dbcsr_iterator_stop(iter)
 
-      tmp = (/number_of_p_entries, number_of_p_blocks/)
+      tmp = [number_of_p_entries, number_of_p_blocks]
       CALL para_env%max(tmp)
       number_of_p_entries = tmp(1)
       number_of_p_blocks = tmp(2)
@@ -482,7 +484,7 @@ CONTAINS
 
       CALL dbcsr_iterator_start(iter, matrix, shared=.FALSE.)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
-         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block, blk)
+         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sparse_block)
 
          buffer_in(ibuf + 1) = iatom
          buffer_in(ibuf + 2) = jatom
@@ -502,7 +504,7 @@ CONTAINS
          itask = buffer_out(ibuf + 3)
          ! buffer_out can be 0 if buffer_in contained less elements than the max number of atom pairs
          ! is_assoc_atomic_block is a map for atom pairs to a processor (assumes symmetry, i,j on the ame as j,i)
-         IF (itask .NE. 0) THEN
+         IF (itask /= 0) THEN
             iatom = buffer_out(ibuf + 1)
             jatom = buffer_out(ibuf + 2)
             is_assoc_atomic_block(iatom, jatom) = itask

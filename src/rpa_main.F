@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -969,7 +969,7 @@ CONTAINS
          CALL cp_fm_struct_create(fm_struct, context=blacs_env_Q, nrow_global=dimen_RI, &
                                   ncol_global=dimen_RI, para_env=para_env_RPA)
          DO ispin = 1, SIZE(fm_mat_Q)
-            CALL cp_fm_create(fm_mat_Q(ispin), fm_struct, name="fm_mat_Q")
+            CALL cp_fm_create(fm_mat_Q(ispin), fm_struct, name="fm_mat_Q", set_zero=.TRUE.)
          END DO
 
          CALL cp_fm_struct_release(fm_struct)
@@ -1190,9 +1190,9 @@ CONTAINS
          iter_evGW = mp2_env%ri_g0w0%iter_evGW
          iter_sc_GW0 = mp2_env%ri_g0w0%iter_sc_GW0
          IF ((.NOT. do_im_time)) THEN
-            IF (iter_sc_GW0 .NE. 1 .AND. iter_evGW .NE. 1) CPABORT("Mixed scGW0/evGW not implemented.")
+            IF (iter_sc_GW0 /= 1 .AND. iter_evGW /= 1) CPABORT("Mixed scGW0/evGW not implemented.")
             ! in case of scGW0 with the N^4 algorithm, we use the evGW code but use the DFT eigenvalues for W
-            IF (iter_sc_GW0 .NE. 1) iter_evGW = iter_sc_GW0
+            IF (iter_sc_GW0 /= 1) iter_evGW = iter_sc_GW0
          END IF
       ELSE
          ext_scaling = 0.0_dp
@@ -1270,7 +1270,7 @@ CONTAINS
          ! image charge model only implemented for cubic scaling GW
          CPASSERT(do_gw_im_time)
          CPASSERT(.NOT. do_periodic)
-         IF (cut_memory .NE. 1) CPABORT("For IC, use MEMORY_CUT 1 in the LOW_SCALING section.")
+         IF (cut_memory /= 1) CPABORT("For IC, use MEMORY_CUT 1 in the LOW_SCALING section.")
       END IF
 
       ALLOCATE (e_fermi(nspins))
@@ -1282,6 +1282,7 @@ CONTAINS
                                do_kpoints_cubic_RPA, e_fermi(1), tj, wj, &
                                weights_cos_tf_t_to_w, weights_cos_tf_w_to_t, weights_sin_tf_t_to_w, &
                                qs_env%mp2_env%ri_g0w0%regularization_minimax)
+
          !For sos_laplace_mp2 and low-scaling RPA, potentially need to store/retrieve the initial weights
          IF (qs_env%mp2_env%ri_rpa_im_time%keep_quad) THEN
             CALL keep_initial_quad(tj, wj, tau_tj, tau_wj, weights_cos_tf_t_to_w, &
@@ -1333,7 +1334,6 @@ CONTAINS
       IF (calc_forces .AND. .NOT. do_im_time) CALL rpa_grad_create(rpa_grad, fm_mat_Q(1), &
                                                                    fm_mat_S, homo, virtual, mp2_env, Eigenval(:, 1, :), &
                                                                    unit_nr, do_ri_sos_laplace_mp2)
-!doubtful
       IF (.NOT. do_im_time .AND. .NOT. do_ri_sos_laplace_mp2) &
          CALL exchange_work%create(qs_env, para_env_sub, mat_munu, dimen_RI_red, &
                                    fm_mat_S, fm_mat_Q(1), fm_mat_Q_gemm(1), homo, virtual)

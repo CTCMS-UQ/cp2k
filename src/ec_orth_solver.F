@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -17,10 +17,12 @@ MODULE ec_orth_solver
                                               get_admm_env
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add, dbcsr_add_on_diag, dbcsr_checksum, dbcsr_copy, dbcsr_create, &
-        dbcsr_desymmetrize, dbcsr_dot, dbcsr_filter, dbcsr_finalize, dbcsr_get_info, &
-        dbcsr_multiply, dbcsr_p_type, dbcsr_release, dbcsr_scale, dbcsr_set, dbcsr_transposed, &
-        dbcsr_type, dbcsr_type_no_symmetry
+        dbcsr_add, dbcsr_copy, dbcsr_create, dbcsr_desymmetrize, dbcsr_filter, dbcsr_finalize, &
+        dbcsr_get_info, dbcsr_multiply, dbcsr_p_type, dbcsr_release, dbcsr_scale, dbcsr_set, &
+        dbcsr_transposed, dbcsr_type, dbcsr_type_no_symmetry
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_add_on_diag,&
+                                              dbcsr_checksum,&
+                                              dbcsr_dot
    USE cp_dbcsr_operations,             ONLY: dbcsr_allocate_matrix_set,&
                                               dbcsr_deallocate_matrix_set
    USE cp_external_control,             ONLY: external_control
@@ -104,8 +106,8 @@ CONTAINS
 !> \date    01.2020
 !> \author  Fabian Belleflamme
 ! **************************************************************************************************
-   SUBROUTINE preconditioner(qs_env, matrix_ks, matrix_p, matrix_rhs, &
-                             matrix_cg_z, eps_filter, iounit)
+   SUBROUTINE ec_preconditioner(qs_env, matrix_ks, matrix_p, matrix_rhs, &
+                                matrix_cg_z, eps_filter, iounit)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(dbcsr_p_type), DIMENSION(:), INTENT(IN), &
@@ -115,7 +117,7 @@ CONTAINS
       REAL(KIND=dp), INTENT(IN)                          :: eps_filter
       INTEGER, INTENT(IN)                                :: iounit
 
-      CHARACTER(len=*), PARAMETER                        :: routineN = 'preconditioner'
+      CHARACTER(len=*), PARAMETER                        :: routineN = 'ec_preconditioner'
 
       INTEGER                                            :: handle, i, ispin, max_iter, nao, nspins
       LOGICAL                                            :: converged
@@ -237,14 +239,14 @@ CONTAINS
             IF (abnormal_value(norm_rr(ispin))) &
                CPABORT("Preconditioner: Tr[r_j*r_j] is an abnormal value (NaN/Inf)")
 
-            IF (norm_rr(ispin) .LT. 0.0_dp) CPABORT("norm_rr < 0")
+            IF (norm_rr(ispin) < 0.0_dp) CPABORT("norm_rr < 0")
             norm_res = MAX(norm_res, ABS(norm_rr(ispin)/REAL(nao, dp)))
 
             ! norm_cA = tr(Ap_j * p_j)
             CALL dbcsr_dot(matrix_cg(ispin)%matrix, matrix_Ax(ispin)%matrix, norm_cA(ispin))
 
             ! Determine step-size
-            IF (norm_cA(ispin) .LT. linres_control%eps) THEN
+            IF (norm_cA(ispin) < linres_control%eps) THEN
                alpha(ispin) = 1.0_dp
             ELSE
                alpha(ispin) = norm_rr(ispin)/norm_cA(ispin)
@@ -264,13 +266,13 @@ CONTAINS
          DO ispin = 1, nspins
             ! Tr[r_j+1*z_j+1]
             CALL dbcsr_dot(matrix_res(ispin)%matrix, matrix_res(ispin)%matrix, new_norm(ispin))
-            IF (new_norm(ispin) .LT. 0.0_dp) CPABORT("tr(r_j+1*z_j+1) < 0")
+            IF (new_norm(ispin) < 0.0_dp) CPABORT("tr(r_j+1*z_j+1) < 0")
             IF (abnormal_value(new_norm(ispin))) &
                CPABORT("Preconditioner: Tr[r_j+1*z_j+1] is an abnormal value (NaN/Inf)")
             norm_res = MAX(norm_res, new_norm(ispin)/REAL(nao, dp))
 
-            IF (norm_rr(ispin) .LT. linres_control%eps*0.001_dp &
-                .OR. new_norm(ispin) .LT. linres_control%eps*0.001_dp) THEN
+            IF (norm_rr(ispin) < linres_control%eps*0.001_dp &
+                .OR. new_norm(ispin) < linres_control%eps*0.001_dp) THEN
                beta(ispin) = 0.0_dp
                converged = .TRUE.
             ELSE
@@ -286,12 +288,12 @@ CONTAINS
          END DO
 
          ! Convergence criteria
-         IF (norm_res .LT. linres_control%eps) THEN
+         IF (norm_res < linres_control%eps) THEN
             converged = .TRUE.
          END IF
 
          t2 = m_walltime()
-         IF (i .EQ. 1 .OR. MOD(i, 1) .EQ. 0 .OR. converged) THEN
+         IF (i == 1 .OR. MOD(i, 1) == 0 .OR. converged) THEN
             IF (iounit > 0) THEN
                WRITE (iounit, "(T10,I5,T25,1E8.2,T33,F25.14,T58,F8.2)") &
                   i, MAXVAL(alpha), norm_res, t2 - t1
@@ -334,7 +336,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE preconditioner
+   END SUBROUTINE ec_preconditioner
 
 ! **************************************************************************************************
 !> \brief AO-based conjugate gradient linear response solver.
@@ -556,13 +558,13 @@ CONTAINS
       IF (linres_control%preconditioner_type == precond_mlp) THEN
          ! M * z_0 = r_0
          ! Conjugate gradient returns z_0
-         CALL preconditioner(qs_env=qs_env, &
-                             matrix_ks=matrix_ks, &
-                             matrix_p=matrix_p, &
-                             matrix_rhs=matrix_res, &
-                             matrix_cg_z=matrix_z0, &
-                             eps_filter=eps_filter, &
-                             iounit=iounit)
+         CALL ec_preconditioner(qs_env=qs_env, &
+                                matrix_ks=matrix_ks, &
+                                matrix_p=matrix_p, &
+                                matrix_rhs=matrix_res, &
+                                matrix_cg_z=matrix_z0, &
+                                eps_filter=eps_filter, &
+                                iounit=iounit)
          linres_control%flag = "PCG-AO"
       ELSE
          ! z_0 = r_0
@@ -581,7 +583,7 @@ CONTAINS
          ! Tr(r_0 * z_0)
          CALL dbcsr_dot(matrix_res(ispin)%matrix, matrix_cg(ispin)%matrix, norm_rr(ispin))
 
-         IF (norm_rr(ispin) .LT. 0.0_dp) CPABORT("norm_rr < 0")
+         IF (norm_rr(ispin) < 0.0_dp) CPABORT("norm_rr < 0")
          norm_res = MAX(norm_res, ABS(norm_rr(ispin)/REAL(nao, dp)))
       END DO
 
@@ -608,12 +610,12 @@ CONTAINS
 
          ! Convergence criteria
          ! default for eps 10E-6 in MO_linres
-         IF (norm_res .LT. linres_control%eps) THEN
+         IF (norm_res < linres_control%eps) THEN
             linres_control%converged = .TRUE.
          END IF
 
          t2 = m_walltime()
-         IF (i .EQ. 1 .OR. MOD(i, 1) .EQ. 0 .OR. linres_control%converged &
+         IF (i == 1 .OR. MOD(i, 1) == 0 .OR. linres_control%converged &
              .OR. restart .OR. should_stop) THEN
             IF (iounit > 0) THEN
                WRITE (iounit, "(T5,I5,T18,A3,T28,L1,T38,1E8.2,T48,F16.10,T68,F8.2)") &
@@ -664,7 +666,7 @@ CONTAINS
             ! norm_cA = tr(Ap_j * p_j)
             CALL dbcsr_dot(matrix_cg(ispin)%matrix, matrix_Ax(ispin)%matrix, norm_cA(ispin))
 
-            IF (norm_cA(ispin) .LT. 0.0_dp) THEN
+            IF (norm_cA(ispin) < 0.0_dp) THEN
 
                ! Recalculate w/o preconditioner
                IF (i > 1) THEN
@@ -705,7 +707,7 @@ CONTAINS
 
          DO ispin = 1, nspins
             ! Determine step-size
-            IF (norm_cA(ispin) .LT. linres_control%eps) THEN
+            IF (norm_cA(ispin) < linres_control%eps) THEN
                alpha(ispin) = 1.0_dp
             ELSE
                alpha(ispin) = norm_rr(ispin)/norm_cA(ispin)
@@ -718,7 +720,7 @@ CONTAINS
 
          ! need to recompute the residue
          restart = .FALSE.
-         IF (MOD(i, linres_control%restart_every) .EQ. 0) THEN
+         IF (MOD(i, linres_control%restart_every) == 0) THEN
             !
             ! r_j+1 = b - A * x_j+1
             CALL build_hessian_op(qs_env=qs_env, &
@@ -755,13 +757,13 @@ CONTAINS
          IF (linres_control%preconditioner_type == precond_mlp) THEN
             ! M * z_j+1 = r_j+1
             ! Conjugate gradient returns z_j+1
-            CALL preconditioner(qs_env=qs_env, &
-                                matrix_ks=matrix_ks, &
-                                matrix_p=matrix_p, &
-                                matrix_rhs=matrix_res, &
-                                matrix_cg_z=matrix_z0, &
-                                eps_filter=eps_filter, &
-                                iounit=iounit)
+            CALL ec_preconditioner(qs_env=qs_env, &
+                                   matrix_ks=matrix_ks, &
+                                   matrix_p=matrix_p, &
+                                   matrix_rhs=matrix_res, &
+                                   matrix_cg_z=matrix_z0, &
+                                   eps_filter=eps_filter, &
+                                   iounit=iounit)
             linres_control%flag = "PCG-AO"
          ELSE
             DO ispin = 1, nspins
@@ -775,12 +777,12 @@ CONTAINS
          DO ispin = 1, nspins
             ! Tr[r_j+1*z_j+1]
             CALL dbcsr_dot(matrix_res(ispin)%matrix, matrix_z0(ispin)%matrix, new_norm(ispin))
-            IF (new_norm(ispin) .LT. 0.0_dp) CPABORT("tr(r_j+1*z_j+1) < 0")
+            IF (new_norm(ispin) < 0.0_dp) CPABORT("tr(r_j+1*z_j+1) < 0")
             IF (abnormal_value(new_norm(ispin))) &
                CPABORT("Preconditioner: Tr[r_j+1*z_j+1] is an abnormal value (NaN/Inf)")
             norm_res = MAX(norm_res, new_norm(ispin)/REAL(nao, dp))
 
-            IF (norm_rr(ispin) .LT. linres_control%eps .OR. new_norm(ispin) .LT. linres_control%eps) THEN
+            IF (norm_rr(ispin) < linres_control%eps .OR. new_norm(ispin) < linres_control%eps) THEN
                beta(ispin) = 0.0_dp
                linres_control%converged = .TRUE.
             ELSE
@@ -1055,7 +1057,7 @@ CONTAINS
       END DO
 
       ! skip the kernel if the DM is very small
-      IF (chksum .GT. 1.0E-14_dp) THEN
+      IF (chksum > 1.0E-14_dp) THEN
 
          ! Bring matrix B as density on grid
 

@@ -17,15 +17,29 @@ import shutil
 import subprocess
 import sys
 import time
+from matchers import run_matcher
 
+if sys.version_info >= (3, 8):
+    from typing import Literal
+else:
+    from typing_extensions import Literal
+
+# Try importing toml from various places.
 try:
-    from typing import Literal  # not available before Python 3.8
-
-    TestStatus = Literal[
-        "OK", "WRONG RESULT", "RUNTIME FAIL", "TIMED OUT", "HUGE OUTPUT"
-    ]
+    import tomllib  # not available before Python 3.11
 except ImportError:
-    TestStatus = str  # type: ignore
+    try:
+        import pip._vendor.tomli as tomllib  # type: ignore
+    except ImportError:
+        try:
+            import pip._vendor.toml as tomllib  # type: ignore
+        except ImportError:
+            import toml as tomllib  # type: ignore
+
+# Possible test outcomes.
+TestStatus = Literal[
+    "OK", "WRONG RESULT", "RUNTIME FAIL", "TIMED OUT", "HUGE OUTPUT", "N/A"
+]
 
 # Some tests do not work with --keepalive (which is generally considered a bug).
 KEEPALIVE_SKIP_DIRS = [
@@ -66,6 +80,7 @@ async def main() -> None:
     parser.add_argument("--restrictdir", action="append")
     parser.add_argument("--skipdir", action="append")
     parser.add_argument("--workbasedir", type=Path)
+    parser.add_argument("--cp2kdatadir", type=Path)
     parser.add_argument("--skip_unittests", action="store_true")
     parser.add_argument("--skip_regtests", action="store_true")
     parser.add_argument("binary_dir", type=Path)
@@ -99,6 +114,7 @@ async def main() -> None:
     print(f"Flag slow:      {cfg.flag_slow}")
     print(f"Debug:          {cfg.debug}")
     print(f"Binary dir:     {cfg.binary_dir}")
+    print(f"CP2K data dir:  {cfg.cp2k_data_dir}")
     print(f"VERSION:        {cfg.version}")
     print(f"Flags:          " + ",".join(flags))
 
@@ -120,12 +136,6 @@ async def main() -> None:
             batch.unittests.append(Unittest(line.split()[0], batch.workdir))
             batches.append(batch)
 
-    # Read TEST_TYPES.
-    test_types_fn = cfg.cp2k_root / "tests" / "TEST_TYPES"
-    test_types: List[Optional[TestType]] = [None]  # test type zero
-    lines = test_types_fn.read_text(encoding="utf8").split("\n")
-    test_types += [TestType(l) for l in lines[1 : int(lines[0]) + 1]]
-
     # Read TEST_DIRS.
     test_dirs_fn = cfg.cp2k_root / "tests" / "TEST_DIRS"
     for line in test_dirs_fn.read_text(encoding="utf8").split("\n"):
@@ -134,13 +144,11 @@ async def main() -> None:
             continue
         batch = Batch(line, cfg)
 
-        # Read TEST_FILES.
-        test_files_fn = Path(batch.src_dir / "TEST_FILES")
-        for line in test_files_fn.read_text(encoding="utf8").split("\n"):
-            line = line.split("#", 1)[0].strip()
-            if not line:
-                continue
-            batch.regtests.append(Regtest(line, test_types, batch.workdir))
+        # Read TEST_FILES.toml
+        test_files_fn = Path(batch.src_dir / "TEST_FILES.toml")
+        test_files_content = test_files_fn.read_text(encoding="utf8")
+        for inp_fn, matcher_specs in tomllib.loads(test_files_content).items():
+            batch.regtests.append(Regtest(inp_fn, matcher_specs, batch.workdir))
             if cfg.smoketest:
                 break  # run only one test per directory
         batches.append(batch)
@@ -212,7 +220,7 @@ async def main() -> None:
         for t in await asyncio.gather(*rerun_tasks):
             rerun_times.update({r.fullname: r.duration for r in t.results})
         stats = {r.fullname: [r.duration, rerun_times[r.fullname]] for r in maybe_slow}
-        slow_tests = {k: v for k, v in stats.items() if mean(v) > threshold}
+        slow_tests = {k: v for k, v in stats.items() if mean(v) - stdev(v) > threshold}
         print(f"Duration threshold (2x 95th %ile): {threshold:.2f} sec")
         print(f"Found {len(slow_tests)} slow tests ({num_suppressed} suppressed):")
         for k, v in slow_tests.items():
@@ -224,6 +232,7 @@ async def main() -> None:
     failure_modes = ["RUNTIME FAIL", "TIMED OUT", "HUGE OUTPUT"]
     num_failed = sum(r.status in failure_modes for r in all_results)
     num_wrong = sum(r.status == "WRONG RESULT" for r in all_results)
+    num_na = sum(r.status == "N/A" for r in all_results)
     num_ok = sum(r.status == "OK" for r in all_results)
     status_ok = (num_ok == num_tests) and (not cfg.flag_slow or not slow_tests)
     print(f"Number of FAILED  tests {num_failed}")
@@ -233,6 +242,7 @@ async def main() -> None:
     summary = f"\nSummary: correct: {num_ok} / {num_tests}"
     summary += f"; wrong: {num_wrong}" if num_wrong > 0 else ""
     summary += f"; failed: {num_failed}" if num_failed > 0 else ""
+    summary += f"; n/a: {num_na}" if num_na > 0 else ""
     summary += f"; slow: {len(slow_tests)}" if cfg.flag_slow and slow_tests else ""
     summary += f"; {total_duration/60.0:.0f}min"
     print(summary)
@@ -272,6 +282,10 @@ class Config:
         leaf_dir = f"TEST-{datestamp}"
         self.work_base_dir = (args.workbasedir or args.binary_dir).resolve() / leaf_dir
         self.error_summary = self.work_base_dir / "error_summary"
+        self.cp2k_data_dir = (
+            args.cp2kdatadir
+            or Path(os.getenv("CP2K_DATA_DIR", str(self.cp2k_root / "data")))
+        ).resolve()
 
         # Parse suppression files.
         slow_supps_fn = self.cp2k_root / "tests" / "SLOW_TESTS_SUPPRESSIONS"
@@ -306,9 +320,14 @@ class Config:
             env["CUDA_VISIBLE_DEVICES"] = ",".join(visible_gpu_devices)
             env["HIP_VISIBLE_DEVICES"] = ",".join(visible_gpu_devices)
         env["OMP_NUM_THREADS"] = str(self.ompthreads)
+        env["CP2K_DATA_DIR"] = str(self.cp2k_data_dir)
         env["PIKA_COMMANDLINE_OPTIONS"] = (
             f"--pika:bind=none --pika:threads={self.ompthreads}"
         )
+        if cwd is not None and "MIMIC" == cwd.parent.name:
+            env["MCL_COMM_MODE"] = "TEST_STUB"
+            env["MCL_PROGRAM"] = "1"
+            env["MCL_TEST_DATA"] = "MCL_LOG_1"
         exe_name = f"{exe_stem}.{self.version}"
         cmd = [str(self.binary_dir / exe_name)]
         if self.valgrind:
@@ -323,38 +342,12 @@ class Config:
 
 
 # ======================================================================================
-class TestType:
-    """Search pattern for result values, ie. a line in the TEST_TYPES file."""
-
-    def __init__(self, line: str):
-        parts = line.rsplit("!", 1)
-        self.pattern = parts[0]
-        self.pattern = self.pattern.replace("[[:space:]]", r"\s")
-        for c in r"|()+":
-            self.pattern = self.pattern.replace(c, f"\\{c}")  # escape special chars
-        try:
-            self.regex = re.compile(self.pattern)
-        except Exception:
-            print("Bad regex: " + self.pattern)
-            raise
-        self.column = int(parts[1])
-
-    def grep(self, output: str) -> Optional[str]:
-        for line in reversed(output.split("\n")):
-            match = self.regex.search(line)
-            if match:
-                # print("pattern:" + self.pattern)
-                # print("line:"+line)
-                return line.split()[self.column - 1]
-        return None
-
-
-# ======================================================================================
 class Unittest:
     """A unit test, ie. a standalone binary that matches '*_unittest.{cfg.version}'."""
 
     def __init__(self, name: str, workdir: Path):
         self.name = name
+        self.matcher_specs: List[Any] = []
         self.out_path = workdir / (self.name + ".out")
 
 
@@ -362,17 +355,11 @@ class Unittest:
 class Regtest:
     """A single input file to test, ie. a line in a TEST_FILES file."""
 
-    def __init__(self, line: str, test_types: List[Optional[TestType]], workdir: Path):
-        parts = line.split()
-        self.inp_fn = parts[0]
+    def __init__(self, inp_fn: str, matcher_specs: List[Any], workdir: Path):
+        self.inp_fn = inp_fn
         self.name = self.inp_fn
+        self.matcher_specs = matcher_specs
         self.out_path = workdir / (self.name + ".out")
-
-        self.test_type = test_types[int(parts[1])]
-        if self.test_type:
-            self.tolerance = float(parts[2])
-            self.ref_value_txt = parts[3]
-            self.ref_value = float(self.ref_value_txt)
 
 
 # ======================================================================================
@@ -390,10 +377,15 @@ class Batch:
         self.huge_suppressions = cfg.huge_suppressions
 
     def requirements_satisfied(self, flags: List[str], mpiranks: int) -> bool:
+        result = True
         for r in self.requirements:
-            if not (r in flags or ("mpiranks" in r and eval(r.replace("||", " or ")))):
-                return False
-        return True
+            if "mpiranks" in r:
+                result &= eval(r.replace("||", " or "))
+            elif r.startswith("!"):
+                result &= r[1:] not in flags
+            else:
+                result &= r in flags
+        return result
 
 
 # ======================================================================================
@@ -402,22 +394,27 @@ class TestResult:
         self,
         batch: Batch,
         test: Union[Regtest, Unittest],
+        spec: Optional[Dict[str, Any]],
         duration: float,
         status: TestStatus,
-        value: Optional[float] = None,
         error: Optional[str] = None,
+        value: Optional[float] = None,
     ):
         self.batch = batch
         self.test = test
+        self.spec = spec
         self.duration = duration
         self.status = status
-        self.value = value
         self.error = error
+        self.value = value
         self.fullname = f"{batch.name}/{test.name}"
 
     def __str__(self) -> str:
+        display_name = self.test.name
+        if self.spec and len(self.test.matcher_specs) > 1:
+            display_name += f":{self.spec.get('matcher', '???')}"
         value = f"{self.value:.10g}" if self.value else "-"
-        return f"    {self.test.name :<80s} {value :>17} {self.status :>12s} ( {self.duration:6.2f} sec)"
+        return f"    {display_name :<80s} {value :>17} {self.status :>12s} ( {self.duration:6.2f} sec)"
 
 
 # ======================================================================================
@@ -534,14 +531,12 @@ async def run_unittests(batch: Batch, cfg: Config) -> List[TestResult]:
         error = "x" * 100 + f"\n{test.out_path}\n{output_tail}\n\n"
         if timed_out:
             error += f"Timed out after {duration} seconds."
-            results.append(TestResult(batch, test, duration, "TIMED OUT", error=error))
+            results += [TestResult(batch, test, None, duration, "TIMED OUT", error)]
         elif returncode != 0:
             error += f"Runtime failure with code {returncode}."
-            results.append(
-                TestResult(batch, test, duration, "RUNTIME FAIL", error=error)
-            )
+            results += [TestResult(batch, test, None, duration, "RUNTIME FAIL", error)]
         else:
-            results.append(TestResult(batch, test, duration, "OK"))
+            results += [TestResult(batch, test, None, duration, "OK")]
 
     return results
 
@@ -578,8 +573,9 @@ async def run_regtests_keepalive(batch: Batch, cfg: Config) -> List[TestResult]:
             await shell.start()
         duration = time.perf_counter() - start_time
         output_size = dirsize(batch.workdir) - start_dirsize
-        res = eval_regtest(batch, test, duration, output_size, returncode, timed_out)
-        results.append(res)
+        results += eval_regtest(
+            batch, test, duration, output_size, returncode, timed_out
+        )
 
     await shell.stop()
     return results
@@ -596,8 +592,9 @@ async def run_regtests_classic(batch: Batch, cfg: Config) -> List[TestResult]:
         test.out_path.write_bytes(output)
         duration = time.perf_counter() - start_time
         output_size = dirsize(batch.workdir) - start_dirsize
-        res = eval_regtest(batch, test, duration, output_size, returncode, timed_out)
-        results.append(res)
+        results += eval_regtest(
+            batch, test, duration, output_size, returncode, timed_out
+        )
 
     return results
 
@@ -615,7 +612,7 @@ def eval_regtest(
     output_size: int,
     returncode: int,
     timed_out: bool,
-) -> TestResult:
+) -> List[TestResult]:
     is_huge_suppressed = f"{batch.name}/{test.name}" in batch.huge_suppressions
     output_bytes = test.out_path.read_bytes() if test.out_path.exists() else b""
     output = output_bytes.decode("utf8", errors="replace")
@@ -625,45 +622,31 @@ def eval_regtest(
     # check for timeout
     if timed_out:
         error += f"{output_tail}\n\nTimed out after {duration} seconds."
-        return TestResult(batch, test, duration, "TIMED OUT", error=error)
+        return [TestResult(batch, test, None, duration, "TIMED OUT", error)]
 
     # check for crash
     if returncode != 0:
         error += f"{output_tail}\n\nRuntime failure with code {returncode}."
-        return TestResult(batch, test, duration, "RUNTIME FAIL", error=error)
+        return [TestResult(batch, test, None, duration, "RUNTIME FAIL", error)]
 
     # check for huge output
     if output_size > 2 * 1024 * 1024 and not is_huge_suppressed:  # 2MiB limit
         error += f"Test produced {output_size/1024/1024:.2f} MiB of output."
-        return TestResult(batch, test, duration, "HUGE OUTPUT", error=error)
+        return [TestResult(batch, test, None, duration, "HUGE OUTPUT", error)]
 
-    # happy end for test type zero
-    if not test.test_type:
-        return TestResult(batch, test, duration, "OK")
+    # happy end if there are no matchers
+    if not test.matcher_specs:
+        return [TestResult(batch, test, None, duration, "OK")]
 
-    # grep result
-    value_txt = test.test_type.grep(output)
-    if not value_txt:
-        error += f"{output_tail}\n\nResult not found: '{test.test_type.pattern}'."
-        return TestResult(batch, test, duration, "WRONG RESULT", error=error)
+    # run the matchers
+    results = []
+    for spec in test.matcher_specs:
+        m = run_matcher(output, **spec)
+        if m.error:
+            m.error = f"{error}Spec: {spec}\n{m.error}"
+        results += [TestResult(batch, test, spec, duration, m.status, m.error, m.value)]
 
-    # parse result
-    try:
-        value = float(value_txt)
-    except:
-        error += f"Could not parse result as float: '{value_txt}'."
-        return TestResult(batch, test, duration, "WRONG RESULT", error=error)
-
-    # compare result to reference
-    diff = value - test.ref_value
-    rel_error = abs(diff / test.ref_value if test.ref_value != 0.0 else diff)
-    if rel_error > test.tolerance:
-        error += f"Difference too large: {rel_error:.2e} > {test.tolerance}, "
-        error += f"ref_value: {test.ref_value_txt}, value: {value_txt}."
-        return TestResult(batch, test, duration, "WRONG RESULT", value, error)
-
-    # happy end
-    return TestResult(batch, test, duration, "OK", value)
+    return results
 
 
 # ======================================================================================

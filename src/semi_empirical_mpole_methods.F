@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -59,8 +59,8 @@ CONTAINS
       INTEGER, INTENT(IN)                                :: method
 
       CHARACTER(LEN=3), DIMENSION(9), PARAMETER :: &
-         label_print_orb = (/"  s", " px", " py", " pz", "dx2", "dzx", "dz2", "dzy", "dxy"/)
-      INTEGER, DIMENSION(9), PARAMETER :: loc_index = (/1, 2, 2, 2, 3, 3, 3, 3, 3/)
+         label_print_orb = ["  s", " px", " py", " pz", "dx2", "dzx", "dz2", "dzy", "dxy"]
+      INTEGER, DIMENSION(9), PARAMETER :: loc_index = [1, 2, 2, 2, 3, 3, 3, 3, 3]
 
       INTEGER                                            :: a, b, i, ind1, ind2, j, k, k1, k2, mu, &
                                                             natorb, ndim, nr

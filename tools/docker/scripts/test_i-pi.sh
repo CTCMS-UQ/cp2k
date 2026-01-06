@@ -2,8 +2,8 @@
 
 # author: Ole Schuett
 
-# Compile CP2K.
-./build_cp2k_cmake.sh "ubuntu" "ssmp" || exit 0
+# shellcheck disable=SC1091
+source /opt/cp2k-toolchain/install/setup
 
 echo -e "\n========== Installing Dependencies =========="
 apt-get update -qq
@@ -24,6 +24,7 @@ echo -e "\n========== Installing i-Pi =========="
 git clone --quiet --depth=1 --single-branch -b main https://github.com/i-pi/i-pi.git /opt/i-pi
 cd /opt/i-pi
 pip3 install --quiet .
+pip3 install --quiet scipy # missing from i-pi requirements
 
 echo -e "\n========== Running i-Pi Tests =========="
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -108,8 +108,8 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'build_tb_qmmm_matrix'
 
-      INTEGER                                            :: blk, handle, i, iatom, ikind, jatom, &
-                                                            natom, natorb, nkind
+      INTEGER                                            :: handle, i, iatom, ikind, jatom, natom, &
+                                                            natorb, nkind
       INTEGER, DIMENSION(:), POINTER                     :: list
       LOGICAL                                            :: defined, do_dftb, do_xtb, found
       REAL(KIND=dp)                                      :: pc_ener, zeff
@@ -214,7 +214,7 @@ CONTAINS
 
       CALL dbcsr_iterator_start(iter, matrix_s(1)%matrix)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
-         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sblock, blk)
+         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sblock)
          NULLIFY (hblock)
          CALL dbcsr_get_block_p(matrix=matrix_h(1)%matrix, &
                                 row=iatom, col=jatom, block=hblock, found=found)
@@ -316,9 +316,9 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'build_tb_qmmm_matrix_pc'
 
-      INTEGER                                            :: blk, do_ipol, ewald_type, handle, i, &
-                                                            iatom, ikind, imm, imp, indmm, ipot, &
-                                                            jatom, natom, natorb, nkind, nmm
+      INTEGER                                            :: do_ipol, ewald_type, handle, i, iatom, &
+                                                            ikind, imm, imp, indmm, ipot, jatom, &
+                                                            natom, natorb, nkind, nmm
       INTEGER, DIMENSION(:), POINTER                     :: list
       LOGICAL                                            :: defined, do_dftb, do_multipoles, do_xtb, &
                                                             found
@@ -550,7 +550,7 @@ CONTAINS
 
       CALL dbcsr_iterator_start(iter, matrix_s(1)%matrix)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
-         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sblock, blk)
+         CALL dbcsr_iterator_next_block(iter, iatom, jatom, sblock)
          NULLIFY (hblock)
          CALL dbcsr_get_block_p(matrix=matrix_h(1)%matrix, &
                                 row=iatom, col=jatom, block=hblock, found=found)
@@ -601,9 +601,9 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'deriv_tb_qmmm_matrix'
 
-      INTEGER                                            :: atom_a, blk, handle, i, iatom, ikind, &
-                                                            iqm, jatom, natom, natorb, nkind, &
-                                                            nspins, number_qm_atoms
+      INTEGER                                            :: atom_a, handle, i, iatom, ikind, iqm, &
+                                                            jatom, natom, natorb, nkind, nspins, &
+                                                            number_qm_atoms
       INTEGER, DIMENSION(:), POINTER                     :: list
       LOGICAL                                            :: defined, do_dftb, do_xtb, found
       REAL(KIND=dp)                                      :: fi, gmij, zeff
@@ -762,7 +762,7 @@ CONTAINS
          !
          CALL dbcsr_iterator_start(iter, matrix_s(1)%matrix)
          DO WHILE (dbcsr_iterator_blocks_left(iter))
-            CALL dbcsr_iterator_next_block(iter, iatom, jatom, sblock, blk)
+            CALL dbcsr_iterator_next_block(iter, iatom, jatom, sblock)
             !
             IF (iatom == jatom) CYCLE
             !
@@ -838,8 +838,8 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'deriv_tb_qmmm_matrix_pc'
 
-      INTEGER :: atom_a, blk, do_ipol, ewald_type, handle, i, iatom, ikind, imm, imp, indmm, ipot, &
-         iqm, jatom, natom, natorb, nkind, nmm, nspins, number_qm_atoms
+      INTEGER :: atom_a, do_ipol, ewald_type, handle, i, iatom, ikind, imm, imp, indmm, ipot, iqm, &
+         jatom, natom, natorb, nkind, nmm, nspins, number_qm_atoms
       INTEGER, DIMENSION(:), POINTER                     :: list
       LOGICAL                                            :: defined, do_dftb, do_multipoles, do_xtb, &
                                                             found
@@ -1178,7 +1178,7 @@ CONTAINS
          !
          CALL dbcsr_iterator_start(iter, matrix_s(1)%matrix)
          DO WHILE (dbcsr_iterator_blocks_left(iter))
-            CALL dbcsr_iterator_next_block(iter, iatom, jatom, sblock, blk)
+            CALL dbcsr_iterator_next_block(iter, iatom, jatom, sblock)
             !
             IF (iatom == jatom) CYCLE
             !
@@ -1288,7 +1288,7 @@ CONTAINS
             rt1 = r_pbc(1)
             rt2 = r_pbc(2)
             rt3 = r_pbc(3)
-            rij = (/rt1, rt2, rt3/)
+            rij = [rt1, rt2, rt3]
             dr = SQRT(SUM(rij**2))
             qeff = mm_charges(Imm)
             ! Computes the screening factor for the spherical cutoff (if defined)
@@ -1296,7 +1296,7 @@ CONTAINS
                CALL spherical_cutoff_factor(qmmm_spherical_cutoff, rij, sph_chrg_factor)
                qeff = qeff*sph_chrg_factor
             END IF
-            IF (ABS(qeff) <= qsmall) CYCLE
+            IF (ABS(qeff) <= qsmall) CYCLE LoopMM
             IF (dr > rtiny) THEN
                IF (pot_type == 0) THEN
                   sr = gamma_rab_sr(dr, qm_alpha, eta_mm, 0.0_dp)
@@ -1372,7 +1372,7 @@ CONTAINS
             rt1 = r_pbc(1)
             rt2 = r_pbc(2)
             rt3 = r_pbc(3)
-            rij = (/rt1, rt2, rt3/)
+            rij = [rt1, rt2, rt3]
             dr = SQRT(SUM(rij**2))
             qeff = mm_charges(Imm)
             ! Computes the screening factor for the spherical cutoff (if defined)
@@ -1381,7 +1381,7 @@ CONTAINS
                CALL spherical_cutoff_factor(qmmm_spherical_cutoff, rij, sph_chrg_factor)
                qeff = qeff*sph_chrg_factor
             END IF
-            IF (ABS(qeff) <= qsmall) CYCLE
+            IF (ABS(qeff) <= qsmall) CYCLE LoopMM
             IF (dr > rtiny) THEN
                drp = dr + ddrmm
                drm = dr - ddrmm

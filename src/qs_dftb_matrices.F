@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -20,8 +20,9 @@ MODULE qs_dftb_matrices
                                               dftb_control_type
    USE cp_dbcsr_api,                    ONLY: &
         dbcsr_add, dbcsr_convert_offsets_to_sizes, dbcsr_copy, dbcsr_create, &
-        dbcsr_distribution_type, dbcsr_dot, dbcsr_finalize, dbcsr_get_block_p, dbcsr_multiply, &
-        dbcsr_p_type, dbcsr_type, dbcsr_type_antisymmetric, dbcsr_type_symmetric
+        dbcsr_distribution_type, dbcsr_finalize, dbcsr_get_block_p, dbcsr_multiply, dbcsr_p_type, &
+        dbcsr_type, dbcsr_type_antisymmetric, dbcsr_type_symmetric
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_dot
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_alloc_block_from_nbl
    USE cp_dbcsr_operations,             ONLY: dbcsr_allocate_matrix_set
    USE cp_dbcsr_output,                 ONLY: cp_dbcsr_write_sparse_matrix
@@ -76,8 +77,8 @@ MODULE qs_dftb_matrices
 
    IMPLICIT NONE
 
-   INTEGER, DIMENSION(16), PARAMETER        :: orbptr = (/0, 1, 1, 1, &
-                                                          2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3/)
+   INTEGER, DIMENSION(16), PARAMETER        :: orbptr = [0, 1, 1, 1, &
+                                                         2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3]
 
    PRIVATE
 
@@ -762,7 +763,7 @@ CONTAINS
                                    row=irow, col=icol, BLOCK=sblock, found=found)
             CPASSERT(found)
 
-            IF (nderivative .GT. 0) THEN
+            IF (nderivative > 0) THEN
                DO i = 2, SIZE(matrix_s, 1)
                   NULLIFY (dsblocks(i)%block)
                   CALL dbcsr_get_block_p(matrix=matrix_s(i)%matrix, &
@@ -780,7 +781,7 @@ CONTAINS
                CALL compute_block_sk(sblock, smatij, smatji, rij, ngrd, ngrdcut, dgrd, &
                                      llm, lmaxi, lmaxj, irow, iatom)
 
-               IF (nderivative .GE. 1) THEN
+               IF (nderivative >= 1) THEN
                   n1 = SIZE(sblock, 1); n2 = SIZE(sblock, 2)
                   indder = 1 ! used to put the 2nd derivatives in the correct matric (5=xx,8=yy,10=zz)
 
@@ -805,7 +806,7 @@ CONTAINS
 
                      CPASSERT(ASSOCIATED(dsblocks(i + 1)%block))
                      dsblocks(i + 1)%block = dsblocks(i + 1)%block + dsblock
-                     IF (nderivative .GT. 1) THEN
+                     IF (nderivative > 1) THEN
                         indder = indder + 5 - i
                         dsblocks(indder)%block = 0.0_dp
                         dsblocks(indder)%block = dsblocks(indder)%block + &
@@ -813,7 +814,7 @@ CONTAINS
                      END IF
                   END DO
 
-                  IF (nderivative .GT. 1) THEN
+                  IF (nderivative > 1) THEN
                      DO i = 1, 2
                         DO j = i + 1, 3
                            dsblock = 0._dp; dsblockm = 0.0_dp
@@ -914,10 +915,10 @@ CONTAINS
 
       ! Up to 2nd derivative take care to get the symmetries correct
       DO i = 1, nmat
-         IF (i .GT. 1) THEN
+         IF (i > 1) THEN
             matnames = TRIM(mnames)//" DERIVATIVE MATRIX DFTB"
             symmetry_type = dbcsr_type_antisymmetric
-            IF (i .GT. 4) symmetry_type = dbcsr_type_symmetric
+            IF (i > 4) symmetry_type = dbcsr_type_symmetric
          ELSE
             symmetry_type = dbcsr_type_symmetric
             matnames = TRIM(mnames)//" MATRIX DFTB"
@@ -927,7 +928,7 @@ CONTAINS
                            name=TRIM(matnames), &
                            dist=dbcsr_dist, matrix_type=symmetry_type, &
                            row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                           nze=0, mutable_work=.TRUE.)
+                           mutable_work=.TRUE.)
          CALL cp_dbcsr_alloc_block_from_nbl(matrices(i)%matrix, sab_nl)
       END DO
 
@@ -1002,10 +1003,10 @@ CONTAINS
       ! Up to 2nd derivative take care to get the symmetries correct
       DO img = 1, nimg
          DO i = 1, nmat
-            IF (i .GT. 1) THEN
+            IF (i > 1) THEN
                matnames = TRIM(mnames)//" DERIVATIVE MATRIX DFTB"
                symmetry_type = dbcsr_type_antisymmetric
-               IF (i .GT. 4) symmetry_type = dbcsr_type_symmetric
+               IF (i > 4) symmetry_type = dbcsr_type_symmetric
             ELSE
                symmetry_type = dbcsr_type_symmetric
                matnames = TRIM(mnames)//" MATRIX DFTB"
@@ -1015,7 +1016,7 @@ CONTAINS
                               name=TRIM(matnames), &
                               dist=dbcsr_dist, matrix_type=symmetry_type, &
                               row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                              nze=0, mutable_work=.TRUE.)
+                              mutable_work=.TRUE.)
             CALL cp_dbcsr_alloc_block_from_nbl(matrices(i, img)%matrix, sab_nl)
          END DO
       END DO

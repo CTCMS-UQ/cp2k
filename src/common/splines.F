@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -28,7 +28,6 @@
 MODULE splines
 
    USE kinds,                           ONLY: dp
-   USE lapack,                          ONLY: lapack_sgbsv
 #include "../base/base_uses.f90"
 
    IMPLICIT NONE
@@ -67,7 +66,7 @@ CONTAINS
          ip = iixmin(xnew(i), x, ip)
          ynew(i) = poly3(xnew(i), c(:, ip))
       END DO
-   END FUNCTION
+   END FUNCTION spline3
 
 ! **************************************************************************************************
 !> \brief ...
@@ -95,7 +94,7 @@ CONTAINS
          IF (PRESENT(dynew)) dynew(i) = dpoly3(xnew(i), c(:, ip))
          IF (PRESENT(d2ynew)) d2ynew(i) = d2poly3(xnew(i), c(:, ip))
       END DO
-   END SUBROUTINE
+   END SUBROUTINE spline3ders
 
 ! **************************************************************************************************
 !> \brief ...
@@ -228,7 +227,7 @@ CONTAINS
 
       ! solve spline equations -- LAPACK band form
       bmat(:, 1) = bs
-      CALL lapack_sgbsv(2*(n - 1), 1, 2, 1, As, 5, ipiv2, bmat, 2*(n - 1), info)
+      CALL dgbsv(2*(n - 1), 1, 2, 1, As, 5, ipiv2, bmat, 2*(n - 1), info)
       IF (info /= 0) CALL stop_error("spline3pars error: dgbsv error.")
       cs = bmat(:, 1)
 
@@ -246,7 +245,7 @@ CONTAINS
          c(3, i) = 3*c3/hi(i)**2
          c(4, i) = (-c3 + c4)/hi(i)**3
       END DO
-   END SUBROUTINE
+   END SUBROUTINE spline3pars
 
 !--------------------------------------------------------------------------------------------------!
 
@@ -284,7 +283,7 @@ CONTAINS
       ! return value and derivative
       val = poly3(x, c(:, i1))
       der = dpoly3(x, c(:, i1))
-   END SUBROUTINE
+   END SUBROUTINE spline3valder
 
 !--------------------------------------------------------------------------------------------------!
 
@@ -341,7 +340,7 @@ CONTAINS
             END IF
          END DO
       END IF
-   END FUNCTION
+   END FUNCTION iix
 
 ! **************************************************************************************************
 !> \brief ...
@@ -360,7 +359,7 @@ CONTAINS
       ELSE
          ip = iix(x, xi)
       END IF
-   END FUNCTION
+   END FUNCTION iixmin
 
 !--------------------------------------------------------------------------------------------------!
 
@@ -396,7 +395,7 @@ CONTAINS
       IF (i < 1) i = 1
       IF (i > n - 1) i = n - 1
       iixun = i
-   END FUNCTION
+   END FUNCTION iixun
 
 !--------------------------------------------------------------------------------------------------!
 
@@ -439,7 +438,7 @@ CONTAINS
       IF (i < 1) i = 1
       IF (i > n - 1) i = n - 1
       iixexp = i
-   END FUNCTION
+   END FUNCTION iixexp
 
 !--------------------------------------------------------------------------------------------------!
 
@@ -461,7 +460,7 @@ CONTAINS
 
       dx = x - c(0)
       poly3 = c(1) + c(2)*dx + c(3)*dx**2 + c(4)*dx**3
-   END FUNCTION
+   END FUNCTION poly3
 
 !--------------------------------------------------------------------------------------------------!
 
@@ -483,7 +482,7 @@ CONTAINS
 
       dx = x - c(0)
       dpoly3 = c(2) + 2*c(3)*dx + 3*c(4)*dx**2
-   END FUNCTION
+   END FUNCTION dpoly3
 
 !--------------------------------------------------------------------------------------------------!
 
@@ -505,7 +504,7 @@ CONTAINS
 
       dx = x - c(0)
       d2poly3 = 2*c(3) + 6*c(4)*dx
-   END FUNCTION
+   END FUNCTION d2poly3
 
 !--------------------------------------------------------------------------------------------------!
 
@@ -519,6 +518,6 @@ CONTAINS
 
 ! Message to print on stdout
       CPABORT(msg)
-   END SUBROUTINE
+   END SUBROUTINE stop_error
 
 END MODULE splines

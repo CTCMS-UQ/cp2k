@@ -1,6 +1,6 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
@@ -36,37 +36,17 @@ static void read_next_line(char line[], int length, FILE *fp) {
 }
 
 /*******************************************************************************
- * \brief Parses next line from file, expecting it to match "${key} ${format}".
- * \author Ole Schuett
- ******************************************************************************/
-static void parse_next_line(const char key[], FILE *fp, const char format[],
-                            const int nargs, ...) {
-  char line[100];
-  read_next_line(line, sizeof(line), fp);
-
-  char full_format[100];
-  strcpy(full_format, key);
-  strcat(full_format, " ");
-  strcat(full_format, format);
-
-  va_list varargs;
-  va_start(varargs, nargs);
-  if (vsscanf(line, full_format, varargs) != nargs) {
-    fprintf(stderr, "Error: Could not parse line.\n");
-    fprintf(stderr, "Line: %s\n", line);
-    fprintf(stderr, "Format: %s\n", full_format);
-    abort();
-  }
-  va_end(varargs);
-}
-
-/*******************************************************************************
  * \brief Shorthand for parsing a single integer value.
  * \author Ole Schuett
  ******************************************************************************/
 static int parse_int(const char key[], FILE *fp) {
   int value;
-  parse_next_line(key, fp, "%i", 1, &value);
+  char line[100], format[100];
+  read_next_line(line, sizeof(line), fp);
+  snprintf(format, sizeof(format), "%s %%i", key);
+  if (sscanf(line, format, &value) != 1) {
+    assert(!"parse_int failed");
+  }
   return value;
 }
 
@@ -75,7 +55,12 @@ static int parse_int(const char key[], FILE *fp) {
  * \author Ole Schuett
  ******************************************************************************/
 static void parse_int3(const char key[], FILE *fp, int vec[3]) {
-  parse_next_line(key, fp, "%i %i %i", 3, &vec[0], &vec[1], &vec[2]);
+  char line[100], format[100];
+  read_next_line(line, sizeof(line), fp);
+  snprintf(format, sizeof(format), "%s %%i %%i %%i", key);
+  if (sscanf(line, format, &vec[0], &vec[1], &vec[2]) != 3) {
+    assert(!"parse_int3 failed");
+  }
 }
 
 /*******************************************************************************
@@ -84,7 +69,12 @@ static void parse_int3(const char key[], FILE *fp, int vec[3]) {
  ******************************************************************************/
 static double parse_double(const char key[], FILE *fp) {
   double value;
-  parse_next_line(key, fp, "%le", 1, &value);
+  char line[100], format[100];
+  read_next_line(line, sizeof(line), fp);
+  snprintf(format, sizeof(format), "%s %%lf", key);
+  if (sscanf(line, format, &value) != 1) {
+    assert(!"parse_double failed");
+  }
   return value;
 }
 
@@ -93,7 +83,12 @@ static double parse_double(const char key[], FILE *fp) {
  * \author Ole Schuett
  ******************************************************************************/
 static void parse_double3(const char key[], FILE *fp, double vec[3]) {
-  parse_next_line(key, fp, "%le %le %le", 3, &vec[0], &vec[1], &vec[2]);
+  char line[100], format[100];
+  read_next_line(line, sizeof(line), fp);
+  snprintf(format, sizeof(format), "%s %%lf %%lf %%lf", key);
+  if (sscanf(line, format, &vec[0], &vec[1], &vec[2]) != 3) {
+    assert(!"parse_double3 failed");
+  }
 }
 
 /*******************************************************************************
@@ -101,10 +96,13 @@ static void parse_double3(const char key[], FILE *fp, double vec[3]) {
  * \author Ole Schuett
  ******************************************************************************/
 static void parse_double3x3(const char key[], FILE *fp, double mat[3][3]) {
-  char format[100];
+  char line[100], format[100];
   for (int i = 0; i < 3; i++) {
-    sprintf(format, "%i %%le %%le %%le", i);
-    parse_next_line(key, fp, format, 3, &mat[i][0], &mat[i][1], &mat[i][2]);
+    read_next_line(line, sizeof(line), fp);
+    snprintf(format, sizeof(format), "%s %i %%lf %%lf %%lf", key, i);
+    if (sscanf(line, format, &mat[i][0], &mat[i][1], &mat[i][2]) != 3) {
+      assert(!"parse_double3x3 failed");
+    }
   }
 }
 
@@ -280,11 +278,14 @@ bool grid_replay(const char *filename, const int cycles, const bool collocate,
   const int n2 = parse_int("n2", fp);
 
   double pab_mutable[n2][n1];
-  char format[100];
+  char line[100], format[100];
   for (int i = 0; i < n2; i++) {
     for (int j = 0; j < n1; j++) {
-      sprintf(format, "%i %i %%le", i, j);
-      parse_next_line("pab", fp, format, 1, &pab_mutable[i][j]);
+      read_next_line(line, sizeof(line), fp);
+      snprintf(format, sizeof(format), "pab %i %i %%lf", i, j);
+      if (sscanf(line, format, &pab_mutable[i][j]) != 1) {
+        assert(!"parse_pab failed");
+      }
     }
   }
   const double(*pab)[n1] = (const double(*)[n1])pab_mutable;
@@ -298,7 +299,10 @@ bool grid_replay(const char *filename, const int cycles, const bool collocate,
   for (int n = 0; n < ngrid_nonzero; n++) {
     int i, j, k;
     double value;
-    parse_next_line("grid", fp, "%i %i %i %le", 4, &i, &j, &k, &value);
+    read_next_line(line, sizeof(line), fp);
+    if (sscanf(line, "grid %i %i %i %le", &i, &j, &k, &value) != 4) {
+      assert(!"parse_grid failed");
+    }
     grid_ref->host_buffer[k * npts_local[1] * npts_local[0] +
                           j * npts_local[0] + i] = value;
   }
@@ -307,8 +311,11 @@ bool grid_replay(const char *filename, const int cycles, const bool collocate,
   memset(hab_ref, 0, n2 * n1 * sizeof(double));
   for (int i = o2; i < ncoset(lb_max) + o2; i++) {
     for (int j = o1; j < ncoset(la_max) + o1; j++) {
-      sprintf(format, "%i %i %%le", i, j);
-      parse_next_line("hab", fp, format, 1, &hab_ref[i][j]);
+      read_next_line(line, sizeof(line), fp);
+      snprintf(format, sizeof(format), "hab %i %i %%lf", i, j);
+      if (sscanf(line, format, &hab_ref[i][j]) != 1) {
+        assert(!"parse_hab failed");
+      }
     }
   }
 
@@ -323,6 +330,11 @@ bool grid_replay(const char *filename, const int cycles, const bool collocate,
   read_next_line(footer_line, sizeof(footer_line), fp);
   if (strcmp(footer_line, "#THE_END\n") != 0) {
     fprintf(stderr, "Error: Wrong footer line.\n");
+    abort();
+  }
+
+  if (fclose(fp) != 0) {
+    fprintf(stderr, "Could not close task file: %s\n", filename);
     abort();
   }
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -796,7 +796,7 @@ CONTAINS
       CHARACTER(LEN=default_string_length), OPTIONAL     :: file_position
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'qs_print_cubes'
-      CHARACTER, DIMENSION(3), PARAMETER                 :: labels = (/'x', 'y', 'z'/)
+      CHARACTER, DIMENSION(3), PARAMETER                 :: labels = ['x', 'y', 'z']
 
       CHARACTER                                          :: label
       CHARACTER(LEN=default_path_length)                 :: file_tmp, filename, my_pos

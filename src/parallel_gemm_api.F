@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -21,6 +21,7 @@ MODULE parallel_gemm_api
    USE cp_cfm_types,                    ONLY: cp_cfm_type
    USE cp_fm_basic_linalg,              ONLY: cp_fm_gemm
    USE cp_fm_types,                     ONLY: cp_fm_get_mm_type,&
+                                              cp_fm_set_all_submatrix,&
                                               cp_fm_type
    USE input_constants,                 ONLY: do_cosma,&
                                               do_scalapack
@@ -75,15 +76,16 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'parallel_gemm_fm'
 
-      INTEGER                                            :: handle, handle1, my_multi
+      INTEGER                                            :: cfc, cfr, handle, my_multi
 
-      CALL timeset(routineN, handle)
+      MARK_USED(cfc)
+      MARK_USED(cfr)
 
       my_multi = cp_fm_get_mm_type()
 
       SELECT CASE (my_multi)
       CASE (do_scalapack)
-         CALL timeset(routineN//"_gemm", handle1)
+         CALL timeset(routineN//"_gemm", handle)
          CALL cp_fm_gemm(transa, transb, m, n, k, alpha, matrix_a, matrix_b, beta, matrix_c, &
                          a_first_col=a_first_col, &
                          a_first_row=a_first_row, &
@@ -91,10 +93,19 @@ CONTAINS
                          b_first_row=b_first_row, &
                          c_first_col=c_first_col, &
                          c_first_row=c_first_row)
-         CALL timestop(handle1)
       CASE (do_cosma)
 #if defined(__COSMA)
-         CALL timeset(routineN//"_cosma", handle1)
+         CALL timeset(routineN//"_cosma", handle)
+         !> This seems not to be correct in COSMA! See BLAS definition:
+         !>           On entry,  BETA  specifies the scalar  beta.  When  BETA  is
+         !>           supplied as zero then C need not be set on input.
+         IF (beta == 0.0_dp) THEN
+            cfr = 1
+            cfc = 1
+            IF (PRESENT(c_first_row)) cfr = c_first_row
+            IF (PRESENT(c_first_col)) cfc = c_first_col
+            CALL cp_fm_set_all_submatrix(matrix_c, 0.0_dp, cfr, cfc, m, n)
+         END IF
          CALL offload_activate_chosen_device()
          CALL cosma_pdgemm(transa=transa, transb=transb, m=m, n=n, k=k, alpha=alpha, &
                            matrix_a=matrix_a, matrix_b=matrix_b, beta=beta, matrix_c=matrix_c, &
@@ -104,7 +115,6 @@ CONTAINS
                            b_first_row=b_first_row, &
                            c_first_col=c_first_col, &
                            c_first_row=c_first_row)
-         CALL timestop(handle1)
 #else
          CPABORT("CP2K compiled without the COSMA library.")
 #endif

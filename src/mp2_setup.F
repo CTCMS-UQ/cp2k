@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -432,6 +432,7 @@ CONTAINS
       CALL section_vals_val_get(mp2_section, "RI%COL_BLOCK", i_val=mp2_env%block_size_col)
       CALL section_vals_val_get(mp2_section, "RI%CALC_COND_NUM", l_val=mp2_env%calc_PQ_cond_num)
       CALL section_vals_val_get(mp2_section, "RI%DO_SVD", l_val=mp2_env%do_svd)
+      CALL section_vals_val_get(mp2_section, "RI%EPS_SVD", r_val=mp2_env%eps_svd)
       CALL section_vals_val_get(mp2_section, "RI%ERI_BLKSIZE", i_vals=mp2_env%eri_blksize)
       CALL section_vals_val_get(mp2_section, "RI%RI_METRIC%POTENTIAL_TYPE", i_val=mp2_env%ri_metric%potential_type)
       CALL section_vals_val_get(mp2_section, "RI%RI_METRIC%OMEGA", r_val=mp2_env%ri_metric%omega)
@@ -492,7 +493,7 @@ CONTAINS
       NULLIFY (mp2_env%eri_mme_param)
       ALLOCATE (mp2_env%eri_mme_param)
 
-      IF (mp2_env%eri_method .EQ. do_eri_mme) THEN
+      IF (mp2_env%eri_method == do_eri_mme) THEN
          eri_mme_section => section_vals_get_subs_vals(mp2_section, "INTEGRALS%ERI_MME")
          CALL cp_eri_mme_init_read_input(eri_mme_section, mp2_env%eri_mme_param)
       END IF
@@ -521,7 +522,7 @@ CONTAINS
       ! print some info about the MP2 parameters
       unit_nr = cp_print_key_unit_nr(logger, mp2_section, "PRINT", &
                                      extension=".mp2Log")
-      IF ((mp2_env%method .NE. mp2_method_none) .AND. unit_nr > 0) THEN
+      IF ((mp2_env%method /= mp2_method_none) .AND. unit_nr > 0) THEN
          WRITE (unit_nr, '(T2,A)') ""
          SELECT CASE (mp2_env%method)
          CASE (mp2_method_direct)
@@ -563,7 +564,7 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      IF (method .NE. mp2_method_none) THEN
+      IF (method /= mp2_method_none) THEN
          CPABORT("Please use not more than one method to compute the correlation energy.")
       END IF
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -136,6 +136,16 @@ CONTAINS
 
       CALL cp_cg_main(force_env, x0, gopt_param, output_unit, globenv, &
                       gopt_env, do_update=my_do_update)
+
+      ! show space_group
+      CALL section_vals_val_get(geo_section, "SHOW_SPACE_GROUP", l_val=spgr%show_space_group)
+      IF (spgr%show_space_group) THEN
+         IF (spgr%keep_space_group) THEN
+            CALL force_env_get(force_env, subsys=subsys)
+         END IF
+         CALL identify_space_group(subsys, geo_section, gopt_env, output_unit)
+         CALL print_spgr(spgr)
+      END IF
 
       CALL cp_print_key_finished_output(output_unit, logger, geo_section, &
                                         "PRINT%PROGRAM_RUN_INFO")

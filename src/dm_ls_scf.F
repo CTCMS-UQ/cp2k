@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -19,10 +19,11 @@ MODULE dm_ls_scf
                                               cite_reference
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add, dbcsr_binary_read, dbcsr_binary_write, dbcsr_checksum, dbcsr_copy, &
-        dbcsr_create, dbcsr_distribution_type, dbcsr_filter, dbcsr_get_info, dbcsr_get_occupation, &
+        dbcsr_add, dbcsr_binary_read, dbcsr_binary_write, dbcsr_copy, dbcsr_create, &
+        dbcsr_distribution_type, dbcsr_filter, dbcsr_get_info, dbcsr_get_occupation, &
         dbcsr_multiply, dbcsr_p_type, dbcsr_release, dbcsr_scale, dbcsr_set, dbcsr_type, &
         dbcsr_type_no_symmetry
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_checksum
    USE cp_external_control,             ONLY: external_control
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_unit_nr,&
@@ -541,7 +542,7 @@ CONTAINS
          IF (do_transport) THEN
             maxscf_reached = should_stop .OR. iscf >= ls_scf_env%max_scf
             ! one extra scf step for post-processing in transmission calculations
-            IF (transport_env%params%method .EQ. transport_transmission) THEN
+            IF (transport_env%params%method == transport_transmission) THEN
                IF (transm_maxscf_reached) THEN
                   IF (unit_nr > 0) WRITE (unit_nr, '(T2,A)') "SCF not converged! "
                   EXIT
@@ -595,7 +596,7 @@ CONTAINS
                      CALL dbcsr_copy(matrix_mixing_old(ispin), ls_scf_env%matrix_ks(ispin))
                   ELSE
                      IF (ls_scf_env%ls_diis) THEN ! ------- IF-DIIS+MIX--- START
-                        IF (diis_step .AND. (iscf - 1) .GE. ls_scf_env%iter_ini_diis) THEN
+                        IF (diis_step .AND. (iscf - 1) >= ls_scf_env%iter_ini_diis) THEN
                            IF (unit_nr > 0) THEN
                               WRITE (unit_nr, '(A61)') &
                                  '*************************************************************'
@@ -658,7 +659,7 @@ CONTAINS
                IF (do_transport) THEN
                   IF (ls_scf_env%has_s_preconditioner) &
                      CPABORT("NOT YET IMPLEMENTED with S preconditioner. ")
-                  IF (ls_scf_env%ls_mstruct%cluster_type .NE. ls_cluster_atomic) &
+                  IF (ls_scf_env%ls_mstruct%cluster_type /= ls_cluster_atomic) &
                      CPABORT("NOT YET IMPLEMENTED with molecular clustering. ")
 
                   extra_scf = maxscf_reached .OR. scf_converged
@@ -692,7 +693,7 @@ CONTAINS
                   CASE (ls_scf_pexsi)
                      IF (ls_scf_env%has_s_preconditioner) &
                         CPABORT("S preconditioning not implemented in combination with the PEXSI library. ")
-                     IF (ls_scf_env%ls_mstruct%cluster_type .NE. ls_cluster_atomic) &
+                     IF (ls_scf_env%ls_mstruct%cluster_type /= ls_cluster_atomic) &
                         CALL cp_abort(__LOCATION__, &
                                       "Molecular clustering not implemented in combination with the PEXSI library. ")
                      CALL density_matrix_pexsi(ls_scf_env%pexsi, ls_scf_env%matrix_p(ispin), ls_scf_env%pexsi%matrix_w(ispin), &
@@ -743,7 +744,7 @@ CONTAINS
          IF (do_transport) THEN
             scf_converged = check_convergence .AND. ABS(energy_diff) < ls_scf_env%eps_scf*ls_scf_env%nelectron_total
             ! one extra scf step for post-processing in transmission calculations
-            IF (transport_env%params%method .EQ. transport_transmission) THEN
+            IF (transport_env%params%method == transport_transmission) THEN
                IF (transm_scf_converged) EXIT
                transm_scf_converged = scf_converged
             ELSE
@@ -778,7 +779,7 @@ CONTAINS
             CALL pexsi_set_convergence_tolerance(ls_scf_env%pexsi, energy_diff, &
                                                  ls_scf_env%eps_scf*ls_scf_env%nelectron_total, &
                                                  ! initialize in second scf step of first SCF cycle:
-                                                 (iscf .EQ. 2) .AND. (ls_scf_env%scf_history%istore .EQ. 0), &
+                                                 (iscf == 2) .AND. (ls_scf_env%scf_history%istore == 0), &
                                                  check_convergence)
          END IF
 

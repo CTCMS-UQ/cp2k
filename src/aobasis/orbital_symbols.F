@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -21,10 +21,10 @@ MODULE orbital_symbols
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'orbital_symbols'
    PRIVATE
 
-   CHARACTER(LEN=1), PARAMETER, DIMENSION(0:11) :: l_sym = (/"s", "p", "d", &
-                                                             "f", "g", "h", &
-                                                             "i", "j", "k", &
-                                                             "l", "m", "n"/)
+   CHARACTER(LEN=1), PARAMETER, DIMENSION(0:11) :: l_sym = ["s", "p", "d", &
+                                                            "f", "g", "h", &
+                                                            "i", "j", "k", &
+                                                            "l", "m", "n"]
 
    PUBLIC :: cgf_symbol, sgf_symbol
    PUBLIC :: l_sym
@@ -45,7 +45,7 @@ CONTAINS
       INTEGER, DIMENSION(3), INTENT(IN)                  :: lxyz
       CHARACTER(LEN=12)                                  :: symbol
 
-      CHARACTER(LEN=1), DIMENSION(3), PARAMETER          :: xyz = (/"x", "y", "z"/)
+      CHARACTER(LEN=1), DIMENSION(3), PARAMETER          :: xyz = ["x", "y", "z"]
 
       INTEGER                                            :: i, ipos, l
 
@@ -107,7 +107,7 @@ CONTAINS
       INTEGER, INTENT(IN)                                :: n, l, m
       CHARACTER(LEN=6)                                   :: symbol
 
-      CHARACTER(LEN=1), DIMENSION(-1:1), PARAMETER       :: yzx = (/"y", "z", "x"/)
+      CHARACTER(LEN=1), DIMENSION(-1:1), PARAMETER       :: yzx = ["y", "z", "x"]
 
       INTEGER                                            :: i
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -26,7 +26,8 @@ MODULE pw_poisson_types
    USE dirichlet_bc_types,              ONLY: dirichlet_bc_parameters
    USE kinds,                           ONLY: dp
    USE mathconstants,                   ONLY: fourpi,&
-                                              twopi
+                                              twopi,&
+                                              z_zero
    USE mt_util,                         ONLY: MT0D,&
                                               MT1D,&
                                               MT2D,&
@@ -293,8 +294,8 @@ CONTAINS
                                        special_dimension=green%special_dimension, slab_size=green%slab_size, &
                                        super_ref_pw_grid=mt_super_ref_pw_grid)
          CASE (PS_IMPLICIT)
-            IF ((poisson_params%ps_implicit_params%boundary_condition .EQ. MIXED_BC) .OR. &
-                (poisson_params%ps_implicit_params%boundary_condition .EQ. NEUMANN_BC)) THEN
+            IF ((poisson_params%ps_implicit_params%boundary_condition == MIXED_BC) .OR. &
+                (poisson_params%ps_implicit_params%boundary_condition == NEUMANN_BC)) THEN
                CALL pw_pool_create(pw_pool_xpndd, pw_grid=dct_pw_grid)
                NULLIFY (green%dct_influence_fn)
                ALLOCATE (green%dct_influence_fn)
@@ -509,7 +510,7 @@ CONTAINS
          DO pt = lb(dim), ub(dim)
             val = twopi*(REAL(pt, KIND=dp)/REAL(npts(dim), KIND=dp))
             exp_m = CMPLX(COS(val), -SIN(val), KIND=dp)
-            sum_m = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+            sum_m = z_zero
             DO k = 0, n - 2
                sum_m = sum_m + m_assign(k)*exp_m**k
             END DO

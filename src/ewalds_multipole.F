@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -42,7 +42,8 @@ MODULE ewalds_multipole
    USE mathconstants, ONLY: fourpi, &
                             oorootpi, &
                             pi, &
-                            sqrthalf
+                            sqrthalf, &
+                            z_zero
    USE message_passing, ONLY: mp_comm_type
    USE parallel_rng_types, ONLY: UNIFORM, &
                                  rng_stream_type
@@ -416,7 +417,7 @@ CONTAINS
       Lists: DO ilist = 1, nonbonded%nlists
          neighbor_kind_pair => nonbonded%neighbor_kind_pairs(ilist)
          npairs = neighbor_kind_pair%npairs
-         IF (npairs == 0) CYCLE
+         IF (npairs == 0) CYCLE Lists
          list => neighbor_kind_pair%list
          cvi = neighbor_kind_pair%cell_vector
          cell_v = MATMUL(cell%hmat, cvi)
@@ -458,7 +459,7 @@ CONTAINS
                   ! scale the electrostatic interaction if needed
                   ! (most often scaled to zero)
                   fac_ij = neighbor_kind_pair%ei_scale(ipair)
-                  IF (fac_ij <= 0) CYCLE
+                  IF (fac_ij <= 0) CYCLE Pairs
                ELSE
                   fac_ij = 1.0_dp
                END IF
@@ -580,16 +581,16 @@ CONTAINS
       Lists: DO ilist = 1, nonbonded%nlists
          neighbor_kind_pair => nonbonded%neighbor_kind_pairs(ilist)
          nscale = neighbor_kind_pair%nscale
-         IF (nscale == 0) CYCLE
+         IF (nscale == 0) CYCLE Lists
          list => neighbor_kind_pair%list
          Kind_Group_Loop: DO igrp = 1, neighbor_kind_pair%ngrp_kind
             istart = neighbor_kind_pair%grp_kind_start(igrp)
-            IF (istart > nscale) CYCLE
+            IF (istart > nscale) CYCLE Kind_Group_Loop
             iend = MIN(neighbor_kind_pair%grp_kind_end(igrp), nscale)
             Pairs: DO ipair = istart, iend
                ! only use pairs that are (partially) excluded for electrostatics
                fac_ij = -1.0_dp + neighbor_kind_pair%ei_scale(ipair)
-               IF (fac_ij >= 0) CYCLE
+               IF (fac_ij >= 0) CYCLE Pairs
 
                atom_a = list(1, ipair)
                atom_b = list(2, ipair)
@@ -704,12 +705,12 @@ CONTAINS
       CALL structure_factor_allocate(pw_grid%bounds, nnodes, exp_igr)
 
       ALLOCATE (summe_ef(1:pw_grid%ngpts_cut))
-      summe_ef = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+      summe_ef = z_zero
       ! Stress Tensor
       IF (do_stress) THEN
          pv_tmp = 0.0_dp
          ALLOCATE (summe_st(3, 1:pw_grid%ngpts_cut))
-         summe_st = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+         summe_st = z_zero
       END IF
 
       ! Defining four_alpha_sq
@@ -983,14 +984,14 @@ CONTAINS
       COMPLEX(KIND=dp)                                   :: tmp
       INTEGER                                            :: i, j
 
-      atm_factor = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+      atm_factor = z_zero
       IF (task(1, 1)) THEN
          ! Charge
          atm_factor = atm_factor + charges(iparticle)
       END IF
       IF (task(2, 2)) THEN
          ! Dipole
-         tmp = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+         tmp = z_zero
          DO i = 1, 3
             tmp = tmp + dipoles(i, iparticle)*pw_grid%g(i, gpt)
          END DO
@@ -998,7 +999,7 @@ CONTAINS
       END IF
       IF (task(3, 3)) THEN
          ! Quadrupole
-         tmp = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+         tmp = z_zero
          DO i = 1, 3
             DO j = 1, 3
                tmp = tmp + quadrupoles(j, i, iparticle)*pw_grid%g(j, gpt)*pw_grid%g(i, gpt)
@@ -1035,7 +1036,7 @@ CONTAINS
 
       INTEGER                                            :: i
 
-      atm_factor = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+      atm_factor = z_zero
       IF (ANY(task(2, :))) THEN
          ! Dipole
          atm_factor = dipoles(:, iparticle)*CMPLX(0.0_dp, -1.0_dp, KIND=dp)
@@ -1580,7 +1581,7 @@ CONTAINS
             Lists: DO ilist = 1, nonbonded%nlists
                neighbor_kind_pair => nonbonded%neighbor_kind_pairs(ilist)
                npairs = neighbor_kind_pair%npairs
-               IF (npairs == 0) CYCLE
+               IF (npairs == 0) CYCLE Lists
                list => neighbor_kind_pair%list
                cvi = neighbor_kind_pair%cell_vector
                cell_v = MATMUL(cell%hmat, cvi)
@@ -1632,7 +1633,7 @@ CONTAINS
                DO icell = -ncells, ncells
                DO jcell = -ncells, ncells
                DO kcell = -ncells, ncells
-                  cell_v = MATMUL(cell%hmat, REAL((/icell, jcell, kcell/), KIND=dp))
+                  cell_v = MATMUL(cell%hmat, REAL([icell, jcell, kcell], KIND=dp))
                   IF (ALL(cell_v == 0.0_dp) .AND. (atom_a == atom_b)) CYCLE
                   rab = rab0 + cell_v
                   rab2 = rab(1)**2 + rab(2)**2 + rab(3)**2
@@ -2041,7 +2042,7 @@ CONTAINS
          WRITE (iw, '(/,A,I8)') "FIELD GRADIENT FOR ATOM: ", i
          WRITE (iw, '(A,9F15.9)') " NUMERICAL:  ", efield2n, &
             " ANALYTICAL: ", efield2(:, i), &
-            " ERROR:      ", RESHAPE(efield2n, (/9/)) - efield2(:, i)
+            " ERROR:      ", RESHAPE(efield2n, [9]) - efield2(:, i)
       END DO
    END SUBROUTINE debug_ewald_multipoles_fields
 

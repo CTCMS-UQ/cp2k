@@ -3,11 +3,11 @@
 # author: Ole Schuett
 
 if (($# != 1)); then
-  echo "Usage: test_performance.sh <ARCH>"
+  echo "Usage: test_performance.sh <PROFILE>"
   exit 1
 fi
 
-ARCH=$1
+PROFILE=$1
 
 function run_benchmark {
   set +e #disable error trapping
@@ -16,8 +16,8 @@ function run_benchmark {
   INPUT=$3
   OUTPUT=$4
   echo -n "Running ${INPUT} with ${OMP_THREADS} threads and ${MPI_RANKS} ranks... "
-  if OMP_NUM_THREADS="${OMP_THREADS}" mpiexec -bind-to socket -np "${MPI_RANKS}" \
-    "/opt/cp2k/exe/${ARCH}/cp2k.psmp" "${INPUT}" &> "${OUTPUT}"; then
+  if OMP_NUM_THREADS="${OMP_THREADS}" mpiexec -np "${MPI_RANKS}" \
+    "/opt/cp2k/build/bin/cp2k.psmp" "${INPUT}" &> "${OUTPUT}"; then
     echo "done."
   else
     echo -e "failed.\n\n"
@@ -32,23 +32,11 @@ function run_benchmark {
 # shellcheck disable=SC1091
 source /opt/cp2k-toolchain/install/setup
 
-echo -e '\n========== Compiling CP2K =========='
-cd /opt/cp2k
-echo -n "Compiling cp2k... "
-if make -j ARCH="${ARCH}" VERSION="psmp" &> make.out; then
-  echo "done."
-else
-  echo -e "failed.\n\n"
-  tail -n 100 make.out
-  cp make.out /workspace/artifacts/
-  echo -e "\nSummary: Compilation failed."
-  echo -e "Status: FAILED\n"
-  exit 0
-fi
+echo -e '\n============== CP2K Binary Flags ============='
+./build/bin/cp2k.psmp --version | grep cp2kflags
 
-# Check benchmark files for input errors.
-echo -en "\nChecking benchmark inputs... "
-if ! ./tools/regtesting/check_inputs.py "./exe/${ARCH}/cp2k.psmp" "./benchmarks/"; then
+echo -e '\n========== Checking Benchmark Inputs ========='
+if ! ./tools/regtesting/check_inputs.py "./build/bin/cp2k.psmp" "./benchmarks/"; then
   echo -e "\nSummary: Some benchmark inputs could not be parsed."
   echo -e "Status: FAILED\n"
   exit 0
@@ -72,7 +60,11 @@ BENCHMARKS=(
   "QMMM_MQAE/MQAE_single_node.inp"
 )
 
-if [[ "${ARCH}" == "local" ]]; then
+if [[ "${PROFILE}" == "toolchain" ]]; then
+  echo 'Plot: name="total_timings_32omp", title="Total Timings with 32 OpenMP Threads", ylabel="time [s]"'
+  echo 'Plot: name="total_timings_32mpi", title="Total Timings with 32 MPI Ranks", ylabel="time [s]"'
+  echo ''
+
   for INPUT in "${BENCHMARKS[@]}"; do
     INPUT_BASENAME=$(basename "${INPUT}")
     LABEL=${INPUT_BASENAME%.*}
@@ -84,12 +76,15 @@ if [[ "${ARCH}" == "local" ]]; then
     cd ..
     echo ""
     /opt/cp2k/plot_performance.py \
-      "${LABEL} with 32 OpenMP Threads" "${LABEL}_timings_32omp" "${OUTPUT_OMP}" \
-      "${LABEL} with 32 MPI Ranks" "${LABEL}_timings_32mpi" "${OUTPUT_MPI}"
+      "${LABEL} with 32 OpenMP Threads" "${LABEL}" "32omp" "${OUTPUT_OMP}" \
+      "${LABEL} with 32 MPI Ranks" "${LABEL}" "32mpi" "${OUTPUT_MPI}"
     echo ""
   done
 
-elif [[ "${ARCH}" == "local_cuda" ]]; then
+elif [[ "${PROFILE}" == "toolchain_cuda_"* ]]; then
+  echo 'Plot: name="total_timings_6cpu_1gpu", title="Total Timings with 6 CPU Cores and 1 GPU", ylabel="time [s]"'
+  echo ''
+
   for INPUT in "${BENCHMARKS[@]}"; do
     if [[ "$INPUT" == "QS_single_node/H2O-hyb.inp" ]]; then
       continue # Has no gpu acceleration, yet.
@@ -103,12 +98,12 @@ elif [[ "${ARCH}" == "local_cuda" ]]; then
     cd ..
     echo ""
     /opt/cp2k/plot_performance.py \
-      "${LABEL} with 6 CPU Cores and 1 GPU" "${LABEL}_timings_6cpu_1gpu" "${OUTPUT}"
+      "${LABEL} with 6 CPU Cores and 1 GPU" "${LABEL}" "6cpu_1gpu" "${OUTPUT}"
     echo ""
   done
 
 else
-  echo "Unknown ARCH: ${ARCH}"
+  echo "Unknown PROFILE: ${PROFILE}"
   exit 1
 fi
 

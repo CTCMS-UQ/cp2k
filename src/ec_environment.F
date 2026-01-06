@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -15,7 +15,8 @@ MODULE ec_environment
    USE atomic_kind_types,               ONLY: atomic_kind_type
    USE basis_set_container_types,       ONLY: add_basis_set_to_container,&
                                               remove_basis_from_container
-   USE basis_set_types,                 ONLY: copy_gto_basis_set,&
+   USE basis_set_types,                 ONLY: allocate_gto_basis_set,&
+                                              copy_gto_basis_set,&
                                               create_primitive_basis_set,&
                                               gto_basis_set_type
    USE bibliography,                    ONLY: Niklasson2003,&
@@ -57,6 +58,7 @@ MODULE ec_environment
                                               get_qs_kind_set,&
                                               qs_kind_type
    USE qs_rho_types,                    ONLY: qs_rho_type
+   USE soft_basis_set,                  ONLY: create_soft_basis
    USE string_utilities,                ONLY: uppercase
    USE xc,                              ONLY: xc_uses_kinetic_energy_density,&
                                               xc_uses_norm_drho
@@ -115,12 +117,13 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'init_ec_env'
 
       INTEGER                                            :: handle, ikind, maxlgto, nkind, unit_nr
-      LOGICAL                                            :: explicit
-      REAL(KIND=dp)                                      :: eps_pgf_orb
+      LOGICAL                                            :: explicit, gpw, paw_atom
+      REAL(KIND=dp)                                      :: eps_pgf_orb, rc
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(gto_basis_set_type), POINTER                  :: basis_set, harris_basis
+      TYPE(gto_basis_set_type), POINTER                  :: basis_set, harris_basis, &
+                                                            harris_soft_basis
       TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(qs_dispersion_type), POINTER                  :: dispersion_env
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
@@ -133,7 +136,7 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       NULLIFY (atomic_kind_set, dispersion_env, ec_env%ls_env, para_env)
-      NULLIFY (ec_env%sab_orb, ec_env%sac_ppl, ec_env%sap_ppnl)
+      NULLIFY (ec_env%sab_orb, ec_env%sac_ae, ec_env%sac_ppl, ec_env%sap_ppnl)
       NULLIFY (ec_env%matrix_ks, ec_env%matrix_h, ec_env%matrix_s)
       NULLIFY (ec_env%matrix_t, ec_env%matrix_p, ec_env%matrix_w)
       NULLIFY (ec_env%task_list)
@@ -202,6 +205,13 @@ CONTAINS
                                    l_val=ec_env%debug_external)
          ! ADMM
          CALL section_vals_val_get(ec_section, "ADMM", l_val=ec_env%do_ec_admm)
+         ! EXTERNAL
+         CALL section_vals_val_get(ec_section, "EXTERNAL_RESPONSE_FILENAME", &
+                                   c_val=ec_env%exresp_fn)
+         CALL section_vals_val_get(ec_section, "EXTERNAL_RESULT_FILENAME", &
+                                   c_val=ec_env%exresult_fn)
+         CALL section_vals_val_get(ec_section, "ERROR_ESTIMATION", &
+                                   l_val=ec_env%do_error)
 
          ec_env%do_skip = .FALSE.
 
@@ -258,6 +268,25 @@ CONTAINS
          !
          CALL get_qs_kind_set(qs_kind_set, maxlgto=maxlgto, basis_type="HARRIS")
          CALL init_orbital_pointers(maxlgto + 1)
+         ! GAPW: Generate soft version of Harris basis
+         CALL get_qs_env(qs_env, dft_control=dft_control)
+         IF (dft_control%qs_control%gapw .OR. dft_control%qs_control%gapw_xc) THEN
+            eps_pgf_orb = dft_control%qs_control%eps_pgf_orb
+            DO ikind = 1, nkind
+               qs_kind => qs_kind_set(ikind)
+               NULLIFY (harris_basis)
+               CALL get_qs_kind(qs_kind, basis_set=harris_basis, basis_type="HARRIS")
+               CALL get_qs_kind(qs_kind, hard_radius=rc, gpw_type_forced=gpw)
+               NULLIFY (harris_soft_basis)
+               CALL allocate_gto_basis_set(harris_soft_basis)
+               CALL create_soft_basis(harris_basis, harris_soft_basis, &
+                                      dft_control%qs_control%gapw_control%eps_fit, &
+                                      rc, paw_atom, &
+                                      dft_control%qs_control%gapw_control%force_paw, gpw)
+               CALL init_interaction_radii_orb_basis(harris_soft_basis, eps_pgf_orb)
+               CALL add_basis_set_to_container(qs_kind%basis_sets, harris_soft_basis, "HARRIS_SOFT")
+            END DO
+         END IF
          !
          CALL uppercase(ec_env%basis)
 
@@ -271,7 +300,7 @@ CONTAINS
                ! Basis sets of energy correction
                CALL get_qs_kind(qs_kind=qs_kind, basis_set=harris_basis, basis_type="HARRIS")
 
-               IF (basis_set%name .NE. harris_basis%name) THEN
+               IF (basis_set%name /= harris_basis%name) THEN
                   ec_env%basis_inconsistent = .TRUE.
                END IF
             END DO
@@ -345,9 +374,9 @@ CONTAINS
 
          ! Initialize Harris LS solver environment
          ec_env%use_ls_solver = .FALSE.
-         ec_env%use_ls_solver = (ec_env%ks_solver .EQ. ec_matrix_sign) &
-                                .OR. (ec_env%ks_solver .EQ. ec_matrix_trs4) &
-                                .OR. (ec_env%ks_solver .EQ. ec_matrix_tc2)
+         ec_env%use_ls_solver = (ec_env%ks_solver == ec_matrix_sign) &
+                                .OR. (ec_env%ks_solver == ec_matrix_trs4) &
+                                .OR. (ec_env%ks_solver == ec_matrix_tc2)
 
          IF (ec_env%use_ls_solver) THEN
             CALL ec_ls_create(qs_env, ec_env)

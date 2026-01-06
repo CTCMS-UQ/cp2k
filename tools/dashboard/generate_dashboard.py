@@ -25,12 +25,7 @@ import requests
 import smtplib
 import sys
 import traceback
-from typing import Any, List, Dict, cast, Optional, ValuesView, NewType
-
-try:
-    from typing import Literal
-except ImportError:
-    from typing_extensions import Literal  # type: ignore
+from typing import Any, List, Literal, Dict, cast, Optional, ValuesView, NewType
 
 import matplotlib as mpl
 
@@ -196,7 +191,7 @@ def gen_frontpage(
         if report.status == "OK":
             status[s].last_ok = report.sha
             status[s].notified = False
-        elif do_notify and not status[s].notified:
+        elif report.status == "FAILED" and do_notify and not status[s].notified:
             send_notification(report, status[s].last_ok, log, name, s, send_emails)
             status[s].notified = True
 

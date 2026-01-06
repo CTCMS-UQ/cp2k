@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -14,6 +14,7 @@
 MODULE input_keyword_types
    USE cp_units,                        ONLY: cp_unit_create,&
                                               cp_unit_desc,&
+                                              cp_unit_desc_length,&
                                               cp_unit_release,&
                                               cp_unit_type
    USE input_enumeration_types,         ONLY: enum_create,&
@@ -191,6 +192,7 @@ CONTAINS
       CHARACTER(len=*), INTENT(in), OPTIONAL             :: deprecation_notice
       LOGICAL, INTENT(in), OPTIONAL                      :: removed
 
+      CHARACTER(LEN=default_string_length)               :: tmp_string
       INTEGER                                            :: i, n
       LOGICAL                                            :: check
 
@@ -221,6 +223,18 @@ CONTAINS
       IF (PRESENT(usage)) THEN
          CPASSERT(LEN_TRIM(usage) <= LEN(keyword%usage))
          keyword%usage = usage
+         ! Check that the usage string starts with one of the keyword names.
+         IF (keyword%names(1) /= "_SECTION_PARAMETERS_" .AND. keyword%names(1) /= "_DEFAULT_KEYWORD_") THEN
+            tmp_string = usage
+            CALL uppercase(tmp_string)
+            check = .FALSE.
+            DO i = 1, SIZE(keyword%names)
+               check = check .OR. (INDEX(tmp_string, TRIM(keyword%names(i))) == 1)
+            END DO
+            IF (.NOT. check) THEN
+               CPABORT("Usage string must start with one of the keyword name.")
+            END IF
+         END IF
       ELSE
          keyword%usage = ""
       END IF
@@ -501,7 +515,7 @@ CONTAINS
       TYPE(keyword_type), POINTER                        :: keyword
       INTEGER, INTENT(in)                                :: unit_nr, level
 
-      CHARACTER(len=default_string_length)               :: c_string
+      CHARACTER(len=cp_unit_desc_length)                 :: c_string
       INTEGER                                            :: i, l
 
       CPASSERT(ASSOCIATED(keyword))

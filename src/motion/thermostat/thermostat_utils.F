@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -44,7 +44,12 @@ MODULE thermostat_utils
                                               mp_para_env_type
    USE molecule_kind_types,             ONLY: get_molecule_kind,&
                                               get_molecule_kind_set,&
-                                              molecule_kind_type
+                                              molecule_kind_type,&
+                                              write_colvar_constraint,&
+                                              write_fixd_constraint,&
+                                              write_g3x3_constraint,&
+                                              write_g4x6_constraint,&
+                                              write_vsite_constraint
    USE molecule_list_types,             ONLY: molecule_list_type
    USE molecule_types,                  ONLY: get_molecule,&
                                               global_constraint_type,&
@@ -153,7 +158,7 @@ CONTAINS
       TYPE(thermostats_type), POINTER                    :: thermostats
       TYPE(cell_type), POINTER                           :: cell
       TYPE(simpar_type), POINTER                         :: simpar
-      TYPE(molecule_kind_type), POINTER                  :: molecule_kind_set(:)
+      TYPE(molecule_kind_type), DIMENSION(:), POINTER    :: molecule_kind_set
       TYPE(distribution_1d_type), POINTER                :: local_molecules
       TYPE(molecule_list_type), POINTER                  :: molecules
       TYPE(particle_list_type), POINTER                  :: particles
@@ -162,13 +167,14 @@ CONTAINS
       INTEGER, INTENT(IN)                                :: region
       TYPE(qmmm_env_type), POINTER                       :: qmmm_env
 
-      INTEGER                                            :: iw, natom, nconstraint_ext, &
+      INTEGER                                            :: ic, iw, natom, nconstraint_ext, &
                                                             nconstraint_int, nrestraints_int, &
                                                             rot_dof, roto_trasl_dof
       TYPE(cp_logger_type), POINTER                      :: logger
 
-! Retrieve information on number of atoms, constraints (external and internal)
+      CPASSERT(ASSOCIATED(gci))
 
+      ! Retrieve information on number of atoms, constraints (external and internal)
       CALL get_molecule_kind_set(molecule_kind_set=molecule_kind_set, &
                                  natom=natom, nconstraint=nconstraint_int, nrestraints=nrestraints_int)
 
@@ -208,6 +214,31 @@ CONTAINS
          WRITE (iw, '(T2,A,T71,I10)') &
             'DOF| Number of intramolecular restraints', nrestraints_int, &
             'DOF| Number of intermolecular restraints', gci%nrestraint
+         IF (ASSOCIATED(gci%colv_list)) THEN
+            DO ic = 1, SIZE(gci%colv_list)
+               CALL write_colvar_constraint(gci%colv_list(ic), ic, iw)
+            END DO
+         END IF
+         IF (ASSOCIATED(gci%fixd_list)) THEN
+            DO ic = 1, SIZE(gci%fixd_list)
+               CALL write_fixd_constraint(gci%fixd_list(ic), ic, iw)
+            END DO
+         END IF
+         IF (ASSOCIATED(gci%g3x3_list)) THEN
+            DO ic = 1, SIZE(gci%g3x3_list)
+               CALL write_g3x3_constraint(gci%g3x3_list(ic), ic, iw)
+            END DO
+         END IF
+         IF (ASSOCIATED(gci%g4x6_list)) THEN
+            DO ic = 1, SIZE(gci%g4x6_list)
+               CALL write_g4x6_constraint(gci%g4x6_list(ic), ic, iw)
+            END DO
+         END IF
+         IF (ASSOCIATED(gci%vsite_list)) THEN
+            DO ic = 1, SIZE(gci%vsite_list)
+               CALL write_vsite_constraint(gci%vsite_list(ic), ic, iw)
+            END DO
+         END IF
       END IF
       CALL cp_print_key_finished_output(iw, logger, print_section, &
                                         "PROGRAM_RUN_INFO")

@@ -1,6 +1,6 @@
 #!-------------------------------------------------------------------------------------------------!
 #!   CP2K: A general program to perform molecular dynamics simulations                             !
-#!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                  !
+#!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                  !
 #!                                                                                                 !
 #!   SPDX-License-Identifier: GPL-2.0-or-later                                                     !
 #!-------------------------------------------------------------------------------------------------!
@@ -8,13 +8,6 @@
 # Copyright (c) 2022- ETH Zurich
 #
 # authors : Mathieu Taillefumier
-
-if(NOT
-   (CMAKE_C_COMPILER_LOADED
-    OR CMAKE_CXX_COMPILER_LOADED
-    OR CMAKE_Fortran_COMPILER_LOADED))
-  message(FATAL_ERROR "FindBLAS requires Fortran, C, or C++ to be enabled.")
-endif()
 
 if(NOT CP2K_CONFIG_PACKAGE)
   set(CP2K_BLAS_VENDOR_LIST
@@ -34,8 +27,6 @@ if(NOT CP2K_CONFIG_PACKAGE)
   list(REMOVE_ITEM __BLAS_VENDOR_LIST "auto")
   list(REMOVE_ITEM __BLAS_VENDOR_LIST "CUSTOM")
 
-  # set(CP2K_BLAS_VENDOR "auto" CACHE STRING "Blas library for computations on
-  # host")
   set_property(CACHE CP2K_BLAS_VENDOR PROPERTY STRINGS ${CP2K_BLAS_VENDOR_LIST})
 
   if(NOT ${CP2K_BLAS_VENDOR} IN_LIST CP2K_BLAS_VENDOR_LIST)
@@ -125,6 +116,9 @@ else()
   set(CP2K_BLAS_FOUND ON)
 endif()
 
+# cleanup list (regularly contains empty items)
+list(FILTER CP2K_BLAS_LINK_LIBRARIES EXCLUDE REGEX "^$")
+
 # we exclude the CP2K_BLAS_INCLUDE_DIRS from the list of mandatory variables as
 # having the fortran interface is usually enough. C, C++ and others languages
 # might require this information though
@@ -149,3 +143,4 @@ mark_as_advanced(CP2K_BLAS_INCLUDE_DIRS)
 mark_as_advanced(CP2K_BLAS_LINK_LIBRARIES)
 mark_as_advanced(CP2K_BLAS_VENDOR)
 mark_as_advanced(CP2K_BLAS_FOUND)
+mark_as_advanced(CP2K_BLAS_VENDOR_LIST)

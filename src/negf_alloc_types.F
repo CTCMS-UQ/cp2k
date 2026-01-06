@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -25,7 +25,7 @@ MODULE negf_alloc_types
 !> \brief Allocatable 1-D integer vector
 ! **************************************************************************************************
    TYPE negf_allocatable_ivector
-      !> allocatable 1-D real vector
+      !> allocatable 1-D integer vector
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: vector
    END TYPE negf_allocatable_ivector
 

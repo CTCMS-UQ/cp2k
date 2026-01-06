@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -87,8 +87,16 @@ MODULE rt_propagation_types
       TYPE(dbcsr_p_type), POINTER, DIMENSION(:)     :: SinvH => NULL()
       TYPE(dbcsr_p_type), POINTER, DIMENSION(:)     :: SinvH_imag => NULL()
       TYPE(dbcsr_p_type), POINTER, DIMENSION(:)     :: SinvB => NULL()
+      ! Matrix of local moments - may not be updated if ions are fixed
+      TYPE(dbcsr_p_type), POINTER, DIMENSION(:)     :: local_moments => NULL()
+      TYPE(dbcsr_type), POINTER                     :: local_moments_work => NULL()
       TYPE(rtp_rho_type), POINTER                   :: rho => NULL()
       TYPE(rtp_mos_type), POINTER                   :: mos => NULL()
+      ! Moment trace, Indices : Spin, direction, time index
+      COMPLEX(KIND=dp), DIMENSION(:, :, :), POINTER   :: moments => NULL()
+      ! Fields do not have a spin index
+      COMPLEX(KIND=dp), DIMENSION(:, :), POINTER     :: fields => NULL()
+      REAL(KIND=dp), DIMENSION(:), POINTER          :: times => NULL()
       REAL(KIND=dp)                                 :: energy_old = 0.0_dp
       REAL(KIND=dp)                                 :: energy_new = 0.0_dp
       REAL(KIND=dp)                                 :: dt = 0.0_dp
@@ -537,7 +545,7 @@ CONTAINS
       history => rtp%history
 
       NULLIFY (history%rho_history, history%mo_history, history%s_history)
-      IF (aspc_order .GT. 0) THEN
+      IF (aspc_order > 0) THEN
          IF (rtp%linear_scaling) THEN
             nmat = SIZE(rtp%rho%new)
             CALL dbcsr_allocate_matrix_set(history%rho_history, nmat, aspc_order)

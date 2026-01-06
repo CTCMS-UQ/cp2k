@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -112,7 +112,7 @@ CONTAINS
       size_all = 0
 
       #:for dim in range(1, maxdim+1)
-         IF (ndata .GE. ${dim}$) THEN
+         IF (ndata >= ${dim}$) THEN
             CPASSERT(PRESENT(data_${dim}$))
             size_all = size_all + SIZE(data_${dim}$)
          END IF
@@ -125,7 +125,7 @@ CONTAINS
       list%ptr(1) = ptr
 
       #:for dim in range(1, maxdim+1)
-         IF (ndata .GE. ${dim}$) THEN
+         IF (ndata >= ${dim}$) THEN
             list%col_data(ptr:ptr + SIZE(data_${dim}$) - 1) = data_${dim}$ (:)
             ptr = ptr + SIZE(data_${dim}$)
             list%ptr(${dim+1}$) = ptr
@@ -339,7 +339,7 @@ CONTAINS
       array_eq_i = .NOT. libxsmm_diff(arr1, arr2)
 #else
       array_eq_i = .FALSE.
-      IF (SIZE(arr1) .EQ. SIZE(arr2)) array_eq_i = ALL(arr1 == arr2)
+      IF (SIZE(arr1) == SIZE(arr2)) array_eq_i = ALL(arr1 == arr2)
 #endif
    END FUNCTION
 

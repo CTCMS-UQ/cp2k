@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -14,7 +14,7 @@
 ! **************************************************************************************************
 MODULE pexsi_interface
 
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
    USE f_ppexsi_interface, ONLY: f_ppexsi_dft_driver, &
                                  f_ppexsi_load_real_hs_matrix, &
                                  f_ppexsi_options, &
@@ -47,7 +47,7 @@ MODULE pexsi_interface
 
    TYPE cp_pexsi_options
       PRIVATE
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       TYPE(f_ppexsi_options) :: options
 #else
       INTEGER :: unused = -1
@@ -98,7 +98,7 @@ CONTAINS
                                                   ordering, rowOrdering, npSymbFact, &
                                                   verbosity
 
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       IF (PRESENT(temperature)) pexsi_options%options%temperature = temperature
       IF (PRESENT(gap)) pexsi_options%options%gap = gap
       IF (PRESENT(deltaE)) pexsi_options%options%deltaE = deltaE
@@ -195,7 +195,7 @@ CONTAINS
                                                   ordering, rowOrdering, npSymbFact, &
                                                   verbosity
 
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       IF (PRESENT(temperature)) temperature = pexsi_options%options%temperature
       IF (PRESENT(gap)) gap = pexsi_options%options%gap
       IF (PRESENT(deltaE)) deltaE = pexsi_options%options%deltaE
@@ -253,7 +253,7 @@ CONTAINS
    SUBROUTINE cp_pexsi_set_default_options(pexsi_options)
       TYPE(cp_pexsi_options), INTENT(OUT)      :: pexsi_options
 
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       CALL f_ppexsi_set_default_options(pexsi_options%options)
 #else
       CPABORT("Requires linking to the PEXSI library.")
@@ -274,14 +274,14 @@ CONTAINS
                                                   outputFileIndex
       INTEGER(KIND=C_INTPTR_T)                 :: cp_pexsi_plan_initialize
 
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       CHARACTER(LEN=*), PARAMETER              :: routineN = 'cp_pexsi_plan_initialize'
       INTEGER                                  :: info, handle
 
       CALL timeset(routineN, handle)
       cp_pexsi_plan_initialize = f_ppexsi_plan_initialize(comm%get_handle(), numProcRow, &
                                                           numProcCol, outputFileIndex, info)
-      IF (info .NE. 0) &
+      IF (info /= 0) &
          CPABORT("Pexsi returned an error. Consider logPEXSI0 for details.")
       CALL timestop(handle)
 #else
@@ -321,7 +321,7 @@ CONTAINS
       INTEGER, INTENT(IN)                      :: isSIdentity
       REAL(KIND=real_8), INTENT(IN)            :: SnzvalLocal(*)
 
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       CHARACTER(LEN=*), PARAMETER              :: routineN = 'cp_pexsi_load_real_symmetric_hs_matrix'
       INTEGER                                  :: handle, info
 
@@ -329,7 +329,7 @@ CONTAINS
       CALL f_ppexsi_load_real_hs_matrix(plan, pexsi_options%options, nrows, nnz, nnzLocal, &
                                         numColLocal, colptrLocal, rowindLocal, &
                                         HnzvalLocal, isSIdentity, SnzvalLocal, info)
-      IF (info .NE. 0) &
+      IF (info /= 0) &
          CPABORT("Pexsi returned an error. Consider logPEXSI0 for details.")
       CALL timestop(handle)
 #else
@@ -372,7 +372,7 @@ CONTAINS
       INTEGER, INTENT(out)                     :: numTotalInertiaIter, &
                                                   numTotalPEXSIIter
 
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       CHARACTER(LEN=*), PARAMETER              :: routineN = 'cp_pexsi_dft_driver'
       INTEGER                                  :: handle, info
 #if defined(__HAS_IEEE_EXCEPTIONS)
@@ -396,7 +396,7 @@ CONTAINS
       CALL ieee_set_halting_mode(IEEE_ALL, halt)
 #endif
 
-      IF (info .NE. 0) &
+      IF (info /= 0) &
          CPABORT("Pexsi returned an error. Consider logPEXSI0 for details.")
       CALL timestop(handle)
 #else
@@ -432,7 +432,7 @@ CONTAINS
                                                   FDMnzvalLocal(*), totalEnergyH, totalEnergyS, &
                                                   totalFreeEnergy
 
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       CHARACTER(LEN=*), PARAMETER              :: routineN = 'cp_pexsi_retrieve_real_symmetric_dft_matrix'
       INTEGER                                  :: handle, info
 
@@ -440,7 +440,7 @@ CONTAINS
       CALL f_ppexsi_retrieve_real_dft_matrix(plan, DMnzvalLocal, EDMnzvalLocal, &
                                              FDMnzvalLocal, totalEnergyH, &
                                              totalEnergyS, totalFreeEnergy, info)
-      IF (info .NE. 0) &
+      IF (info /= 0) &
          CPABORT("Pexsi returned an error. Consider logPEXSI0 for details.")
       CALL timestop(handle)
 #else
@@ -464,19 +464,19 @@ CONTAINS
    SUBROUTINE cp_pexsi_plan_finalize(plan)
       INTEGER(KIND=C_INTPTR_T), INTENT(IN)     :: plan
 
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       CHARACTER(LEN=*), PARAMETER              :: routineN = 'cp_pexsi_plan_finalize'
       INTEGER                                  :: info, handle
 
       CALL timeset(routineN, handle)
       CALL f_ppexsi_plan_finalize(plan, info)
-      IF (info .NE. 0) &
+      IF (info /= 0) &
          CPABORT("Pexsi returned an error. Consider logPEXSI0 for details.")
       CALL timestop(handle)
 #else
       MARK_USED(plan)
       CPABORT("Requires linking to the PEXSI library.")
 #endif
-   END SUBROUTINE
+   END SUBROUTINE cp_pexsi_plan_finalize
 
 END MODULE pexsi_interface

@@ -6,8 +6,8 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-openblas_ver="0.3.28" # Keep in sync with get_openblas_arch.sh
-openblas_sha256="f1003466ad074e9b0c8d421a204121100b0751c96fc6fcf3d1456bd12f8a00a1"
+openblas_ver="0.3.30" # Keep in sync with get_openblas_arch.sh
+openblas_sha256="27342cff518646afb4c2b976d809102e368957974c250a25ccc965e53063c95d"
 openblas_pkg="OpenBLAS-${openblas_ver}.tar.gz"
 
 source "${SCRIPT_DIR}"/common_vars.sh
@@ -106,7 +106,7 @@ case "${with_openblas}" in
     fi
     ;;
   __SYSTEM__)
-    echo "==================== Finding LAPACK from system paths ===================="
+    echo "==================== Finding OpenBLAS from system paths ===================="
     # assume that system openblas is threaded
     check_lib -lopenblas "OpenBLAS"
     OPENBLAS_LIBS="-lopenblas"
@@ -119,7 +119,7 @@ case "${with_openblas}" in
   __DONTUSE__) ;;
 
   *)
-    echo "==================== Linking LAPACK to user paths ===================="
+    echo "==================== Linking OpenBLAS to user paths ===================="
     pkg_install_dir="$with_openblas"
     check_dir "${pkg_install_dir}/include"
     check_dir "${pkg_install_dir}/lib"

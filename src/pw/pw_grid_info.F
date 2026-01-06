@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -166,7 +166,7 @@ CONTAINS
       ! final check if all went fine ...
       IF (my_ncommensurate > 0) THEN
          DO my_icommensurate = 1, my_ncommensurate
-            ftest = ANY(MODULO(n, 2**(my_ncommensurate - my_icommensurate)) .NE. 0)
+            ftest = ANY(MODULO(n, 2**(my_ncommensurate - my_icommensurate)) /= 0)
             CPASSERT(.NOT. ftest)
          END DO
       END IF

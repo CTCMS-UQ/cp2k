@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -17,7 +17,7 @@ MODULE rpa_gw_kpoints_util
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_cfm_basic_linalg,             ONLY: cp_cfm_column_scale,&
                                               cp_cfm_scale_and_add_fm,&
-                                              cp_cfm_upper_to_full
+                                              cp_cfm_uplo_to_full
    USE cp_cfm_cholesky,                 ONLY: cp_cfm_cholesky_decompose,&
                                               cp_cfm_cholesky_invert
    USE cp_cfm_diag,                     ONLY: cp_cfm_geeig,&
@@ -35,8 +35,8 @@ MODULE rpa_gw_kpoints_util
         dbcsr_copy, dbcsr_create, dbcsr_deallocate_matrix, dbcsr_desymmetrize, dbcsr_filter, &
         dbcsr_get_block_p, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
         dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_p_type, &
-        dbcsr_release, dbcsr_reserve_all_blocks, dbcsr_set, dbcsr_transposed, dbcsr_type, &
-        dbcsr_type_no_symmetry
+        dbcsr_release, dbcsr_set, dbcsr_transposed, dbcsr_type, dbcsr_type_no_symmetry
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_reserve_all_blocks
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
                                               dbcsr_allocate_matrix_set
@@ -137,9 +137,7 @@ CONTAINS
                                                             count_ev_sc_GW
       TYPE(mp_para_env_type), POINTER                    :: para_env
       REAL(KIND=dp), INTENT(INOUT)                       :: Erpa
-      REAL(KIND=dp), DIMENSION(0:num_integ_points), &
-         INTENT(IN)                                      :: tau_tj
-      REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: tj, wj
+      REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: tau_tj, tj, wj
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :), &
          INTENT(IN)                                      :: weights_cos_tf_w_to_t
       REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: wkp_W
@@ -278,7 +276,6 @@ CONTAINS
       REAL(KIND=dp), OPTIONAL                            :: min_eigval
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'cp_cfm_power'
-      COMPLEX(KIND=dp), PARAMETER :: czero = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
 
       COMPLEX(KIND=dp), ALLOCATABLE, DIMENSION(:)        :: eigenvalues_exponent
       INTEGER                                            :: handle, i, ncol_global, nrow_global
@@ -293,10 +290,8 @@ CONTAINS
       ! Test that matrix is square
       CALL cp_cfm_get_info(matrix, nrow_global=nrow_global, ncol_global=ncol_global)
       CPASSERT(nrow_global == ncol_global)
-      ALLOCATE (eigenvalues(nrow_global))
-      eigenvalues(:) = 0.0_dp
-      ALLOCATE (eigenvalues_exponent(nrow_global))
-      eigenvalues_exponent(:) = czero
+      ALLOCATE (eigenvalues(nrow_global), SOURCE=0.0_dp)
+      ALLOCATE (eigenvalues_exponent(nrow_global), SOURCE=z_zero)
 
       ! Diagonalize matrix: get eigenvectors and eigenvalues
       CALL cp_cfm_heevd(matrix, cfm_work, eigenvalues)
@@ -308,7 +303,7 @@ CONTAINS
             IF (PRESENT(min_eigval)) THEN
                eigenvalues_exponent(i) = CMPLX(min_eigval, 0.0_dp, KIND=dp)
             ELSE
-               eigenvalues_exponent(i) = czero
+               eigenvalues_exponent(i) = z_zero
             END IF
          END IF
       END DO
@@ -414,7 +409,7 @@ CONTAINS
                                 fm_mat_work, cfm_mat_Q, ikp, nkp, ikp_local, para_env)
 
       TYPE(dbcsr_p_type), DIMENSION(:, :), INTENT(INOUT) :: mat_P_omega_kp
-      TYPE(cp_fm_type), INTENT(IN)                       :: fm_mat_RI_global_work, fm_mat_work
+      TYPE(cp_fm_type), INTENT(INOUT)                    :: fm_mat_RI_global_work, fm_mat_work
       TYPE(cp_cfm_type), INTENT(IN)                      :: cfm_mat_Q
       INTEGER, INTENT(IN)                                :: ikp, nkp, ikp_local
       TYPE(mp_para_env_type), POINTER                    :: para_env
@@ -658,7 +653,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE get_dummys
 
 ! **************************************************************************************************
 !> \brief ...
@@ -685,7 +680,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE release_dummys
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1005,7 +1000,7 @@ CONTAINS
       TYPE(cp_fm_type), INTENT(IN)                       :: fm_mat_L_re, fm_mat_L_im
       INTEGER, INTENT(IN)                                :: dimen_RI, num_integ_points, jquad, ikp
       REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: tj
-      REAL(KIND=dp), DIMENSION(0:num_integ_points), &
+      REAL(KIND=dp), DIMENSION(num_integ_points), &
          INTENT(IN)                                      :: tau_tj
       REAL(KIND=dp), DIMENSION(:, :), INTENT(IN)         :: weights_cos_tf_w_to_t
       INTEGER, INTENT(IN)                                :: ikp_local
@@ -1063,7 +1058,7 @@ CONTAINS
       CALL cp_cfm_cholesky_invert(cfm_mat_Q)
 
       ! symmetrize the result
-      CALL cp_cfm_upper_to_full(cfm_mat_Q)
+      CALL cp_cfm_uplo_to_full(cfm_mat_Q)
 
       ! subtract exchange part by subtracing identity matrix from epsilon
       CALL cp_cfm_get_info(matrix=cfm_mat_Q, &
@@ -1126,7 +1121,7 @@ CONTAINS
             iatom = atom_from_RI_index(row_indices(irow))
             jatom = atom_from_RI_index(col_indices(jcol))
 
-            IF (iatom .NE. iatom_old .OR. jatom .NE. jatom_old) THEN
+            IF (iatom /= iatom_old .OR. jatom /= jatom_old) THEN
 
                ! symmetrize=.FALSE. necessary since we already have a symmetrized index_to_cell
                CALL compute_weight_re_im(weight_re, weight_im, &
@@ -1419,7 +1414,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE compute_wkp_W
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1446,7 +1441,7 @@ CONTAINS
                qs_env%mp2_env%ri_rpa_im_time%kpoints_Sigma_no_xc, &
                para_env)
 
-      nkp_grid_G(1:3) = (/1, 1, 1/)
+      nkp_grid_G(1:3) = [1, 1, 1]
 
       CALL get_qs_env(qs_env=qs_env, para_env=para_env)
 
@@ -1536,8 +1531,6 @@ CONTAINS
       LOGICAL, OPTIONAL                                  :: with_xc_terms
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'create_kp_and_calc_kp_orbitals'
-      COMPLEX(KIND=dp), PARAMETER :: cone = CMPLX(1.0_dp, 0.0_dp, KIND=dp), &
-         czero = CMPLX(0.0_dp, 0.0_dp, KIND=dp), ione = CMPLX(0.0_dp, 1.0_dp, KIND=dp)
 
       INTEGER                                            :: handle, i_dim, i_re_im, ikp, ispin, nkp, &
                                                             nspins
@@ -1632,16 +1625,16 @@ CONTAINS
          DO ikp = 1, nkp
 
             CALL copy_dbcsr_to_fm(mat_ks_kp(ikp, 1)%matrix, kpoints%kp_env(ikp)%kpoint_env%wmat(1, ispin))
-            CALL cp_cfm_scale_and_add_fm(czero, cksmat, cone, kpoints%kp_env(ikp)%kpoint_env%wmat(1, ispin))
+            CALL cp_cfm_scale_and_add_fm(z_zero, cksmat, z_one, kpoints%kp_env(ikp)%kpoint_env%wmat(1, ispin))
 
             CALL copy_dbcsr_to_fm(mat_ks_kp(ikp, 2)%matrix, kpoints%kp_env(ikp)%kpoint_env%wmat(2, ispin))
-            CALL cp_cfm_scale_and_add_fm(cone, cksmat, ione, kpoints%kp_env(ikp)%kpoint_env%wmat(2, ispin))
+            CALL cp_cfm_scale_and_add_fm(z_one, cksmat, gaussi, kpoints%kp_env(ikp)%kpoint_env%wmat(2, ispin))
 
             CALL copy_dbcsr_to_fm(mat_s_kp(ikp, 1)%matrix, fm_work)
-            CALL cp_cfm_scale_and_add_fm(czero, csmat, cone, fm_work)
+            CALL cp_cfm_scale_and_add_fm(z_zero, csmat, z_one, fm_work)
 
             CALL copy_dbcsr_to_fm(mat_s_kp(ikp, 2)%matrix, fm_work)
-            CALL cp_cfm_scale_and_add_fm(cone, csmat, ione, fm_work)
+            CALL cp_cfm_scale_and_add_fm(z_one, csmat, gaussi, fm_work)
 
             kp => kpoints%kp_env(ikp)%kpoint_env
 

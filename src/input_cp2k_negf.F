@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -61,8 +61,8 @@ CONTAINS
       CPASSERT(.NOT. ASSOCIATED(section))
       CALL section_create(section, __LOCATION__, name="NEGF", &
                           description="Parameters which control quantum transport calculation"// &
-                          " based on Non-Equilibrium Green's Function method.", &
-                          citations=(/Bailey2006, Papior2017/), &
+                          " based on Non-Equilibrium Green Function method.", &
+                          citations=[Bailey2006, Papior2017], &
                           n_keywords=18, n_subsections=6, repeats=.FALSE.)
 
       NULLIFY (keyword, print_key, subsection)
@@ -157,7 +157,7 @@ CONTAINS
                           enum_desc=s2a( &
                           "Adaptive Clenshaw-Curtis quadrature method. Requires FFTW3 library.", &
                           "Adaptive Simpson method. Works without FFTW3."), &
-                          enum_i_vals=(/negfint_method_cc, negfint_method_simpson/))
+                          enum_i_vals=[negfint_method_cc, negfint_method_simpson])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -296,6 +296,17 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, __LOCATION__, name="FERMI_LEVEL_SHIFTED", &
+                          description="Used to shift the zero-energy level of an electrode to the common zero-energy level."// &
+                          " If this keyword is specified, the Fermi level,"// &
+                          " calculated by standard DFT or NEGF (using the REFINE_FERMI_LEVEL keyword),"// &
+                          " or previously specified using the FERMI_LEVEL keyword,"// &
+                          " is changed to this value. All diagonal elements of the Hamiltonian are shifted accordingly.", &
+                          n_var=1, type_of_var=real_t, unit_str="hartree", &
+                          default_r_val=0.0_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, __LOCATION__, name="TEMPERATURE", &
                           description="Electronic temperature.", &
                           n_var=1, type_of_var=real_t, unit_str="K", &
@@ -310,6 +321,39 @@ CONTAINS
       CALL create_print_dos_section(print_key, "DOS", "the Density of States (DOS)")
       CALL section_add_subsection(subsection, print_key)
       CALL section_release(print_key)
+
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+      ! RESTART subsection
+      CALL section_create(subsection, __LOCATION__, "RESTART", &
+                          "Read and write restart files for the given contact.", repeats=.FALSE.)
+
+      CALL keyword_create(keyword, __LOCATION__, name="FILENAME", &
+                          description=' Controls part of the filename for output. '// &
+                          ' Use filename to obtain projectname-filename. '// &
+                          ' Use ./filename to get filename.'// &
+                          ' A middle name (contact number, type of matrix, spin if 2 spins) and extension '// &
+                          ' are always added to the filename.', &
+                          usage="FILENAME ./filename ", &
+                          default_lc_val="")
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="READ_WRITE_HS", &
+                          description="Requests reading of the electrode Hamiltonian and overlap matrices from a file."// &
+                          " If at least one of these files doesn't exist, all Hamiltonian and overlap matrices"// &
+                          " are calculated and saved. If no name is specified by FILENAME, the default file names are"// &
+                          " projectname-Nn-H00, projectname-Nn-H01, projectname-Nn-S00, projectname-Nn-S01"// &
+                          " for restricted calculations with identical spin population, or"// &
+                          " projectname-Nn-H00-Ss, projectname-Nn-H01-Ss, projectname-Nn-S00-Ss, projectname-Nn-S01-Ss"// &
+                          " for unrestricted calculations with two spin components,"// &
+                          " where n is the number of the contact and s is the spin index."// &
+                          " Otherwise, projectname is modified. Note that the code does not distinguish"// &
+                          " between the files created by a separate electrode or the entire system.", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
 
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
@@ -377,14 +421,14 @@ CONTAINS
                           usage="_SECTION_PARAMETERS_", &
                           default_i_val=low_print_level, lone_keyword_i_val=low_print_level, &
                           enum_c_vals=s2a("on", "off", "silent", "low", "medium", "high", "debug"), &
-                          enum_i_vals=(/silent_print_level - 1, debug_print_level + 1, &
-                                        silent_print_level, low_print_level, &
-                                        medium_print_level, high_print_level, debug_print_level/))
+                          enum_i_vals=[silent_print_level - 1, debug_print_level + 1, &
+                                       silent_print_level, low_print_level, &
+                                       medium_print_level, high_print_level, debug_print_level])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="PRINT_LEVEL", &
-                          variants=(/"IOLEVEL"/), &
+                          variants=["IOLEVEL"], &
                           description="Determines the verbose level for this section "// &
                           "additionally to GLOBAL%PRINT_LEVEL and SECTION_PARAMETERS, "// &
                           "which switch on printing.", &
@@ -394,8 +438,8 @@ CONTAINS
                           enum_desc=s2a("No output", &
                                         "Little output", "Quite some output", "Lots of output", &
                                         "Everything is written out, useful for debugging purposes only"), &
-                          enum_i_vals=(/silent_print_level, low_print_level, medium_print_level, &
-                                        high_print_level, debug_print_level/))
+                          enum_i_vals=[silent_print_level, low_print_level, medium_print_level, &
+                                       high_print_level, debug_print_level])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -26,7 +26,8 @@ MODULE qmmm_util
                                               section_vals_type,&
                                               section_vals_val_get
    USE kinds,                           ONLY: dp
-   USE mathconstants,                   ONLY: pi
+   USE mathconstants,                   ONLY: gaussi,&
+                                              pi
    USE particle_methods,                ONLY: write_fist_particle_coordinates,&
                                               write_qs_particle_coordinates
    USE particle_types,                  ONLY: particle_type
@@ -142,9 +143,9 @@ CONTAINS
       qm_atom_index => force_env%qmmm_env%qm%qm_atom_index
       CPASSERT(ASSOCIATED(qm_atom_index))
 
-      qm_cell_diag = (/qm_cell%hmat(1, 1), &
-                       qm_cell%hmat(2, 2), &
-                       qm_cell%hmat(3, 3)/)
+      qm_cell_diag = [qm_cell%hmat(1, 1), &
+                      qm_cell%hmat(2, 2), &
+                      qm_cell%hmat(3, 3)]
       particles_mm => subsys_mm%particles%els
       DO ip = 1, SIZE(qm_atom_index)
          qm_index = qm_atom_index(ip)
@@ -234,9 +235,9 @@ CONTAINS
 
       skin(:) = list(:)
 
-      qm_cell_diag = (/qm_cell%hmat(1, 1), &
-                       qm_cell%hmat(2, 2), &
-                       qm_cell%hmat(3, 3)/)
+      qm_cell_diag = [qm_cell%hmat(1, 1), &
+                      qm_cell%hmat(2, 2), &
+                      qm_cell%hmat(3, 3)]
       particles_mm => subsys_mm%particles%els
       wallenergy = 0.0_dp
       DO ip = 1, SIZE(qm_atom_index)
@@ -483,7 +484,7 @@ CONTAINS
          DO ip = 1, subsys_mm%particles%n_els
             particles_mm(ip)%r = particles_mm(ip)%r - transl_v
          END DO
-         IF (qmmm_env%qm%added_shells%num_mm_atoms .GT. 0) THEN
+         IF (qmmm_env%qm%added_shells%num_mm_atoms > 0) THEN
             DO ip = 1, qmmm_env%qm%added_shells%num_mm_atoms
                qmmm_env%qm%added_shells%added_particles(ip)%r = qmmm_env%qm%added_shells%added_particles(ip)%r - transl_v
                qmmm_env%qm%added_shells%added_cores(ip)%r = qmmm_env%qm%added_shells%added_cores(ip)%r - transl_v
@@ -528,13 +529,13 @@ CONTAINS
 
       mean_z = 0.0_dp
       DO ip = 1, SIZE(qm_atom_index)
-         mean_z = mean_z + EXP(CMPLX(0.0_dp, 1.0_dp, KIND=dp)*2.0*pi* &
+         mean_z = mean_z + EXP(gaussi*2.0*pi* &
                                MATMUL(mm_cell%h_inv, particles_mm(qm_atom_index(ip))%r))
       END DO
       mean_z = mean_z/ABS(mean_z)
       qmmm_pbc_aware_mean = MATMUL(mm_cell%hmat, &
-                                   REAL(LOG(mean_z)/(CMPLX(0.0_dp, 1.0_dp, KIND=dp)*2.0_dp*pi), dp))
-   END FUNCTION
+                                   REAL(LOG(mean_z)/(gaussi*2.0_dp*pi), dp))
+   END FUNCTION qmmm_pbc_aware_mean
 
 ! **************************************************************************************************
 !> \brief minimum image lattice coordinates difference vector

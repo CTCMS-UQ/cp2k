@@ -1,20 +1,19 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
 #ifndef OFFLOAD_FFT_H
 #define OFFLOAD_FFT_H
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "offload_library.h"
 #include "offload_runtime.h"
 
-#if (defined(__OFFLOAD_CUDA) || defined(__OFFLOAD_HIP))
+#include <stdio.h>
+#include <stdlib.h>
 
+#if (defined(__OFFLOAD_CUDA) || defined(__OFFLOAD_HIP))
 #if defined(__OFFLOAD_CUDA)
 #include <cufft.h>
 #elif defined(__OFFLOAD_HIP)
@@ -66,109 +65,76 @@ static inline const char *offload_fftGetErrorString(offload_fftResult error) {
   switch (error) {
   case CUFFT_SUCCESS:
     return "CUFFT_SUCCESS";
-
   case CUFFT_INVALID_PLAN:
     return "CUFFT_INVALID_PLAN";
-
   case CUFFT_ALLOC_FAILED:
     return "CUFFT_ALLOC_FAILED";
-
   case CUFFT_INVALID_TYPE:
     return "CUFFT_INVALID_TYPE";
-
   case CUFFT_INVALID_VALUE:
     return "CUFFT_INVALID_VALUE";
-
   case CUFFT_INTERNAL_ERROR:
     return "CUFFT_INTERNAL_ERROR";
-
   case CUFFT_EXEC_FAILED:
     return "CUFFT_EXEC_FAILED";
-
   case CUFFT_SETUP_FAILED:
     return "CUFFT_SETUP_FAILED";
-
   case CUFFT_INVALID_SIZE:
     return "CUFFT_INVALID_SIZE";
-
-  case CUFFT_INCOMPLETE_PARAMETER_LIST:
-    return "CUFFT_INCOMPLETE_PARAMETER_LIST";
-
+  /*case CUFFT_INCOMPLETE_PARAMETER_LIST:
+    return "CUFFT_INCOMPLETE_PARAMETER_LIST";*/
   case CUFFT_INVALID_DEVICE:
     return "CUFFT_INVALID_DEVICE";
-
-  case CUFFT_PARSE_ERROR:
-    return "CUFFT_PARSE_ERROR";
-
+  /*case CUFFT_PARSE_ERROR:
+    return "CUFFT_PARSE_ERROR";*/
   case CUFFT_NO_WORKSPACE:
     return "CUFFT_NO_WORKSPACE";
-
   case CUFFT_NOT_IMPLEMENTED:
     return "CUFFT_NOT_IMPLEMENTED";
-
   case CUFFT_NOT_SUPPORTED:
     return "CUFFT_NOT_SUPPORTED";
-
   case CUFFT_UNALIGNED_DATA:
     return "CUFFT_UNALIGNED_DATA";
-
-  case CUFFT_LICENSE_ERROR:
-    return "CUFFT_LICENSE_ERROR";
+  /*case CUFFT_LICENSE_ERROR:
+    return "CUFFT_LICENSE_ERROR";*/
+  default:; // <unknown>
   }
 
 #elif defined(__OFFLOAD_HIP)
-
   switch (error) {
   case HIPFFT_SUCCESS:
     return "HIPFFT_SUCCESS";
-
   case HIPFFT_INVALID_PLAN:
     return "HIPFFT_INVALID_PLAN";
-
   case HIPFFT_ALLOC_FAILED:
     return "HIPFFT_ALLOC_FAILED";
-
   case HIPFFT_INVALID_TYPE:
     return "HIPFFT_INVALID_TYPE";
-
   case HIPFFT_INVALID_VALUE:
     return "HIPFFT_INVALID_VALUE";
-
   case HIPFFT_INTERNAL_ERROR:
     return "HIPFFT_INTERNAL_ERROR";
-
   case HIPFFT_EXEC_FAILED:
     return "HIPFFT_EXEC_FAILED";
-
   case HIPFFT_SETUP_FAILED:
     return "HIPFFT_SETUP_FAILED";
-
   case HIPFFT_INVALID_SIZE:
     return "HIPFFT_INVALID_SIZE";
-
   case HIPFFT_INCOMPLETE_PARAMETER_LIST:
     return "HIPFFT_INCOMPLETE_PARAMETER_LIST";
-
   case HIPFFT_INVALID_DEVICE:
     return "HIPFFT_INVALID_DEVICE";
-
   case HIPFFT_PARSE_ERROR:
     return "HIPFFT_PARSE_ERROR";
-
   case HIPFFT_NO_WORKSPACE:
     return "HIPFFT_NO_WORKSPACE";
-
   case HIPFFT_NOT_IMPLEMENTED:
     return "HIPFFT_NOT_IMPLEMENTED";
-
   case HIPFFT_NOT_SUPPORTED:
     return "HIPFFT_NOT_SUPPORTED";
-
   case HIPFFT_UNALIGNED_DATA:
     return "HIPFFT_UNALIGNED_DATA";
-
-    // case HIPFFT_LICENSE_ERROR:
-    //  return "HIPFFT_LICENSE_ERROR";
+  default:; // <unknown>
   }
 #endif
 

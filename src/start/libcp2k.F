@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -55,7 +55,7 @@ MODULE libcp2k
       INTEGER                 :: idx = 1
    CONTAINS
       PROCEDURE :: func => eri2array_func
-   END TYPE
+   END TYPE eri2array
 
 CONTAINS
 
@@ -100,6 +100,21 @@ CONTAINS
       CALL init_cp2k(.FALSE., ierr)
       CPASSERT(ierr == 0)
    END SUBROUTINE cp2k_init_without_mpi
+
+! **************************************************************************************************
+!> \brief ...
+!> \param mpi_comm ...
+! **************************************************************************************************
+   SUBROUTINE cp2k_init_without_mpi_comm(mpi_comm) BIND(C)
+      INTEGER(C_INT), VALUE                              :: mpi_comm
+
+      INTEGER                                            :: ierr
+      TYPE(mp_comm_type)                                 :: my_mpi_comm
+
+      CALL my_mpi_comm%set_handle(INT(mpi_comm))
+      CALL init_cp2k(.FALSE., ierr, my_mpi_comm)
+      CPASSERT(ierr == 0)
+   END SUBROUTINE cp2k_init_without_mpi_comm
 
 ! **************************************************************************************************
 !> \brief ...
@@ -458,7 +473,7 @@ CONTAINS
       NULLIFY (f_env)
       CALL f_env_add_defaults(f_env_id, f_env)
       CALL force_env_get(f_env%force_env, in_use=in_use)
-      IF (in_use .EQ. use_qs_force) THEN
+      IF (in_use == use_qs_force) THEN
          f_env%force_env%qs_env%transport_env%ext_c_method_ptr = func_ptr
       END IF
       CALL f_env_rm_defaults(f_env, ierr)

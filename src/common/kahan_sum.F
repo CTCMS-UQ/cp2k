@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -614,7 +614,7 @@ CONTAINS
       DO i3 = LBOUND(mask, 3), UBOUND(mask, 3)
       DO i2 = LBOUND(mask, 2), UBOUND(mask, 2)
       DO i1 = LBOUND(mask, 1), UBOUND(mask, 1)
-         IF (mask(i1, i2, i3) .GT. th) THEN
+         IF (mask(i1, i2, i3) > th) THEN
             y = array1(i1, i2, i3)*array2(i1, i2, i3) - c
             t = ks + y
             c = (t - ks) - y

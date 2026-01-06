@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -73,10 +73,10 @@ CONTAINS
             inner: DO k = -shell*perd(3), shell*perd(3)
                IF (.NOT. (i**2 + j**2 + k**2 == shell)) CYCLE inner
                IF (found) THEN
-                  m = (/i, j, k/)
+                  m = [i, j, k]
                   EXIT outer
                END IF
-               IF (ALL(M .EQ. (/i, j, k/))) found = .TRUE.
+               IF (ALL(M == [i, j, k])) found = .TRUE.
             END DO inner
          END DO
          END DO

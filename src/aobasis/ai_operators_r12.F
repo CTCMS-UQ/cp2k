@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -695,7 +695,7 @@ CONTAINS
       f0 = 2.0_dp*SQRT(pi**5*zetw)*zetp*zetq
 
       !check that the operator has been init from file
-      CPASSERT(get_lmax_init() .GE. nmax)
+      CPASSERT(get_lmax_init() >= nmax)
 
       CALL t_c_g0_n(f, use_gamma, r, t, nmax)
       IF (use_gamma) CALL fgamma(nmax, t, f)

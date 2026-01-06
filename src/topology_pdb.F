@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -49,7 +49,6 @@ MODULE topology_pdb
    USE cell_types,                      ONLY: get_cell
    USE cp2k_info,                       ONLY: compile_revision,&
                                               cp2k_version,&
-                                              r_datx,&
                                               r_host_name,&
                                               r_user_name
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
@@ -70,6 +69,8 @@ MODULE topology_pdb
    USE kinds,                           ONLY: default_path_length,&
                                               default_string_length,&
                                               dp
+   USE machine,                         ONLY: m_timestamp,&
+                                              timestamp_length
    USE memory_utilities,                ONLY: reallocate
    USE message_passing,                 ONLY: mp_para_env_type
    USE physcon,                         ONLY: angstrom
@@ -286,8 +287,9 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'write_coordinate_pdb'
 
       CHARACTER(LEN=120)                                 :: line
-      CHARACTER(LEN=default_string_length)               :: my_tag1, my_tag2, my_tag3, my_tag4, &
-                                                            record
+      CHARACTER(LEN=default_path_length)                 :: record
+      CHARACTER(LEN=default_string_length)               :: my_tag1, my_tag2, my_tag3, my_tag4
+      CHARACTER(LEN=timestamp_length)                    :: timestamp
       INTEGER                                            :: handle, i, id1, id2, idres, iw, natom
       LOGICAL                                            :: charge_beta, charge_extended, &
                                                             charge_occup, ldum
@@ -307,7 +309,7 @@ CONTAINS
       CALL section_vals_val_get(print_key, "CHARGE_OCCUP", l_val=charge_occup)
       CALL section_vals_val_get(print_key, "CHARGE_BETA", l_val=charge_beta)
       CALL section_vals_val_get(print_key, "CHARGE_EXTENDED", l_val=charge_extended)
-      i = COUNT((/charge_occup, charge_beta, charge_extended/))
+      i = COUNT([charge_occup, charge_beta, charge_extended])
       IF (i > 1) &
          CPABORT("Either only CHARGE_OCCUP, CHARGE_BETA, or CHARGE_EXTENDED can be selected")
 
@@ -319,9 +321,10 @@ CONTAINS
       IF (iw > 0) WRITE (UNIT=iw, FMT=*) "    Writing out PDB file ", TRIM(record)
 
       ! Write file header
+      CALL m_timestamp(timestamp)
       WRITE (UNIT=file_unit, FMT="(A6,T11,A)") &
          "TITLE ", "PDB file created by "//TRIM(cp2k_version)//" (revision "//TRIM(compile_revision)//")", &
-         "AUTHOR", TRIM(r_user_name)//"@"//TRIM(r_host_name)//" "//r_datx(1:19)
+         "AUTHOR", TRIM(r_user_name)//"@"//TRIM(r_host_name)//" "//timestamp(:19)
       ! Write cell information
       CALL get_cell(cell=topology%cell, alpha=angle_alpha, beta=angle_beta, gamma=angle_gamma, abc=abc)
       WRITE (UNIT=file_unit, FMT="(A6,3F9.3,3F7.2)") &
@@ -367,7 +370,7 @@ CONTAINS
             WRITE (UNIT=line(61:66), FMT="(F6.2)") 0.0_dp
          END IF
          IF (ASSOCIATED(atom_info%atm_charge)) THEN
-            IF (ANY((/charge_occup, charge_beta, charge_extended/)) .AND. &
+            IF (ANY([charge_occup, charge_beta, charge_extended]) .AND. &
                 (atom_info%atm_charge(i) == -HUGE(0.0_dp))) &
                CPABORT("No atomic charges found yet (after the topology setup)")
             IF (charge_occup) THEN

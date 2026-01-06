@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -55,7 +55,7 @@ CONTAINS
                           description="Parallelization strategy.", &
                           usage="DISTRIBUTION_TYPE DISTRIBUTED", &
                           enum_c_vals=s2a("AUTOMATIC", "DISTRIBUTED", "REPLICATED"), &
-                          enum_i_vals=(/rsgrid_automatic, rsgrid_distributed, rsgrid_replicated/), &
+                          enum_i_vals=[rsgrid_automatic, rsgrid_distributed, rsgrid_replicated], &
                           enum_desc=s2a("Use heuristic rules to decide between distributed and replicated", &
                                         "Force a distributed setup if possible", &
                                         "Force a replicated setup"), &
@@ -70,7 +70,7 @@ CONTAINS
                           "Also see LOCK_DISTRIBUTION.", &
                           usage="DISTRIBUTION_LAYOUT", &
                           repeats=.FALSE., n_var=3, &
-                          default_i_vals=(/-1, -1, -1/))
+                          default_i_vals=[-1, -1, -1])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

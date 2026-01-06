@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -46,7 +46,7 @@ CONTAINS
                           description="Controls the calculation of atomic properties. "// &
                           "Printing is controlled by FORCE_EVAL / PRINT / PROGRAM_RUN_INFO", &
                           repeats=.FALSE., &
-                          citations=(/Kikuchi2009/))
+                          citations=[Kikuchi2009])
 
       NULLIFY (keyword)
 

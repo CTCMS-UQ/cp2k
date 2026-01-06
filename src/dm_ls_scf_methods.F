@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -14,12 +14,14 @@
 MODULE dm_ls_scf_methods
    USE arnoldi_api,                     ONLY: arnoldi_extremal
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add, dbcsr_add_on_diag, dbcsr_copy, dbcsr_create, dbcsr_desymmetrize, dbcsr_dot, &
-        dbcsr_filter, dbcsr_finalize, dbcsr_frobenius_norm, dbcsr_get_data_type, &
+        dbcsr_add, dbcsr_copy, dbcsr_create, dbcsr_desymmetrize, dbcsr_filter, dbcsr_finalize, &
         dbcsr_get_occupation, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
         dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, &
-        dbcsr_put_block, dbcsr_release, dbcsr_scale, dbcsr_set, dbcsr_trace, dbcsr_type, &
-        dbcsr_type_no_symmetry
+        dbcsr_put_block, dbcsr_release, dbcsr_scale, dbcsr_set, dbcsr_type, dbcsr_type_no_symmetry
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_add_on_diag,&
+                                              dbcsr_dot,&
+                                              dbcsr_frobenius_norm,&
+                                              dbcsr_trace
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_unit_nr,&
                                               cp_logger_type
@@ -226,15 +228,13 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'compute_matrix_preconditioner'
 
-      INTEGER                                            :: datatype, handle, iblock_col, iblock_row
+      INTEGER                                            :: handle, iblock_col, iblock_row
       LOGICAL                                            :: block_needed
       REAL(dp), DIMENSION(:, :), POINTER                 :: block_dp
       TYPE(dbcsr_iterator_type)                          :: iter
       TYPE(dbcsr_type)                                   :: matrix_bs
 
       CALL timeset(routineN, handle)
-
-      datatype = dbcsr_get_data_type(matrix_s) ! could be single or double precision
 
       ! first generate a block diagonal copy of s
       CALL dbcsr_create(matrix_bs, template=matrix_s)
@@ -411,9 +411,9 @@ CONTAINS
       used_submatrix_sign_method = ls_scf_submatrix_sign_ns
       IF (PRESENT(submatrix_sign_method)) used_submatrix_sign_method = submatrix_sign_method
 
-      internal_mu_adjust = ((sign_method .EQ. ls_scf_sign_submatrix) .AND. &
-                            (used_submatrix_sign_method .EQ. ls_scf_submatrix_sign_direct_muadj .OR. &
-                             used_submatrix_sign_method .EQ. ls_scf_submatrix_sign_direct_muadj_lowmem))
+      internal_mu_adjust = ((sign_method == ls_scf_sign_submatrix) .AND. &
+                            (used_submatrix_sign_method == ls_scf_submatrix_sign_direct_muadj .OR. &
+                             used_submatrix_sign_method == ls_scf_submatrix_sign_direct_muadj_lowmem))
 
       IF (internal_mu_adjust) THEN
          CALL density_matrix_sign_internal_mu(matrix_p, trace, mu, sign_method, &
@@ -971,7 +971,7 @@ CONTAINS
 
       ! calculate the chemical potential by doing a bisection of fk(x0)-0.5, where fk is evaluated using the stored values for gamma
       ! E. Rubensson et al., Chem Phys Lett 432, 2006, 591-594
-      mu_a = 0.0_dp; mu_b = 1.0_dp; 
+      mu_a = 0.0_dp; mu_b = 1.0_dp;
       mu_fa = evaluate_trs4_polynomial(mu_a, gamma_values, i - 1) - 0.5_dp
       DO j = 1, 40
          mu_c = 0.5*(mu_a + mu_b)

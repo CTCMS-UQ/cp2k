@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -13,6 +13,7 @@ MODULE cp_dlaf_utils_api
    USE dlaf_fortran, ONLY: dlaf_create_grid_from_blacs, &
                            dlaf_finalize, &
                            dlaf_free_grid, &
+                           dlaf_free_all_grids, &
                            dlaf_initialize
 #endif
 
@@ -23,7 +24,7 @@ MODULE cp_dlaf_utils_api
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'cp_dlaf_utils_api'
 
    PUBLIC :: cp_dlaf_initialize, cp_dlaf_finalize
-   PUBLIC :: cp_dlaf_create_grid, cp_dlaf_free_grid
+   PUBLIC :: cp_dlaf_create_grid, cp_dlaf_free_grid, cp_dlaf_free_all_grids
 
 CONTAINS
 
@@ -110,5 +111,21 @@ CONTAINS
 #endif
       CALL timestop(handle)
    END SUBROUTINE cp_dlaf_free_grid
+
+! **************************************************************************************************
+!> \brief Free all DLA-Future grids
+!> \author Rocco Meli
+! **************************************************************************************************
+   SUBROUTINE cp_dlaf_free_all_grids()
+      CHARACTER(len=*), PARAMETER :: routineN = 'cp_dlaf_free_all_grids'
+
+      INTEGER                                            :: handle
+
+      CALL timeset(routineN, handle)
+#if defined(__DLAF)
+      CALL dlaf_free_all_grids()
+#endif
+      CALL timestop(handle)
+   END SUBROUTINE cp_dlaf_free_all_grids
 
 END MODULE cp_dlaf_utils_api

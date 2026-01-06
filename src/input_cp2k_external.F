@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -188,7 +188,7 @@ CONTAINS
       CALL section_create(section, __LOCATION__, name="EXTERNAL_DENSITY", &
                           description="Section for the use of the ZMP technique on external densities.", &
                           n_keywords=4, n_subsections=0, repeats=.FALSE., &
-                          citations=(/Zhao1994, Tozer1996/))
+                          citations=[Zhao1994, Tozer1996])
       NULLIFY (keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="FILE_DENSITY", &
@@ -197,7 +197,7 @@ CONTAINS
                           "one grid. The number of points in each direction, and the spacing must "// &
                           "be previously defined choosing the plane waves cut-off in section MGRID "// &
                           "keyword CUTOFF, and the cube dimension in section SUBSYS / CELL / keyword ABC", &
-                          usage="DENSITY_FILE_NAME <FILENAME>", &
+                          usage="FILE_DENSITY <FILENAME>", &
                           type_of_var=char_t, default_c_val="RHO_O.dat", n_var=-1)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -208,7 +208,7 @@ CONTAINS
                           "the values depending, restarting from the previous calculation with the smaller "// &
                           "value. To choose the progressive values of LAMBDA look at the convergence of the "// &
                           "eigenvalues.", &
-                          usage="DX <REAL>", default_r_val=10.0_dp)
+                          usage="LAMBDA <REAL>", default_r_val=10.0_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -217,7 +217,7 @@ CONTAINS
                           "option is more stable.", &
                           usage="ZMP_CONSTRAINT <CHAR>", &
                           enum_c_vals=s2a("COULOMB", "DIFF", "NONE"), &
-                          enum_i_vals=(/use_coulomb, use_diff, use_no/), &
+                          enum_i_vals=[use_coulomb, use_diff, use_no], &
                           enum_desc=s2a("Coulomb constraint, integral of [rho_0(r)-rho(r)]/|r-r'|", &
                                         "Simple constraint, [rho_0(r)-rho(r)]", &
                                         "No constrain imposed"), &

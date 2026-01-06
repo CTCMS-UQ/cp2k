@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -27,7 +27,8 @@ MODULE qs_tddfpt2_eigensolver
         cp_fm_release, cp_fm_set_all, cp_fm_set_submatrix, cp_fm_to_fm, cp_fm_type
    USE cp_log_handling,                 ONLY: cp_logger_type
    USE cp_output_handling,              ONLY: cp_iterate
-   USE input_constants,                 ONLY: tddfpt_kernel_full,&
+   USE input_constants,                 ONLY: no_sf_tddfpt,&
+                                              tddfpt_kernel_full,&
                                               tddfpt_kernel_none,&
                                               tddfpt_kernel_stda
    USE input_section_types,             ONLY: section_vals_type
@@ -44,6 +45,8 @@ MODULE qs_tddfpt2_eigensolver
    USE qs_kernel_types,                 ONLY: full_kernel_env_type,&
                                               kernel_env_type
    USE qs_scf_methods,                  ONLY: eigensolver
+   USE qs_tddfpt2_bse_utils,            ONLY: tddfpt_apply_bse,&
+                                              zeroth_order_gw
    USE qs_tddfpt2_fhxc,                 ONLY: fhxc_kernel,&
                                               stda_kernel
    USE qs_tddfpt2_operators,            ONLY: tddfpt_apply_energy_diff,&
@@ -113,7 +116,7 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_orthogonalize_psi1_psi0'
 
       INTEGER                                            :: handle, ispin, ivect, nactive, nao, &
-                                                            nspins, nvects
+                                                            nspins, nvects, spin
       TYPE(cp_fm_struct_type), POINTER                   :: matrix_struct
       TYPE(cp_fm_type)                                   :: evortho
       TYPE(cp_fm_type), DIMENSION(:), POINTER            :: mos
@@ -127,12 +130,17 @@ CONTAINS
       IF (nvects > 0) THEN
          IF (.NOT. tddfpt_control%do_smearing) THEN
             DO ispin = 1, nspins
+               IF (tddfpt_control%spinflip == no_sf_tddfpt) THEN
+                  spin = ispin
+               ELSE
+                  spin = 2
+               END IF
                CALL cp_fm_get_info(matrix=evects(ispin, 1), matrix_struct=matrix_struct, &
                                    nrow_global=nao, ncol_global=nactive)
                CALL cp_fm_create(evortho, matrix_struct)
                DO ivect = 1, nvects
                   ! evortho: C0 * C0^T * S * C1 == (S * C0 * C0^T)^T * C1
-                  CALL parallel_gemm('T', 'N', nao, nactive, nao, 1.0_dp, S_C0_C0T(ispin), &
+                  CALL parallel_gemm('T', 'N', nao, nactive, nao, 1.0_dp, S_C0_C0T(spin), &
                                      evects(ispin, ivect), 0.0_dp, evortho)
                   CALL cp_fm_scale_and_add(1.0_dp, evects(ispin, ivect), -1.0_dp, evortho)
                END DO
@@ -172,22 +180,24 @@ CONTAINS
 !>                  for each spin in atomic basis set, and S is the corresponding overlap matrix
 !> \param max_norm  the largest possible overlap between the ground state and
 !>                  excited state wave functions
+!> \param spinflip ...
 !> \return true if trial vectors are non-orthogonal to occupied molecular orbitals
 !> \par History
 !>    * 07.2016 created [Sergey Chulkov]
 !>    * 05.2019 use temporary work matrices [JHU]
 ! **************************************************************************************************
-   FUNCTION tddfpt_is_nonorthogonal_psi1_psi0(evects, S_C0, max_norm) &
+   FUNCTION tddfpt_is_nonorthogonal_psi1_psi0(evects, S_C0, max_norm, spinflip) &
       RESULT(is_nonortho)
       TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: evects
       TYPE(cp_fm_type), DIMENSION(:), INTENT(in)         :: S_C0
       REAL(kind=dp), INTENT(in)                          :: max_norm
+      INTEGER, INTENT(in)                                :: spinflip
       LOGICAL                                            :: is_nonortho
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_is_nonorthogonal_psi1_psi0'
 
       INTEGER                                            :: handle, ispin, ivect, nactive, nao, &
-                                                            nocc, nspins, nvects
+                                                            nocc, nspins, nvects, spin
       REAL(kind=dp)                                      :: maxabs_val
       TYPE(cp_fm_struct_type), POINTER                   :: matrix_struct, matrix_struct_tmp
       TYPE(cp_fm_type)                                   :: aortho
@@ -200,7 +210,14 @@ CONTAINS
       is_nonortho = .FALSE.
 
       loop: DO ispin = 1, nspins
-         CALL cp_fm_get_info(matrix=S_C0(ispin), ncol_global=nocc)
+
+         IF (spinflip == no_sf_tddfpt) THEN
+            spin = ispin
+         ELSE
+            spin = 2
+         END IF
+
+         CALL cp_fm_get_info(matrix=S_C0(spin), ncol_global=nocc)
          CALL cp_fm_get_info(matrix=evects(ispin, 1), matrix_struct=matrix_struct, &
                              nrow_global=nao, ncol_global=nactive)
          CALL cp_fm_struct_create(matrix_struct_tmp, nrow_global=nocc, &
@@ -208,8 +225,8 @@ CONTAINS
          CALL cp_fm_create(aortho, matrix_struct_tmp)
          CALL cp_fm_struct_release(matrix_struct_tmp)
          DO ivect = 1, nvects
-            ! aortho = S_0^T * S * C_1
-            CALL parallel_gemm('T', 'N', nocc, nactive, nao, 1.0_dp, S_C0(ispin), &
+            ! aortho = S_C0^T * S * C_1
+            CALL parallel_gemm('T', 'N', nocc, nactive, nao, 1.0_dp, S_C0(spin), &
                                evects(ispin, ivect), 0.0_dp, aortho)
             CALL cp_fm_maxabsval(aortho, maxabs_val)
             is_nonortho = maxabs_val > max_norm
@@ -262,7 +279,7 @@ CONTAINS
    SUBROUTINE tddfpt_orthonormalize_psi1_psi1(evects, nvects_new, S_evects, matrix_s)
       TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: evects
       INTEGER, INTENT(in)                                :: nvects_new
-      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: S_evects
+      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(INOUT)   :: S_evects
       TYPE(dbcsr_type), POINTER                          :: matrix_s
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_orthonormalize_psi1_psi1'
@@ -290,7 +307,7 @@ CONTAINS
       END DO
 
       DO jvect = nvects_old + 1, nvects_total
-         ! <psi1_i | psi1_j>
+         ! Orthogonalization <psi1_i | psi1_j>
          DO ivect = 1, jvect - 1
             CALL cp_fm_trace(evects(:, jvect), S_evects(:, ivect), weights(1:nspins), accurate=.FALSE.)
             norm = SUM(weights(1:nspins))
@@ -300,7 +317,7 @@ CONTAINS
             END DO
          END DO
 
-         ! <psi1_j | psi1_j>
+         ! Normalization <psi1_j | psi1_j> = 1
          DO ispin = 1, nspins
             CALL cp_dbcsr_sm_fm_multiply(matrix_s, evects(ispin, jvect), S_evects(ispin, jvect), &
                                          ncol=nactive(ispin), alpha=1.0_dp, beta=0.0_dp)
@@ -342,7 +359,8 @@ CONTAINS
    SUBROUTINE tddfpt_compute_Aop_evects(Aop_evects, evects, S_evects, gs_mos, tddfpt_control, &
                                         matrix_ks, qs_env, kernel_env, &
                                         sub_env, work_matrices, matrix_s)
-      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: Aop_evects, evects, S_evects
+      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(INOUT)   :: Aop_evects
+      TYPE(cp_fm_type), DIMENSION(:, :), INTENT(IN)      :: evects, S_evects
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          INTENT(in)                                      :: gs_mos
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
@@ -357,8 +375,9 @@ CONTAINS
 
       INTEGER                                            :: handle, ispin, ivect, nspins, nvects
       INTEGER, DIMENSION(maxspins)                       :: nmo_occ
-      LOGICAL                                            :: do_admm, do_hfx, do_lri_response, &
-                                                            is_rks_triplets, re_int
+      LOGICAL                                            :: do_admm, do_bse, do_hfx, &
+                                                            do_lri_response, is_rks_triplets, &
+                                                            re_int
       REAL(KIND=dp)                                      :: rcut, scale
       TYPE(cp_fm_type)                                   :: fm_dummy
       TYPE(full_kernel_env_type), POINTER                :: kernel_env_admm_aux
@@ -366,7 +385,7 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      nspins = SIZE(evects, 1)
+      nspins = SIZE(gs_mos, 1)
       nvects = SIZE(evects, 2)
       do_hfx = tddfpt_control%do_hfx
       do_admm = tddfpt_control%do_admm
@@ -377,12 +396,14 @@ CONTAINS
       END IF
       is_rks_triplets = tddfpt_control%rks_triplets
       do_lri_response = tddfpt_control%do_lrigpw
+      do_bse = tddfpt_control%do_bse
+      IF (do_bse) do_hfx = .FALSE.
 
       IF (debug_this_module) THEN
          CPASSERT(nspins > 0)
-         CPASSERT(SIZE(Aop_evects, 1) == nspins)
+         CPASSERT(SIZE(Aop_evects, 1) == SIZE(evects, 1))
+         CPASSERT(SIZE(S_evects, 1) == SIZE(evects, 1))
          CPASSERT(SIZE(Aop_evects, 2) == nvects)
-         CPASSERT(SIZE(S_evects, 1) == nspins)
          CPASSERT(SIZE(S_evects, 2) == nvects)
          CPASSERT(SIZE(gs_mos) == nspins)
       END IF
@@ -395,7 +416,7 @@ CONTAINS
          CALL cp_fm_get_info(evects(1, 1), para_env=para_env)
          IF (ALLOCATED(work_matrices%evects_sub)) THEN
             DO ivect = 1, nvects
-               DO ispin = 1, nspins
+               DO ispin = 1, SIZE(evects, 1)
                   ASSOCIATE (evect => evects(ispin, ivect), work_matrix => work_matrices%evects_sub(ispin, ivect))
                   IF (ASSOCIATED(evect%matrix_struct)) THEN
                   IF (ASSOCIATED(work_matrix%matrix_struct)) THEN
@@ -418,7 +439,7 @@ CONTAINS
             CALL fhxc_kernel(Aop_evects, evects, is_rks_triplets, do_hfx, do_admm, qs_env, &
                              kernel_env%full_kernel, kernel_env_admm_aux, sub_env, work_matrices, &
                              tddfpt_control%admm_symm, tddfpt_control%admm_xc_correction, &
-                             do_lri_response)
+                             do_lri_response, tddfpt_mgrid=tddfpt_control%mgrid_is_explicit)
          ELSE IF (tddfpt_control%kernel == tddfpt_kernel_stda) THEN
             ! sTDA kernel
             CALL stda_kernel(Aop_evects, evects, is_rks_triplets, qs_env, tddfpt_control%stda_control, &
@@ -426,7 +447,7 @@ CONTAINS
          ELSE IF (tddfpt_control%kernel == tddfpt_kernel_none) THEN
             ! No kernel
             DO ivect = 1, nvects
-               DO ispin = 1, nspins
+               DO ispin = 1, SIZE(evects, 1)
                   CALL cp_fm_set_all(Aop_evects(ispin, ivect), 0.0_dp)
                END DO
             END DO
@@ -436,7 +457,7 @@ CONTAINS
 
          IF (ALLOCATED(work_matrices%evects_sub)) THEN
             DO ivect = 1, nvects
-               DO ispin = 1, nspins
+               DO ispin = 1, SIZE(evects, 1)
                   ASSOCIATE (Aop_evect => Aop_evects(ispin, ivect), &
                              work_matrix => work_matrices%Aop_evects_sub(ispin, ivect))
                   IF (ASSOCIATED(Aop_evect%matrix_struct)) THEN
@@ -456,8 +477,13 @@ CONTAINS
          END IF
 
          ! orbital energy difference term
-         CALL tddfpt_apply_energy_diff(Aop_evects=Aop_evects, evects=evects, S_evects=S_evects, &
-                                       gs_mos=gs_mos, matrix_ks=matrix_ks)
+         IF (.NOT. do_bse) THEN
+            CALL tddfpt_apply_energy_diff(Aop_evects=Aop_evects, evects=evects, S_evects=S_evects, &
+                                          gs_mos=gs_mos, matrix_ks=matrix_ks, tddfpt_control=tddfpt_control)
+         ELSE
+            CALL zeroth_order_gw(qs_env=qs_env, Aop_evects=Aop_evects, evects=evects, S_evects=S_evects, &
+                                 gs_mos=gs_mos, matrix_s=matrix_s, matrix_ks=matrix_ks)
+         END IF
 
          ! if smeared occupation, then add aCCSX here
          IF (tddfpt_control%do_smearing) THEN
@@ -531,6 +557,10 @@ CONTAINS
                END DO
             END IF
          END IF
+         IF (do_bse) THEN
+            ! add dynamical screening
+            CALL tddfpt_apply_bse(Aop_evects=Aop_evects, evects=evects, gs_mos=gs_mos, qs_env=qs_env)
+         END IF
 
       END IF
 
@@ -546,7 +576,7 @@ CONTAINS
 !> \param evals            Ritz eigenvalues (initialised on exit)
 !> \param krylov_vects     Krylov's vectors
 !> \param Aop_krylov       action of TDDFPT operator on Krylov's vectors
-!> \param Atilde ...
+!> \param Atilde           TDDFPT matrix projected into the Krylov's vectors subspace
 !> \param nkvo ...
 !> \param nkvn ...
 !> \par History
@@ -581,8 +611,8 @@ CONTAINS
       CALL cp_fm_get_info(krylov_vects(1, 1), context=blacs_env_global)
 
       CALL cp_fm_struct_create(fm_struct, nrow_global=nkvs, ncol_global=nkvs, context=blacs_env_global)
-      CALL cp_fm_create(Atilde_fm, fm_struct)
-      CALL cp_fm_create(evects_Atilde_fm, fm_struct)
+      CALL cp_fm_create(Atilde_fm, fm_struct, set_zero=.TRUE.)
+      CALL cp_fm_create(evects_Atilde_fm, fm_struct, set_zero=.TRUE.)
       CALL cp_fm_struct_release(fm_struct)
 
       ! *** compute upper-diagonal reduced action matrix ***
@@ -652,25 +682,28 @@ CONTAINS
 !> \param Aop_ritz                approximate action of TDDFPT operator on Ritz vectors
 !> \param gs_mos                  molecular orbitals optimised for the ground state
 !> \param matrix_s                overlap matrix
+!> \param tddfpt_control ...
 !> \par History
 !>    * 06.2016 created [Sergey Chulkov]
 !>    * 03.2017 refactored to achieve significant performance gain [Sergey Chulkov]
 ! **************************************************************************************************
    SUBROUTINE tddfpt_compute_residual_vects(residual_vects, evals, ritz_vects, Aop_ritz, gs_mos, &
-                                            matrix_s)
+                                            matrix_s, tddfpt_control)
       TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: residual_vects
       REAL(kind=dp), DIMENSION(:), INTENT(in)            :: evals
       TYPE(cp_fm_type), DIMENSION(:, :), INTENT(in)      :: ritz_vects, Aop_ritz
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          INTENT(in)                                      :: gs_mos
       TYPE(dbcsr_type), POINTER                          :: matrix_s
+      TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_compute_residual_vects'
       REAL(kind=dp), PARAMETER :: eref_scale = 0.99_dp, threshold = 16.0_dp*EPSILON(1.0_dp)
 
-      INTEGER                                            :: handle, icol_local, irow_local, irv, &
-                                                            ispin, nao, ncols_local, nrows_local, &
-                                                            nrvs, nspins
+      INTEGER                                            :: handle, ica, icb, icol_local, &
+                                                            irow_local, irv, ispin, nao, &
+                                                            ncols_local, nrows_local, nrvs, &
+                                                            nspins, spin2, spinflip
       INTEGER, DIMENSION(:), POINTER                     :: col_indices_local, row_indices_local
       INTEGER, DIMENSION(maxspins)                       :: nactive, nmo_virt
       REAL(kind=dp)                                      :: e_occ_plus_lambda, eref, lambda
@@ -683,18 +716,24 @@ CONTAINS
 
       nspins = SIZE(residual_vects, 1)
       nrvs = SIZE(residual_vects, 2)
+      spinflip = tddfpt_control%spinflip
 
       IF (nrvs > 0) THEN
          CALL dbcsr_get_info(matrix_s, nfullrows_total=nao)
          ALLOCATE (awork(nspins), vomat(nspins))
          DO ispin = 1, nspins
-            nmo_virt(ispin) = SIZE(gs_mos(ispin)%evals_virt)
+            IF (spinflip == no_sf_tddfpt) THEN
+               spin2 = ispin
+            ELSE
+               spin2 = 2
+            END IF
+            nmo_virt(spin2) = SIZE(gs_mos(spin2)%evals_virt)
             !
             CALL cp_fm_get_info(matrix=ritz_vects(ispin, 1), matrix_struct=ao_mo_struct, &
                                 ncol_global=nactive(ispin))
             CALL cp_fm_create(awork(ispin), ao_mo_struct)
             !
-            CALL cp_fm_struct_create(virt_mo_struct, nrow_global=nmo_virt(ispin), &
+            CALL cp_fm_struct_create(virt_mo_struct, nrow_global=nmo_virt(spin2), &
                                      ncol_global=nactive(ispin), template_fmstruct=ao_mo_struct)
             CALL cp_fm_create(vomat(ispin), virt_mo_struct)
             CALL cp_fm_struct_release(virt_mo_struct)
@@ -705,6 +744,11 @@ CONTAINS
             lambda = evals(irv)
 
             DO ispin = 1, nspins
+               IF (spinflip == no_sf_tddfpt) THEN
+                  spin2 = ispin
+               ELSE
+                  spin2 = 2
+               END IF
                CALL cp_fm_get_info(vomat(ispin), nrow_local=nrows_local, &
                                    ncol_local=ncols_local, row_indices=row_indices_local, &
                                    col_indices=col_indices_local, local_data=weights_ldata)
@@ -714,14 +758,17 @@ CONTAINS
                                             ncol=nactive(ispin), alpha=-lambda, beta=0.0_dp)
                CALL cp_fm_scale_and_add(1.0_dp, awork(ispin), 1.0_dp, Aop_ritz(ispin, irv))
                !
-               CALL parallel_gemm('T', 'N', nmo_virt(ispin), nactive(ispin), nao, 1.0_dp, gs_mos(ispin)%mos_virt, &
+               CALL parallel_gemm('T', 'N', nmo_virt(spin2), nactive(ispin), nao, 1.0_dp, gs_mos(spin2)%mos_virt, &
                                   awork(ispin), 0.0_dp, vomat(ispin))
 
+               ! Apply Davidson preconditioner to the residue vectors vomat to obtain new directions
                DO icol_local = 1, ncols_local
-                  e_occ_plus_lambda = gs_mos(ispin)%evals_occ(col_indices_local(icol_local)) + lambda
+                  ica = col_indices_local(icol_local)
+                  icb = gs_mos(ispin)%index_active(ica)
+                  e_occ_plus_lambda = gs_mos(ispin)%evals_occ(icb) + lambda
 
                   DO irow_local = 1, nrows_local
-                     eref = gs_mos(ispin)%evals_virt(row_indices_local(irow_local)) - e_occ_plus_lambda
+                     eref = gs_mos(spin2)%evals_virt(row_indices_local(irow_local)) - e_occ_plus_lambda
 
                      ! eref = e_virt - e_occ - lambda = e_virt - e_occ - (eref_scale*lambda + (1-eref_scale)*lambda);
                      ! eref_new = e_virt - e_occ - eref_scale*lambda = eref + (1 - eref_scale)*lambda
@@ -732,7 +779,7 @@ CONTAINS
                   END DO
                END DO
 
-               CALL parallel_gemm('N', 'N', nao, nactive(ispin), nmo_virt(ispin), 1.0_dp, gs_mos(ispin)%mos_virt, &
+               CALL parallel_gemm('N', 'N', nao, nactive(ispin), nmo_virt(spin2), 1.0_dp, gs_mos(spin2)%mos_virt, &
                                   vomat(ispin), 0.0_dp, residual_vects(ispin, irv))
             END DO
          END DO
@@ -804,9 +851,9 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      nspins = SIZE(gs_mos)
+      nspins = SIZE(evects, 1)
       nstates = tddfpt_control%nstates
-      nstates_total = tddfpt_total_number_of_states(gs_mos)
+      nstates_total = tddfpt_total_number_of_states(tddfpt_control, gs_mos)
 
       IF (debug_this_module) THEN
          CPASSERT(SIZE(evects, 1) == nspins)
@@ -817,14 +864,12 @@ CONTAINS
       CALL get_qs_env(qs_env, matrix_s=matrix_s)
 
       ! adjust the number of Krylov vectors
-      max_krylov_vects = tddfpt_control%nkvs
-      IF (max_krylov_vects < nstates) max_krylov_vects = nstates
-      IF (INT(max_krylov_vects, kind=int_8) > nstates_total) max_krylov_vects = INT(nstates_total)
+      max_krylov_vects = MIN(MAX(tddfpt_control%nkvs, nstates), INT(nstates_total))
 
       ALLOCATE (Aop_ritz(nspins, nstates))
       DO istate = 1, nstates
          DO ispin = 1, nspins
-            CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, Aop_ritz(ispin, istate))
+            CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, Aop_ritz(ispin, istate))
          END DO
       END DO
 
@@ -834,13 +879,13 @@ CONTAINS
 
       DO istate = 1, nstates
          DO ispin = 1, nspins
-            CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, krylov_vects(ispin, istate))
+            CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, krylov_vects(ispin, istate))
             CALL cp_fm_to_fm(evects(ispin, istate), krylov_vects(ispin, istate))
 
-            CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, S_krylov(ispin, istate))
+            CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, S_krylov(ispin, istate))
             CALL cp_fm_to_fm(S_evects(ispin, istate), S_krylov(ispin, istate))
 
-            CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, Aop_krylov(ispin, istate))
+            CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, Aop_krylov(ispin, istate))
          END DO
       END DO
 
@@ -855,6 +900,7 @@ CONTAINS
          ! davidson iteration
          CALL cp_iterate(logger%iter_info, iter_nr_out=iter)
 
+         ! Matrix-vector operations
          CALL tddfpt_compute_Aop_evects(Aop_evects=Aop_krylov(:, nvects_exist + 1:nvects_exist + nvects_new), &
                                         evects=krylov_vects(:, nvects_exist + 1:nvects_exist + nvects_new), &
                                         S_evects=S_krylov(:, nvects_exist + 1:nvects_exist + nvects_new), &
@@ -885,11 +931,11 @@ CONTAINS
             ! compute residual vectors for the next iteration
             DO istate = 1, nvects_new
                DO ispin = 1, nspins
-                  CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, &
+                  CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, &
                                          krylov_vects(ispin, nvects_exist + istate))
-                  CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, &
+                  CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, &
                                          S_krylov(ispin, nvects_exist + istate))
-                  CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, &
+                  CALL fm_pool_create_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, &
                                          Aop_krylov(ispin, nvects_exist + istate))
                END DO
             END DO
@@ -897,7 +943,7 @@ CONTAINS
             CALL tddfpt_compute_residual_vects(residual_vects=krylov_vects(:, nvects_exist + 1:nvects_exist + nvects_new), &
                                                evals=evals_last(1:nvects_new), &
                                                ritz_vects=evects(:, 1:nvects_new), Aop_ritz=Aop_ritz(:, 1:nvects_new), &
-                                               gs_mos=gs_mos, matrix_s=matrix_s(1)%matrix)
+                                               gs_mos=gs_mos, matrix_s=matrix_s(1)%matrix, tddfpt_control=tddfpt_control)
 
             CALL tddfpt_orthogonalize_psi1_psi0(krylov_vects(:, nvects_exist + 1:nvects_exist + nvects_new), &
                                                 work_matrices%S_C0_C0T, qs_env, &
@@ -907,7 +953,8 @@ CONTAINS
                                                  S_krylov(:, 1:nvects_exist + nvects_new), matrix_s(1)%matrix)
 
             is_nonortho = tddfpt_is_nonorthogonal_psi1_psi0(krylov_vects(:, nvects_exist + 1:nvects_exist + nvects_new), &
-                                                            work_matrices%S_C0, tddfpt_control%orthogonal_eps)
+                                                            work_matrices%S_C0, tddfpt_control%orthogonal_eps, &
+                                                            tddfpt_control%spinflip)
          ELSE
             ! convergence or the maximum number of Krylov vectors have been achieved
             nvects_new = 0
@@ -955,9 +1002,9 @@ CONTAINS
 
       DO istate = nvects_exist + nvects_new, 1, -1
          DO ispin = nspins, 1, -1
-            CALL fm_pool_give_back_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, Aop_krylov(ispin, istate))
-            CALL fm_pool_give_back_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, S_krylov(ispin, istate))
-            CALL fm_pool_give_back_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, krylov_vects(ispin, istate))
+            CALL fm_pool_give_back_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, Aop_krylov(ispin, istate))
+            CALL fm_pool_give_back_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, S_krylov(ispin, istate))
+            CALL fm_pool_give_back_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, krylov_vects(ispin, istate))
          END DO
       END DO
       DEALLOCATE (Aop_krylov, krylov_vects, S_krylov)
@@ -965,7 +1012,7 @@ CONTAINS
 
       DO istate = nstates, 1, -1
          DO ispin = nspins, 1, -1
-            CALL fm_pool_give_back_fm(work_matrices%fm_pool_ao_mo_occ(ispin)%pool, Aop_ritz(ispin, istate))
+            CALL fm_pool_give_back_fm(work_matrices%fm_pool_ao_mo_active(ispin)%pool, Aop_ritz(ispin, istate))
          END DO
       END DO
       DEALLOCATE (Aop_ritz)

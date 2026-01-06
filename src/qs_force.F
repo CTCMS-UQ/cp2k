@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -77,6 +77,7 @@ MODULE qs_force
                                               velocity_gauge_nl_force
    USE se_core_core,                    ONLY: se_core_core_interaction
    USE se_core_matrix,                  ONLY: build_se_core_matrix
+   USE tblite_interface,                ONLY: build_tblite_matrices
    USE virial_types,                    ONLY: symmetrize_virial,&
                                               virial_type
    USE xtb_matrices,                    ONLY: build_xtb_matrices
@@ -196,7 +197,7 @@ CONTAINS
          dft_control%qs_control%cdft_control%save_pot = .TRUE.
       END IF
 
-      ! recalculate energy with forces
+      ! recalculate energy and the response vector for the Z-vector linear equation system if calc_force = .true.
       CALL qs_energies(qs_env, calc_forces=.TRUE.)
 
       NULLIFY (para_env)
@@ -287,7 +288,11 @@ CONTAINS
          CALL calculate_dftb_dispersion(qs_env=qs_env, para_env=para_env, &
                                         calculate_forces=.TRUE.)
       ELSEIF (dft_control%qs_control%xtb) THEN
-         CALL build_xtb_matrices(qs_env=qs_env, calculate_forces=.TRUE.)
+         IF (dft_control%qs_control%xtb_control%do_tblite) THEN
+            CALL build_tblite_matrices(qs_env=qs_env, calculate_forces=.TRUE.)
+         ELSE
+            CALL build_xtb_matrices(qs_env=qs_env, calculate_forces=.TRUE.)
+         END IF
       ELSEIF (perform_ec) THEN
          ! Calculates core and grid based forces
          CALL energy_correction(qs_env, ec_init=.FALSE., calculate_forces=.TRUE.)
@@ -369,6 +374,8 @@ CONTAINS
       END IF
 
       ! Excited state forces
+      ! Solve the response linear equation system for the Z-vector method
+      ! and calculate remaining terms of the force
       CALL excited_state_energy(qs_env, calculate_forces=.TRUE.)
 
       ! replicate forces (get current pointer)
@@ -593,10 +600,12 @@ CONTAINS
                   iatom, ikind, "      gth_nlcc", qs_force(ikind)%gth_nlcc(1:3, i), &
                   iatom, ikind, "      gth_ppnl", qs_force(ikind)%gth_ppnl(1:3, i), &
                   iatom, ikind, " all_potential", qs_force(ikind)%all_potential(1:3, i), &
+                  iatom, ikind, "cneo_potential", qs_force(ikind)%cneo_potential(1:3, i), &
                   iatom, ikind, "  core_overlap", qs_force(ikind)%core_overlap(1:3, i), &
                   iatom, ikind, "      rho_core", qs_force(ikind)%rho_core(1:3, i), &
                   iatom, ikind, "      rho_elec", qs_force(ikind)%rho_elec(1:3, i), &
                   iatom, ikind, "  rho_lri_elec", qs_force(ikind)%rho_lri_elec(1:3, i), &
+                  iatom, ikind, "  rho_cneo_nuc", qs_force(ikind)%rho_cneo_nuc(1:3, i), &
                   iatom, ikind, "     vhxc_atom", qs_force(ikind)%vhxc_atom(1:3, i), &
                   iatom, ikind, "   g0s_Vh_elec", qs_force(ikind)%g0s_Vh_elec(1:3, i), &
                   iatom, ikind, "      ch_pulay", qs_force(ikind)%ch_pulay(1:3, i), &

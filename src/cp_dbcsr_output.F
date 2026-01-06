@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -261,11 +261,11 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'copy_repl_dbcsr_to_repl_fm'
 
-      INTEGER                                            :: blk, col, handle, i, j, nblkcols_total, &
+      INTEGER                                            :: col, handle, i, j, nblkcols_total, &
                                                             nblkrows_total, nc, nr, row
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: c_offset, r_offset
       INTEGER, DIMENSION(:), POINTER                     :: col_blk_size, row_blk_size
-      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: DATA
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: block
       TYPE(dbcsr_iterator_type)                          :: iter
 
       CALL timeset(routineN, handle)
@@ -299,10 +299,10 @@ CONTAINS
 
       CALL dbcsr_iterator_start(iter, sparse_matrix)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
-         CALL dbcsr_iterator_next_block(iter, row, col, DATA, blk)
-         DO j = 1, SIZE(DATA, 2)
-         DO i = 1, SIZE(DATA, 1)
-            fm(r_offset(row) + i - 1, c_offset(col) + j - 1) = DATA(i, j)
+         CALL dbcsr_iterator_next_block(iter, row, col, block)
+         DO j = 1, SIZE(block, 2)
+         DO i = 1, SIZE(block, 1)
+            fm(r_offset(row) + i - 1, c_offset(col) + j - 1) = block(i, j)
          END DO
          END DO
       END DO
@@ -640,7 +640,7 @@ CONTAINS
          nelement_max = nelement(mype)
          CALL para_env%sum(nblock_sum)
          CALL para_env%sum(nelement_sum)
-         tmp = (/nblock_max, nelement_max/)
+         tmp = [nblock_max, nelement_max]
          CALL para_env%max(tmp)
          nblock_max = tmp(1); nelement_max = tmp(2)
       END IF
@@ -653,7 +653,7 @@ CONTAINS
       END IF
 
       occupation = -1.0_dp
-      IF (nblock_tot .NE. 0) occupation = 100.0_dp*REAL(nblock_sum, dp)/REAL(nblock_tot, dp)
+      IF (nblock_tot /= 0) occupation = 100.0_dp*REAL(nblock_sum, dp)/REAL(nblock_tot, dp)
 
       IF (ionode) THEN
          WRITE (UNIT=output_unit, FMT="(/,/,T2,A)") &

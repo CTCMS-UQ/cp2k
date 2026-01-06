@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -365,7 +365,7 @@ CONTAINS
          NULLIFY (xas_env%unoccupied_orbs)
       END IF
       NULLIFY (xas_env%ao_mo_fm_pools)
-      IF (ASSOCIATED(xas_env%all_vectors) .AND. xas_env%nvirtual .GT. 0) THEN
+      IF (ASSOCIATED(xas_env%all_vectors) .AND. xas_env%nvirtual > 0) THEN
          CALL cp_fm_release(xas_env%all_vectors)
          DEALLOCATE (xas_env%all_vectors)
          NULLIFY (xas_env%all_vectors)

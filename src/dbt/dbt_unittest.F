@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -70,7 +70,7 @@ PROGRAM dbt_unittest
 
    ! set standard output parameters
    io_unit = -1
-   IF (mynode .EQ. 0) io_unit = default_output_unit
+   IF (mynode == 0) io_unit = default_output_unit
 
    CALL dbcsr_init_lib(mp_comm%get_handle(), io_unit) ! Needed for DBM_VALIDATE_AGAINST_DBCSR.
    CALL dbm_library_init()
@@ -790,4 +790,4 @@ PROGRAM dbt_unittest
    ! finalize mpi
    CALL mp_world_finalize()
 
-END PROGRAM
+END PROGRAM dbt_unittest

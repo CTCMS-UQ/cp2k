@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -17,12 +17,16 @@ MODULE rpa_gw_im_time_util
    USE cell_types,                      ONLY: cell_type,&
                                               pbc
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add_on_diag, dbcsr_create, dbcsr_distribution_get, dbcsr_distribution_new, &
-        dbcsr_distribution_release, dbcsr_distribution_type, dbcsr_filter, dbcsr_get_diag, &
-        dbcsr_get_info, dbcsr_get_stored_coordinates, dbcsr_init_p, dbcsr_iterator_blocks_left, &
-        dbcsr_iterator_next_block, dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, &
-        dbcsr_multiply, dbcsr_p_type, dbcsr_release, dbcsr_release_p, dbcsr_reserve_all_blocks, &
-        dbcsr_set_diag, dbcsr_type, dbcsr_type_no_symmetry
+        dbcsr_create, dbcsr_distribution_get, dbcsr_distribution_new, dbcsr_distribution_release, &
+        dbcsr_distribution_type, dbcsr_filter, dbcsr_get_info, dbcsr_get_stored_coordinates, &
+        dbcsr_init_p, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
+        dbcsr_iterator_readonly_start, dbcsr_iterator_start, dbcsr_iterator_stop, &
+        dbcsr_iterator_type, dbcsr_multiply, dbcsr_p_type, dbcsr_release, dbcsr_release_p, &
+        dbcsr_type, dbcsr_type_no_symmetry
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_add_on_diag,&
+                                              dbcsr_get_diag,&
+                                              dbcsr_reserve_all_blocks,&
+                                              dbcsr_set_diag
    USE cp_dbcsr_operations,             ONLY: copy_fm_to_dbcsr,&
                                               cp_dbcsr_m_by_n_from_row_template
    USE cp_fm_types,                     ONLY: cp_fm_create,&
@@ -432,7 +436,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE get_tensor_3c_overl_int_gw
 
 ! **************************************************************************************************
 !> \brief reflect from V = (A,B|B,A) to V_reflected = (B,A|A,B) where A belongs to the block of the molecule
@@ -571,20 +575,15 @@ CONTAINS
       ALLOCATE (buffer_rec(0:para_env%num_pe - 1))
       ALLOCATE (buffer_send(0:para_env%num_pe - 1))
 
-      ALLOCATE (num_entries_rec(0:para_env%num_pe - 1))
-      ALLOCATE (num_blocks_rec(0:para_env%num_pe - 1))
-      ALLOCATE (num_entries_send(0:para_env%num_pe - 1))
-      ALLOCATE (num_blocks_send(0:para_env%num_pe - 1))
-      num_entries_rec = 0
-      num_blocks_rec = 0
-      num_entries_send = 0
-      num_blocks_send = 0
+      ALLOCATE (num_entries_rec(0:para_env%num_pe - 1), SOURCE=0)
+      ALLOCATE (num_blocks_rec(0:para_env%num_pe - 1), SOURCE=0)
+      ALLOCATE (num_entries_send(0:para_env%num_pe - 1), SOURCE=0)
+      ALLOCATE (num_blocks_send(0:para_env%num_pe - 1), SOURCE=0)
 
-      CALL dbcsr_iterator_start(iter, mat_orig)
+      CALL dbcsr_iterator_readonly_start(iter, mat_orig)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-         CALL dbcsr_iterator_next_block(iter, row, col, data_block, &
-                                        row_size=row_size, col_size=col_size)
+         CALL dbcsr_iterator_next_block(iter, row, col, row_size=row_size, col_size=col_size)
 
          row_reflected = image_atom(row)
 
@@ -648,7 +647,7 @@ CONTAINS
       ALLOCATE (entry_counter(0:para_env%num_pe - 1))
       entry_counter(:) = 0
 
-      CALL dbcsr_iterator_start(iter, mat_orig)
+      CALL dbcsr_iterator_readonly_start(iter, mat_orig)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
          CALL dbcsr_iterator_next_block(iter, row, col, data_block, &
@@ -663,7 +662,7 @@ CONTAINS
          offset = entry_counter(imepos)
 
          buffer_send(imepos)%msg(offset + 1:offset + block_size) = &
-            RESHAPE(data_block(1:row_size, 1:col_size), (/block_size/))
+            RESHAPE(data_block(1:row_size, 1:col_size), [block_size])
 
          block = block_counter(imepos) + 1
 
@@ -704,7 +703,7 @@ CONTAINS
                   offset = buffer_rec(imepos)%indx(i_block, 3)
 
                   data_block(:, :) = RESHAPE(buffer_rec(imepos)%msg(offset + 1:offset + row_size*col_size), &
-                                             (/row_size, col_size/))
+                                             [row_size, col_size])
 
                END IF
 
@@ -732,7 +731,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE reflect_mat_row
 
 ! **************************************************************************************************
 !> \brief ...
@@ -831,7 +830,7 @@ CONTAINS
          ycell = index_to_cell(2, icell)
          zcell = index_to_cell(3, icell)
 
-         cell_vector(1:3) = MATMUL(hmat, REAL((/xcell, ycell, zcell/), dp))
+         cell_vector(1:3) = MATMUL(hmat, REAL([xcell, ycell, zcell], dp))
 
          rab_cell_i(1:3) = pbc(particle_set(iatom)%r(1:3), cell) - &
                            (pbc(particle_set(jatom)%r(1:3), cell) + cell_vector(1:3))
@@ -850,7 +849,7 @@ CONTAINS
          ycell = index_to_cell(2, icell)
          zcell = index_to_cell(3, icell)
 
-         cell_vector(1:3) = MATMUL(hmat, REAL((/xcell, ycell, zcell/), dp))
+         cell_vector(1:3) = MATMUL(hmat, REAL([xcell, ycell, zcell], dp))
 
          rab_cell_i(1:3) = pbc(particle_set(iatom)%r(1:3), cell) - &
                            (pbc(particle_set(jatom)%r(1:3), cell) + cell_vector(1:3))

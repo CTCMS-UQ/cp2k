@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -208,9 +208,9 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'srb_potential'
       REAL(KIND=dp), DIMENSION(5:9), PARAMETER :: &
-         cnfac = (/0.05646607_dp, 0.10514203_dp, 0.09753494_dp, 0.30470380_dp, 0.23261783_dp/), &
-         ensrb = (/2.20568300_dp, 2.49640820_dp, 2.81007174_dp, 4.51078438_dp, 4.67476223_dp/), &
-         r0srb = (/1.35974851_dp, 0.98310699_dp, 0.98423007_dp, 0.76716063_dp, 1.06139799_dp/)
+         cnfac = [0.05646607_dp, 0.10514203_dp, 0.09753494_dp, 0.30470380_dp, 0.23261783_dp], &
+         ensrb = [2.20568300_dp, 2.49640820_dp, 2.81007174_dp, 4.51078438_dp, 4.67476223_dp], &
+         r0srb = [1.35974851_dp, 0.98310699_dp, 0.98423007_dp, 0.76716063_dp, 1.06139799_dp]
 
       INTEGER                                            :: atom_a, atom_b, atom_c, handle, i, &
                                                             iatom, ikind, jatom, jkind, katom, &
@@ -222,7 +222,7 @@ CONTAINS
                                                             dr0, drk, enta, entb, esrbij, etasrb, &
                                                             f1, fhua, fhub, gscal, ksrb, rra0, &
                                                             rrb0, shift
-      REAL(KIND=dp), DIMENSION(3)                        :: fdik, fdika, fdikb, force_rr, rij, rik
+      REAL(KIND=dp), DIMENSION(3)                        :: fdik, force_rr, rij, rik
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(atprop_type), POINTER                         :: atprop
       TYPE(neighbor_list_iterator_p_type), &
@@ -309,11 +309,10 @@ CONTAINS
                   rik = dcnum(iatom)%rik(:, i)
                   drk = SQRT(SUM(rik(:)**2))
                   IF (drk > 1.e-3_dp) THEN
-                     fdika(:) = fhua*dcnum(iatom)%dvals(i)*rik(:)/drk
-                     force(ikind)%repulsive(:, atom_a) = force(ikind)%repulsive(:, atom_a) - fdika(:)
-                     force(kkind)%repulsive(:, atom_c) = force(kkind)%repulsive(:, atom_c) + fdika(:)
+                     fdik(:) = fhua*dcnum(iatom)%dvals(i)*rik(:)/drk
+                     force(ikind)%repulsive(:, atom_a) = force(ikind)%repulsive(:, atom_a) - fdik(:)
+                     force(kkind)%repulsive(:, atom_c) = force(kkind)%repulsive(:, atom_c) + fdik(:)
                      IF (use_virial) THEN
-                        fdik = fdika + fdikb
                         CALL virial_pair_force(virial%pv_virial, -1._dp, fdik, rik)
                      END IF
                   END IF

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -31,9 +31,10 @@ MODULE xas_tdp_atom
         dbcsr_copy, dbcsr_create, dbcsr_distribution_get, dbcsr_distribution_new, &
         dbcsr_distribution_release, dbcsr_distribution_type, dbcsr_filter, dbcsr_finalize, &
         dbcsr_get_block_p, dbcsr_get_stored_coordinates, dbcsr_iterator_blocks_left, &
-        dbcsr_iterator_next_block, dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, &
-        dbcsr_p_type, dbcsr_put_block, dbcsr_release, dbcsr_replicate_all, dbcsr_set, dbcsr_type, &
-        dbcsr_type_antisymmetric, dbcsr_type_no_symmetry, dbcsr_type_symmetric
+        dbcsr_iterator_next_block, dbcsr_iterator_readonly_start, dbcsr_iterator_start, &
+        dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_p_type, dbcsr_put_block, dbcsr_release, &
+        dbcsr_replicate_all, dbcsr_set, dbcsr_type, dbcsr_type_antisymmetric, &
+        dbcsr_type_no_symmetry, dbcsr_type_symmetric
    USE cp_dbcsr_cholesky,               ONLY: cp_dbcsr_cholesky_decompose,&
                                               cp_dbcsr_cholesky_invert
    USE cp_dbcsr_operations,             ONLY: dbcsr_deallocate_matrix_set
@@ -120,6 +121,7 @@ MODULE xas_tdp_atom
                                               xc_dset_get_derivative,&
                                               xc_dset_release
    USE xc_derivative_types,             ONLY: xc_derivative_get,&
+                                              xc_derivative_p_type,&
                                               xc_derivative_type
    USE xc_derivatives,                  ONLY: xc_functionals_eval,&
                                               xc_functionals_get_needs
@@ -182,7 +184,9 @@ CONTAINS
       nex_kinds = xas_tdp_env%nex_kinds
       nex_atoms = xas_tdp_env%nex_atoms
       do_xc = xas_tdp_control%do_xc
-      IF (PRESENT(ltddfpt) .AND. ltddfpt) do_xc = .FALSE.
+      IF (PRESENT(ltddfpt)) THEN
+         IF (ltddfpt) do_xc = .FALSE.
+      END IF
       nspins = 1; IF (xas_tdp_control%do_uks .OR. xas_tdp_control%do_roks) nspins = 2
 
       xas_atom_env%nspins = nspins
@@ -351,9 +355,9 @@ CONTAINS
 
                   !hack to convert string into integer
                   READ (grid_info(igrid, 2), *, iostat=stat) na
-                  IF (stat .NE. 0) CPABORT("The 'na' value for the GRID keyword must be an integer")
+                  IF (stat /= 0) CPABORT("The 'na' value for the GRID keyword must be an integer")
                   READ (grid_info(igrid, 3), *, iostat=stat) nr
-                  IF (stat .NE. 0) CPABORT("The 'nr' value for the GRID keyword must be an integer")
+                  IF (stat /= 0) CPABORT("The 'nr' value for the GRID keyword must be an integer")
                   EXIT
                END IF
             END DO
@@ -519,8 +523,8 @@ CONTAINS
       TYPE(cp_1d_i_p_type), DIMENSION(:), OPTIONAL, &
          POINTER                                         :: neighbor_set
 
-      INTEGER                                            :: blk, i, iat, ibase, iblk, jblk, mepos, &
-                                                            natom, nb, nbase
+      INTEGER                                            :: i, iat, ibase, iblk, jblk, mepos, natom, &
+                                                            nb, nbase
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: blk_to_base, inb, who_is_there
       INTEGER, ALLOCATABLE, DIMENSION(:, :)              :: n_neighbors
       LOGICAL, ALLOCATABLE, DIMENSION(:)                 :: is_base_atom
@@ -552,10 +556,10 @@ CONTAINS
       ALLOCATE (n_neighbors(nbase, 0:para_env%num_pe - 1))
       n_neighbors = 0
 
-      CALL dbcsr_iterator_start(iter, mat_s)
+      CALL dbcsr_iterator_readonly_start(iter, mat_s)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-         CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk, blk=blk)
+         CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk)
 
          !avoid self-neighbors
          IF (iblk == jblk) CYCLE
@@ -587,12 +591,12 @@ CONTAINS
       END DO
 
       ! Loop a second time over S, this time fill the neighbors details
-      CALL dbcsr_iterator_start(iter, mat_s)
+      CALL dbcsr_iterator_readonly_start(iter, mat_s)
       ALLOCATE (inb(nbase))
       inb = 1
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-         CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk, blk=blk)
+         CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk)
          IF (iblk == jblk) CYCLE
 
          !test distance
@@ -764,7 +768,7 @@ CONTAINS
       CALL dbcsr_iterator_start(iter, whole_s)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-         CALL dbcsr_iterator_next_block(iter, row=iat, column=jat, blk=blk)
+         CALL dbcsr_iterator_next_block(iter, row=iat, column=jat)
          CALL dbcsr_get_block_p(whole_s, iat, jat, block_whole, found_whole)
 
          !only interested in neighbors
@@ -797,7 +801,7 @@ CONTAINS
       CALL dbcsr_iterator_start(iter, ri_sinv)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-         CALL dbcsr_iterator_next_block(iter, row=inb, column=jnb, blk=blk)
+         CALL dbcsr_iterator_next_block(iter, row=inb, column=jnb)
          CALL dbcsr_get_block_p(ri_sinv, inb, jnb, block_risinv, found_risinv)
 
          IF (.NOT. found_risinv) CYCLE
@@ -833,7 +837,7 @@ CONTAINS
 
       ELSE
          CALL cp_dbcsr_cholesky_decompose(ri_sinv, para_env=para_env, blacs_env=blacs_env)
-         CALL cp_dbcsr_cholesky_invert(ri_sinv, para_env=para_env, blacs_env=blacs_env, upper_to_full=.TRUE.)
+         CALL cp_dbcsr_cholesky_invert(ri_sinv, para_env=para_env, blacs_env=blacs_env, uplo_to_full=.TRUE.)
          CALL dbcsr_filter(ri_sinv, 1.E-10_dp) !make sure ri_sinv is sparse coming out of fm routines
       END IF
       CALL dbcsr_replicate_all(ri_sinv)
@@ -1182,7 +1186,7 @@ CONTAINS
 !  Point to the rho_set densities
       rhoa => rho_set%rhoa
       rhob => rho_set%rhob
-      rhoa = 0.0_dp; rhob = 0.0_dp; 
+      rhoa = 0.0_dp; rhob = 0.0_dp;
       IF (do_gga) THEN
          DO dir = 1, 3
             rho_set%drhoa(dir)%array = 0.0_dp
@@ -1916,7 +1920,11 @@ CONTAINS
       do_sf = xas_tdp_control%do_spin_flip
 
 !  Get some info on the functionals
-      xc_functionals => section_vals_get_subs_vals(input, "DFT%XAS_TDP%KERNEL%XC_FUNCTIONAL")
+      IF (qs_env%do_rixs) THEN
+         xc_functionals => section_vals_get_subs_vals(input, "PROPERTIES%RIXS%XAS_TDP%KERNEL%XC_FUNCTIONAL")
+      ELSE
+         xc_functionals => section_vals_get_subs_vals(input, "DFT%XAS_TDP%KERNEL%XC_FUNCTIONAL")
+      END IF
       ! ask for lsd in any case
       needs = xc_functionals_get_needs(xc_functionals, lsd=.TRUE., calc_potential=.TRUE.)
       do_gga = needs%drho_spin !because either LDA or GGA, and the former does not need gradient
@@ -2867,7 +2875,7 @@ CONTAINS
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
       INTEGER                                            :: i, maxso, na, nr, nset, nsotot, nspins, &
-                                                            ri_nsgf, ub
+                                                            ri_nsgf
       REAL(dp), ALLOCATABLE, DIMENSION(:, :)             :: fxc, int_so
       REAL(dp), DIMENSION(:, :), POINTER                 :: ri_sphi_so
       TYPE(cp_3d_r_p_type), ALLOCATABLE, DIMENSION(:)    :: d2e
@@ -2875,9 +2883,9 @@ CONTAINS
       TYPE(grid_atom_type), POINTER                      :: grid_atom
       TYPE(gto_basis_set_type), POINTER                  :: ri_basis
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
-      TYPE(xc_derivative_type), POINTER                  :: deriv
+      TYPE(xc_derivative_p_type), DIMENSION(3)           :: derivs
 
-      NULLIFY (grid_atom, deriv, ri_basis, ri_sphi_so, qs_kind_set, dft_control)
+      NULLIFY (grid_atom, ri_basis, ri_sphi_so, qs_kind_set, dft_control)
 
       ! Initialization
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set, dft_control=dft_control)
@@ -2892,12 +2900,14 @@ CONTAINS
 
       ! Get the second derivatives
       ALLOCATE (d2e(3))
-      deriv => xc_dset_get_derivative(deriv_set, [deriv_rhoa, deriv_rhoa])
-      CALL xc_derivative_get(deriv, deriv_data=d2e(1)%array)
-      deriv => xc_dset_get_derivative(deriv_set, [deriv_rhoa, deriv_rhob])
-      CALL xc_derivative_get(deriv, deriv_data=d2e(2)%array)
-      deriv => xc_dset_get_derivative(deriv_set, [deriv_rhob, deriv_rhob])
-      CALL xc_derivative_get(deriv, deriv_data=d2e(3)%array)
+      derivs(1)%deriv => xc_dset_get_derivative(deriv_set, [deriv_rhoa, deriv_rhoa])
+      derivs(2)%deriv => xc_dset_get_derivative(deriv_set, [deriv_rhoa, deriv_rhob])
+      derivs(3)%deriv => xc_dset_get_derivative(deriv_set, [deriv_rhob, deriv_rhob])
+      DO i = 1, 3
+         IF (ASSOCIATED(derivs(i)%deriv)) THEN
+            CALL xc_derivative_get(derivs(i)%deriv, deriv_data=d2e(i)%array)
+         END IF
+      END DO
 
       ! Allocate some work arrays
       ALLOCATE (fxc(na, nr))
@@ -2905,18 +2915,17 @@ CONTAINS
 
       ! Integrate for all three derivatives, taking the grid weight into account
       ! If closed shell, do not need to integrate beta-beta as it is the same as alpha-alpha
-      ub = 2; IF (nspins == 2) ub = 3
-      DO i = 1, ub
-
+      DO i = 1, nspins + 1
          int_so = 0.0_dp
-         fxc(:, :) = d2e(i)%array(:, :, 1)*grid_atom%weight(:, :)
-         CALL integrate_so_prod(int_so, fxc, ikind, xas_atom_env, qs_env)
+         IF (ASSOCIATED(derivs(i)%deriv)) THEN
+            fxc(:, :) = d2e(i)%array(:, :, 1)*grid_atom%weight(:, :)
+            CALL integrate_so_prod(int_so, fxc, ikind, xas_atom_env, qs_env)
+         END IF
 
          !contract into sgf. Array allocated on current processor only
          ALLOCATE (int_fxc(iatom, i)%array(ri_nsgf, ri_nsgf))
          int_fxc(iatom, i)%array = 0.0_dp
          CALL contract_so2sgf(int_fxc(iatom, i)%array, int_so, ri_basis, ri_sphi_so)
-
       END DO
 
    END SUBROUTINE integrate_sc_fxc
@@ -2969,18 +2978,28 @@ CONTAINS
 
       ALLOCATE (d1e(2))
       deriv => xc_dset_get_derivative(deriv_set, [deriv_rhoa])
-      CALL xc_derivative_get(deriv, deriv_data=d1e(1)%array)
+      IF (ASSOCIATED(deriv)) THEN
+         CALL xc_derivative_get(deriv, deriv_data=d1e(1)%array)
+      END IF
       deriv => xc_dset_get_derivative(deriv_set, [deriv_rhob])
-      CALL xc_derivative_get(deriv, deriv_data=d1e(2)%array)
+      IF (ASSOCIATED(deriv)) THEN
+         CALL xc_derivative_get(deriv, deriv_data=d1e(2)%array)
+      END IF
 
       ! In case rhoa -> rhob, take the limit, which involves the (already computed) second derivatives
       ALLOCATE (d2e(3))
       deriv => xc_dset_get_derivative(deriv_set, [deriv_rhoa, deriv_rhoa])
-      CALL xc_derivative_get(deriv, deriv_data=d2e(1)%array)
+      IF (ASSOCIATED(deriv)) THEN
+         CALL xc_derivative_get(deriv, deriv_data=d2e(1)%array)
+      END IF
       deriv => xc_dset_get_derivative(deriv_set, [deriv_rhoa, deriv_rhob])
-      CALL xc_derivative_get(deriv, deriv_data=d2e(2)%array)
+      IF (ASSOCIATED(deriv)) THEN
+         CALL xc_derivative_get(deriv, deriv_data=d2e(2)%array)
+      END IF
       deriv => xc_dset_get_derivative(deriv_set, [deriv_rhob, deriv_rhob])
-      CALL xc_derivative_get(deriv, deriv_data=d2e(3)%array)
+      IF (ASSOCIATED(deriv)) THEN
+         CALL xc_derivative_get(deriv, deriv_data=d2e(3)%array)
+      END IF
 
       !Compute the kernel on the grid. Already take weight into acocunt there
       ALLOCATE (fxc(na, nr))
@@ -3113,7 +3132,7 @@ CONTAINS
       my_CG => harmonics%my_CG
       max_iso_not0 = harmonics%max_iso_not0
       max_s_harm = harmonics%max_s_harm
-      CPASSERT(2*maxl .LE. indso(1, max_iso_not0))
+      CPASSERT(2*maxl <= indso(1, max_iso_not0))
 
       ALLOCATE (g1(nr), g2(nr), gg(nr, 0:2*maxl))
       ALLOCATE (gfxcg(na, 0:2*maxl))
@@ -3131,7 +3150,7 @@ CONTAINS
             CALL get_none0_cg_list(my_CG, lmin(iset1), lmax(iset1), lmin(iset2), lmax(iset2), &
                                    max_s_harm, lmax(iset1) + lmax(iset2), cg_list, cg_n_list, &
                                    max_iso_not0_local)
-            CPASSERT(max_iso_not0_local .LE. max_iso_not0)
+            CPASSERT(max_iso_not0_local <= max_iso_not0)
 
             n2 = nsoset(lmax(iset2))
             DO ipgf1 = 1, npgf(iset1)
@@ -3374,8 +3393,8 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'integrate_soc_atoms'
 
-      INTEGER                                            :: blk, handle, i, iat, ikind, ir, jat, &
-                                                            maxso, na, nkind, nr, nset, nsgf
+      INTEGER                                            :: handle, i, iat, ikind, ir, jat, maxso, &
+                                                            na, nkind, nr, nset, nsgf
       LOGICAL                                            :: all_potential_present
       REAL(dp)                                           :: zeff
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: Vr
@@ -3468,7 +3487,7 @@ CONTAINS
          CALL dbcsr_iterator_start(iter, matrix_s(1)%matrix)
          DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-            CALL dbcsr_iterator_next_block(iter, row=iat, column=jat, blk=blk)
+            CALL dbcsr_iterator_next_block(iter, row=iat, column=jat)
             IF (.NOT. iat == jat) CYCLE
             ikind = particle_set(iat)%atomic_kind%kind_number
 

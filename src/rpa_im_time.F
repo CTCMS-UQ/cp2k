@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -16,8 +16,8 @@ MODULE rpa_im_time
    USE cp_dbcsr_api,                    ONLY: &
         dbcsr_add, dbcsr_clear, dbcsr_copy, dbcsr_create, dbcsr_distribution_get, &
         dbcsr_distribution_type, dbcsr_filter, dbcsr_get_info, dbcsr_init_p, dbcsr_p_type, &
-        dbcsr_release_p, dbcsr_reserve_all_blocks, dbcsr_scale, dbcsr_set, dbcsr_type, &
-        dbcsr_type_no_symmetry
+        dbcsr_release_p, dbcsr_scale, dbcsr_set, dbcsr_type, dbcsr_type_no_symmetry
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_reserve_all_blocks
    USE cp_dbcsr_operations,             ONLY: copy_fm_to_dbcsr,&
                                               dbcsr_allocate_matrix_set,&
                                               dbcsr_deallocate_matrix_set
@@ -155,13 +155,12 @@ CONTAINS
          INTENT(IN)                                      :: weights_cos_tf_t_to_w
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:), &
          INTENT(IN)                                      :: tj
-      INTEGER, INTENT(IN)                                :: num_integ_points, nmo
+      REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: tau_tj
+      REAL(KIND=dp), INTENT(IN)                          :: e_fermi, eps_filter, alpha, &
+                                                            eps_filter_im_time
       REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: Eigenval
-      REAL(KIND=dp), INTENT(IN)                          :: eps_filter_im_time, alpha, eps_filter, &
-                                                            e_fermi
-      REAL(KIND=dp), DIMENSION(0:num_integ_points), &
-         INTENT(IN)                                      :: tau_tj
-      INTEGER, INTENT(IN)                                :: cut_memory, unit_nr
+      INTEGER, INTENT(IN)                                :: nmo, num_integ_points, cut_memory, &
+                                                            unit_nr
       TYPE(mp2_type)                                     :: mp2_env
       TYPE(mp_para_env_type), INTENT(IN)                 :: para_env
       TYPE(qs_environment_type), POINTER                 :: qs_env
@@ -665,10 +664,8 @@ CONTAINS
 
       TYPE(cp_fm_type), INTENT(IN)                       :: fm_scaled_dm_occ_tau, &
                                                             fm_scaled_dm_virt_tau
-      INTEGER, INTENT(IN)                                :: num_integ_points
-      REAL(KIND=dp), DIMENSION(0:num_integ_points), &
-         INTENT(IN)                                      :: tau_tj
-      INTEGER, INTENT(IN)                                :: nmo
+      REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: tau_tj
+      INTEGER, INTENT(IN)                                :: num_integ_points, nmo
       TYPE(cp_fm_type), INTENT(IN)                       :: fm_mo_coeff_occ, fm_mo_coeff_virt, &
                                                             fm_mo_coeff_occ_scaled, &
                                                             fm_mo_coeff_virt_scaled
@@ -1287,7 +1284,7 @@ CONTAINS
                   iatom = atom_from_ao_index(row_indices(irow))
                   jatom = atom_from_ao_index(col_indices(jcol))
 
-                  IF (iatom .NE. iatom_old .OR. jatom .NE. jatom_old) THEN
+                  IF (iatom /= iatom_old .OR. jatom /= jatom_old) THEN
 
                      CALL compute_weight_re_im(weight_re, weight_im, &
                                                num_cells, iatom, jatom, xkp(1:3, ik), wkp(ik), &
@@ -1446,9 +1443,9 @@ CONTAINS
 
       ! check that real space super lattice is a (2n+1)x(2m+1)x(2k+1) super lattice with the unit cell
       ! in the middle
-      CPASSERT(cell_grid(1) .NE. itm(1)*2)
-      CPASSERT(cell_grid(2) .NE. itm(2)*2)
-      CPASSERT(cell_grid(3) .NE. itm(3)*2)
+      CPASSERT(cell_grid(1) /= itm(1)*2)
+      CPASSERT(cell_grid(2) /= itm(2)*2)
+      CPASSERT(cell_grid(3) /= itm(3)*2)
 
       IF (ASSOCIATED(cell_to_index)) DEALLOCATE (cell_to_index)
       IF (ASSOCIATED(index_to_cell)) DEALLOCATE (index_to_cell)
@@ -1578,12 +1575,12 @@ CONTAINS
          y_cell_R_minus_S = y_cell_R - y_cell_S
          z_cell_R_minus_S = z_cell_R - z_cell_S
 
-         IF (x_cell_R_minus_S .GE. LBOUND(cell_to_index_3c, 1) .AND. &
-             x_cell_R_minus_S .LE. UBOUND(cell_to_index_3c, 1) .AND. &
-             y_cell_R_minus_S .GE. LBOUND(cell_to_index_3c, 2) .AND. &
-             y_cell_R_minus_S .LE. UBOUND(cell_to_index_3c, 2) .AND. &
-             z_cell_R_minus_S .GE. LBOUND(cell_to_index_3c, 3) .AND. &
-             z_cell_R_minus_S .LE. UBOUND(cell_to_index_3c, 3)) THEN
+         IF (x_cell_R_minus_S >= LBOUND(cell_to_index_3c, 1) .AND. &
+             x_cell_R_minus_S <= UBOUND(cell_to_index_3c, 1) .AND. &
+             y_cell_R_minus_S >= LBOUND(cell_to_index_3c, 2) .AND. &
+             y_cell_R_minus_S <= UBOUND(cell_to_index_3c, 2) .AND. &
+             z_cell_R_minus_S >= LBOUND(cell_to_index_3c, 3) .AND. &
+             z_cell_R_minus_S <= UBOUND(cell_to_index_3c, 3)) THEN
 
             i_cell_R_minus_S = cell_to_index_3c(x_cell_R_minus_S, y_cell_R_minus_S, z_cell_R_minus_S)
 
@@ -1669,12 +1666,12 @@ CONTAINS
          y_cell_R_minus_S_minus_T = y_cell_R - y_cell_S - y_cell_T
          z_cell_R_minus_S_minus_T = z_cell_R - z_cell_S - z_cell_T
 
-         IF (x_cell_R_minus_S_minus_T .GE. LBOUND(cell_to_index_3c, 1) .AND. &
-             x_cell_R_minus_S_minus_T .LE. UBOUND(cell_to_index_3c, 1) .AND. &
-             y_cell_R_minus_S_minus_T .GE. LBOUND(cell_to_index_3c, 2) .AND. &
-             y_cell_R_minus_S_minus_T .LE. UBOUND(cell_to_index_3c, 2) .AND. &
-             z_cell_R_minus_S_minus_T .GE. LBOUND(cell_to_index_3c, 3) .AND. &
-             z_cell_R_minus_S_minus_T .LE. UBOUND(cell_to_index_3c, 3)) THEN
+         IF (x_cell_R_minus_S_minus_T >= LBOUND(cell_to_index_3c, 1) .AND. &
+             x_cell_R_minus_S_minus_T <= UBOUND(cell_to_index_3c, 1) .AND. &
+             y_cell_R_minus_S_minus_T >= LBOUND(cell_to_index_3c, 2) .AND. &
+             y_cell_R_minus_S_minus_T <= UBOUND(cell_to_index_3c, 2) .AND. &
+             z_cell_R_minus_S_minus_T >= LBOUND(cell_to_index_3c, 3) .AND. &
+             z_cell_R_minus_S_minus_T <= UBOUND(cell_to_index_3c, 3)) THEN
 
             i_cell_R_minus_S_minus_T = cell_to_index_3c(x_cell_R_minus_S_minus_T, &
                                                         y_cell_R_minus_S_minus_T, &

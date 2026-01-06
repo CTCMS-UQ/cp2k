@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -118,33 +118,43 @@ CONTAINS
 !> \param qs_env ...
 !> \param iounit ...
 !> \param print_level ...
+!> \param ext ...
 ! **************************************************************************************************
-   SUBROUTINE eeq_print(qs_env, iounit, print_level)
+   SUBROUTINE eeq_print(qs_env, iounit, print_level, ext)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       INTEGER, INTENT(IN)                                :: iounit, print_level
+      LOGICAL, INTENT(IN)                                :: ext
 
       CHARACTER(LEN=2)                                   :: element_symbol
       INTEGER                                            :: enshift_type, iatom, ikind, natom
-      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: charges
+      REAL(KIND=dp), DIMENSION(:), POINTER               :: charges
       TYPE(cell_type), POINTER                           :: cell
       TYPE(eeq_solver_type)                              :: eeq_sparam
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
 
       MARK_USED(print_level)
 
-      CALL get_qs_env(qs_env, natom=natom, particle_set=particle_set)
-      ALLOCATE (charges(natom))
-      CALL get_qs_env(qs_env, cell=cell)
-      ! enforce en shift method 1 (original/molecular)
-      ! method 2 from paper on PBC seems not to work
-      enshift_type = 1
-      !IF (ALL(cell%perd == 0)) enshift_type = 1
-      CALL eeq_charges(qs_env, charges, eeq_sparam, 2, enshift_type)
+      CALL get_qs_env(qs_env, natom=natom, particle_set=particle_set, cell=cell)
+      IF (ext) THEN
+         NULLIFY (charges)
+         CALL get_qs_env(qs_env, eeq=charges)
+         CPASSERT(ASSOCIATED(charges))
+         enshift_type = 0
+      ELSE
+         ALLOCATE (charges(natom))
+         ! enforce en shift method 1 (original/molecular)
+         ! method 2 from paper on PBC seems not to work
+         enshift_type = 1
+         !IF (ALL(cell%perd == 0)) enshift_type = 1
+         CALL eeq_charges(qs_env, charges, eeq_sparam, 2, enshift_type)
+      END IF
 
       IF (iounit > 0) THEN
 
-         IF (enshift_type == 1) THEN
+         IF (enshift_type == 0) THEN
+            WRITE (UNIT=iounit, FMT="(/,T2,A)") "EEQ Charges (External)"
+         ELSE IF (enshift_type == 1) THEN
             WRITE (UNIT=iounit, FMT="(/,T2,A)") "EEQ Charges (Parametrization 2019 (Molecules))"
          ELSE IF (enshift_type == 2) THEN
             WRITE (UNIT=iounit, FMT="(/,T2,A)") "EEQ Charges (Parametrization 2019 (Crystals))"
@@ -164,7 +174,7 @@ CONTAINS
 
       END IF
 
-      DEALLOCATE (charges)
+      IF (.NOT. ext) DEALLOCATE (charges)
 
    END SUBROUTINE eeq_print
 
@@ -344,7 +354,7 @@ CONTAINS
       LOGICAL                                            :: do_ewald, use_virial
       LOGICAL, ALLOCATABLE, DIMENSION(:)                 :: default_present
       REAL(KIND=dp)                                      :: ala, alb, alpha, cn, ctot, dr, dr2, drk, &
-                                                            elag, esg, gam2, gama, grc, kappa, &
+                                                            elag, esg, fe, gam2, gama, grc, kappa, &
                                                             qlam, qq, qq1, qq2, rcut, scn, sgamma, &
                                                             subcells, totalcharge, xi
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: c_radius, cnumbers, gam, qlag
@@ -530,6 +540,8 @@ CONTAINS
             dr2 = SUM(rij**2)
             dr = SQRT(dr2)
             IF (dr > rcut .OR. dr < 1.E-6_dp) CYCLE
+            fe = 1.0_dp
+            IF (iatom == jatom) fe = 0.5_dp
             IF (response_only) THEN
                qq = -qlag(iatom)*charges(jatom)
             ELSE
@@ -550,13 +562,13 @@ CONTAINS
             gradient(:, iatom) = gradient(:, iatom) + fdik(:)
             gradient(:, jatom) = gradient(:, jatom) - fdik(:)
             IF (use_virial) THEN
-               CALL virial_pair_force(stress, -1._dp, fdik, rij)
+               CALL virial_pair_force(stress, -fe, fdik, rij)
             END IF
             fdik(:) = qq2*grc*rij(:)/dr
             gradient(:, iatom) = gradient(:, iatom) - fdik(:)
             gradient(:, jatom) = gradient(:, jatom) + fdik(:)
             IF (use_virial) THEN
-               CALL virial_pair_force(stress, 1._dp, fdik, rij)
+               CALL virial_pair_force(stress, fe, fdik, rij)
             END IF
          END DO
          CALL neighbor_list_iterator_release(nl_iterator)
@@ -759,7 +771,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER                        :: routineN = 'eeq_solver'
 
       INTEGER                                            :: handle, ierror, iunit, natom, nkind, ns
-      LOGICAL                                            :: do_direct, do_ewald, do_sparse
+      LOGICAL                                            :: do_direct, do_displ, do_ewald, do_sparse
       REAL(KIND=dp)                                      :: alpha, deth, ftime, qtot
       TYPE(cp_fm_struct_type), POINTER                   :: mat_struct
       TYPE(cp_fm_type)                                   :: eeq_mat
@@ -779,6 +791,11 @@ CONTAINS
       do_direct = eeq_sparam%direct
       do_sparse = eeq_sparam%sparse
 
+      do_displ = .FALSE.
+      IF (dft_control%apply_period_efield .AND. ASSOCIATED(dft_control%period_efield)) THEN
+         do_displ = dft_control%period_efield%displacement_field
+      END IF
+
       ! sparse option NYA
       IF (do_sparse) THEN
          CALL cp_abort(__LOCATION__, "EEQ: Sparse option not yet available")
@@ -796,7 +813,7 @@ CONTAINS
          CPASSERT(PRESENT(ewald_env))
          CPASSERT(PRESENT(ewald_pw))
          IF (do_direct) THEN
-            IF (dft_control%apply_period_efield .AND. dft_control%period_efield%displacement_field) THEN
+            IF (do_displ) THEN
                CPABORT("NYA")
             ELSE
                CALL fpbc_solver(charges, lambda, eeq_energy, eeq_mat, particle_set, &
@@ -804,7 +821,7 @@ CONTAINS
                                 ewald_env, ewald_pw, iounit)
             END IF
          ELSE
-            IF (dft_control%apply_period_efield .AND. dft_control%period_efield%displacement_field) THEN
+            IF (do_displ) THEN
                CPABORT("NYA")
             ELSE
                ierror = 0
@@ -1479,7 +1496,6 @@ CONTAINS
       CALL para_env%sum(potential(1:na))
       CALL cp_fm_matvec(fm_mat, charges, potential, alpha=1.0_dp, beta=1.0_dp)
       eeqn = 0.5_dp*SUM(charges(1:na)*potential(1:na)) + SUM(charges(1:na)*rhs(1:na))
-!     potential(1:na) = potential(1:na) + rhs(1:na)
       potential(1:ns) = potential(1:ns) + rhs(1:ns)
       ALLOCATE (mvec(ns))
       CALL cp_fm_matvec(mmat, potential, mvec, alpha=-1.0_dp, beta=0.0_dp)
@@ -1518,6 +1534,10 @@ CONTAINS
       IF (dft_control%apply_period_efield) THEN
          dfield = dft_control%period_efield%displacement_field
 
+         IF (ALLOCATED(dft_control%period_efield%strength_list)) THEN
+            CPABORT("use of strength_list not implemented for eeq_efield_energy")
+         END IF
+
          fieldpol = dft_control%period_efield%polarisation
          fieldpol = fieldpol/SQRT(DOT_PRODUCT(fieldpol, fieldpol))
          fieldpol = -fieldpol*dft_control%period_efield%strength
@@ -1550,7 +1570,7 @@ CONTAINS
             END DO
             ef_energy = -0.25_dp*omega/twopi*ef_energy
          ELSE
-            ef_energy = -SUM(fpolvec(:)*qi(:))
+            ef_energy = SUM(fpolvec(:)*qi(:))
          END IF
 
       ELSE IF (dft_control%apply_efield) THEN
@@ -1596,6 +1616,10 @@ CONTAINS
       IF (dft_control%apply_period_efield) THEN
          dfield = dft_control%period_efield%displacement_field
 
+         IF (ALLOCATED(dft_control%period_efield%strength_list)) THEN
+            CPABORT("use of strength_list not implemented for eeq_efield_pot")
+         END IF
+
          fieldpol = dft_control%period_efield%polarisation
          fieldpol = fieldpol/SQRT(DOT_PRODUCT(fieldpol, fieldpol))
          fieldpol = -fieldpol*dft_control%period_efield%strength
@@ -1616,7 +1640,7 @@ CONTAINS
                DO idir = 1, 3
                   kvec(:) = twopi*cell%h_inv(idir, :)
                   kr = SUM(kvec(:)*ria(:))
-                  efr(ia) = efr(ia) - kr*fpolvec(idir)
+                  efr(ia) = efr(ia) + kr*fpolvec(idir)
                END DO
             END DO
          END IF
@@ -1661,6 +1685,10 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(3, 3)                     :: hmat
 
       natom = SIZE(particle_set)
+
+      IF (ALLOCATED(dft_control%period_efield%strength_list)) THEN
+         CPABORT("use of strength_list not implemented for eeq_dfield_pot")
+      END IF
 
       dfilter(1:3) = dft_control%period_efield%d_filter(1:3)
       fieldpol = dft_control%period_efield%polarisation
@@ -1756,6 +1784,7 @@ CONTAINS
       LOGICAL                                            :: dfield, use_virial
       REAL(KIND=dp)                                      :: q
       REAL(KIND=dp), DIMENSION(3)                        :: fa, fieldpol, ria
+      REAL(KIND=dp), DIMENSION(3, 3)                     :: pve
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -1776,6 +1805,10 @@ CONTAINS
       dfield = dft_control%period_efield%displacement_field
       CPASSERT(.NOT. dfield)
 
+      IF (ALLOCATED(dft_control%period_efield%strength_list)) THEN
+         CPABORT("use of strength_list not implemented for eeq_efield_force_periodic")
+      END IF
+
       fieldpol = dft_control%period_efield%polarisation
       fieldpol = fieldpol/SQRT(DOT_PRODUCT(fieldpol, fieldpol))
       fieldpol = -fieldpol*dft_control%period_efield%strength
@@ -1786,23 +1819,25 @@ CONTAINS
       CALL get_atomic_kind_set(atomic_kind_set, atom_of_kind=atom_of_kind)
       CALL get_qs_env(qs_env=qs_env, force=force)
 
+      pve = 0.0_dp
       DO ikind = 1, nkind
          force(ikind)%efield = 0.0_dp
          DO ia = 1, local_particles%n_el(ikind)
             iatom = local_particles%list(ikind)%array(ia)
             q = charges(iatom) - qlag(iatom)
-            fa(1:3) = -q*fieldpol(1:3)
+            fa(1:3) = q*fieldpol(1:3)
             atom_a = atom_of_kind(iatom)
             force(ikind)%efield(1:3, atom_a) = fa
             IF (use_virial) THEN
                ria = particle_set(ia)%r
                ria = pbc(ria, cell)
-               CALL virial_pair_force(virial%pv_virial, -0.5_dp, fa, ria)
-               CALL virial_pair_force(virial%pv_virial, -0.5_dp, ria, fa)
+               CALL virial_pair_force(pve, -0.5_dp, fa, ria)
+               CALL virial_pair_force(pve, -0.5_dp, ria, fa)
             END IF
          END DO
          CALL para_env%sum(force(ikind)%efield)
       END DO
+      virial%pv_virial = virial%pv_virial + pve
 
    END SUBROUTINE eeq_efield_force_periodic
 

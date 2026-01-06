@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -670,7 +670,7 @@ CONTAINS
       IF (para_env_top%is_source() .AND. (MOD(iopt, opt_bas%write_frequency) == 0 .OR. iopt == opt_bas%powell_param%maxfun)) &
          unit_nr = cp_logger_get_default_unit_nr(logger)
 
-      IF (unit_nr .GT. 0) THEN
+      IF (unit_nr > 0) THEN
          WRITE (unit_nr, '(1X,A,I8)') "BASOPT| Information at iteration number:", iopt
          WRITE (unit_nr, '(1X,A)') "BASOPT| Training set | Combination | Rho difference | Condition num. | Time"
          WRITE (unit_nr, '(1X,A)') "BASOPT| -----------------------------------------------------------------------"

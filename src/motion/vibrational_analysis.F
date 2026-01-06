@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -71,8 +71,8 @@ MODULE vibrational_analysis
    USE particle_methods,                ONLY: write_particle_matrix
    USE particle_types,                  ONLY: particle_type
    USE physcon,                         ONLY: &
-        a_bohr, angstrom, bohr, boltzmann, debye, e_mass, h_bar, hertz, kelvin, kjmol, massunit, &
-        n_avogadro, pascal, vibfac, wavenumbers
+        a_bohr, angstrom, bohr, boltzmann, c_light, debye, e_mass, h_bar, hertz, joule, kelvin, &
+        kjmol, massunit, n_avogadro, pascal, vibfac, wavenumbers
    USE replica_methods,                 ONLY: rep_env_calc_e_f,&
                                               rep_env_create
    USE replica_types,                   ONLY: rep_env_release,&
@@ -105,7 +105,7 @@ CONTAINS
       TYPE(global_environment_type), POINTER             :: globenv
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'vb_anal'
-      CHARACTER(LEN=1), DIMENSION(3), PARAMETER          :: lab = (/"X", "Y", "Z"/)
+      CHARACTER(LEN=1), DIMENSION(3), PARAMETER          :: lab = ["X", "Y", "Z"]
 
       CHARACTER(LEN=default_string_length)               :: description_d, description_p
       INTEGER :: handle, i, icoord, icoordm, icoordp, ierr, imap, iounit, ip1, ip2, iparticle1, &
@@ -197,7 +197,7 @@ CONTAINS
             CALL f_env_rm_defaults(f_env, ierr)
          ELSE
             CALL get_moving_atoms(force_env=f_env%force_env, Ilist=Mlist)
-            something_frozen = SIZE(particles) .NE. SIZE(Mlist)
+            something_frozen = SIZE(particles) /= SIZE(Mlist)
             natoms = SIZE(Mlist)
             ncoord = natoms*3
             ALLOCATE (Clist(ncoord))
@@ -632,8 +632,6 @@ CONTAINS
                   rmass(i) = norm/massunit
                   ! Renormalize displacements and convert in Angstrom
                   D(:, i) = SQRT(norm)*D(:, i)
-                  ! Force constants
-                  konst(i) = SIGN(1.0_dp, H_eigval2(i))*2.0_dp*pi**2*(ABS(H_eigval2(i))/massunit)**2*rmass(i)
                   IF (calc_intens) THEN
                      D_deriv = 0._dp
                      DO j = 1, nvib
@@ -671,6 +669,8 @@ CONTAINS
                   END IF
                   ! Convert frequencies to cm^-1
                   H_eigval2(i) = SIGN(1.0_dp, H_eigval2(i))*SQRT(ABS(H_eigval2(i))*massunit)*vibfac/1000.0_dp
+                  ! Force constant in au, conversion to mdyne/A is 15.57
+                  konst(i) = SIGN(1.0_dp, H_eigval2(i))*rmass(i)*massunit*(2.0_dp*pi*c_light*100*ABS(H_eigval2(i))*h_bar/joule)**2
                END DO
                IF (calc_intens) THEN
                   IF (iounit > 0) THEN
@@ -1141,7 +1141,7 @@ CONTAINS
       INTEGER                                            :: handle, jj
 
       CALL timeset(routineN, handle)
-      IF (unit .GT. 0) THEN
+      IF (unit > 0) THEN
          ! degrees of freedom, i.e. the rank
          WRITE (unit) dof
          ! eigenvalues in one record

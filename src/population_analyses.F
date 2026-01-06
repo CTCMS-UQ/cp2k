@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -23,7 +23,7 @@ MODULE population_analyses
    USE cp_dbcsr_api,                    ONLY: &
         dbcsr_copy, dbcsr_deallocate_matrix, dbcsr_get_block_p, dbcsr_iterator_blocks_left, &
         dbcsr_iterator_next_block, dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, &
-        dbcsr_p_type, dbcsr_set, dbcsr_setname, dbcsr_type
+        dbcsr_p_type, dbcsr_set, dbcsr_type
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               cp_dbcsr_sm_fm_multiply
    USE cp_dbcsr_output,                 ONLY: cp_dbcsr_write_sparse_matrix,&
@@ -256,9 +256,8 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'mulliken_population_analysis'
 
       CHARACTER(LEN=default_string_length)               :: headline
-      INTEGER                                            :: blk, handle, iatom, ic, isgf, ispin, &
-                                                            jatom, jsgf, natom, nsgf, nspin, sgfa, &
-                                                            sgfb
+      INTEGER                                            :: handle, iatom, ic, isgf, ispin, jatom, &
+                                                            jsgf, natom, nsgf, nspin, sgfa, sgfb
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: first_sgf_atom
       LOGICAL                                            :: found, print_gop
       REAL(KIND=dp)                                      :: ps
@@ -330,9 +329,14 @@ CONTAINS
          sm_s => matrix_s(1, 1)%matrix ! Overlap matrix in sparse format
          ALLOCATE (sm_ps)
          headline = "MULLIKEN NET ATOMIC ORBITAL AND OVERLAP POPULATION MATRIX"
-         CALL dbcsr_copy(matrix_b=sm_ps, &
-                         matrix_a=sm_s, &
-                         name=TRIM(headline))
+         IF (nspin > 1) THEN
+            IF (ispin == 1) THEN
+               headline = TRIM(headline)//" For Alpha Spin"
+            ELSE
+               headline = TRIM(headline)//" For Beta Spin"
+            END IF
+         END IF
+         CALL dbcsr_copy(matrix_b=sm_ps, matrix_a=sm_s, name=TRIM(headline))
       END IF
 
       ! Build Mulliken population matrix for each spin
@@ -347,7 +351,7 @@ CONTAINS
             ! CALL dbcsr_hadamard_product(sm_p,sm_s,sm_ps)
             CALL dbcsr_iterator_start(iter, sm_s)
             DO WHILE (dbcsr_iterator_blocks_left(iter))
-               CALL dbcsr_iterator_next_block(iter, iatom, jatom, s_block, blk)
+               CALL dbcsr_iterator_next_block(iter, iatom, jatom, s_block)
                IF (.NOT. (ASSOCIATED(s_block))) CYCLE
                CALL dbcsr_get_block_p(matrix=sm_p, &
                                       row=iatom, &
@@ -388,15 +392,7 @@ CONTAINS
 
          IF (print_level > 2) THEN
             ! Write the full Mulliken net AO and overlap population matrix
-            IF (nspin > 1) THEN
-               IF (ispin == 1) THEN
-                  CALL dbcsr_setname(sm_ps, TRIM(headline)//" For Alpha Spin")
-               ELSE
-                  CALL dbcsr_setname(sm_ps, TRIM(headline)//" For Beta Spin")
-               END IF
-            END IF
-            CALL cp_dbcsr_write_sparse_matrix(sm_ps, 4, 6, qs_env, para_env, &
-                                              output_unit=output_unit)
+            CALL cp_dbcsr_write_sparse_matrix(sm_ps, 4, 6, qs_env, para_env, output_unit=output_unit)
          END IF
       END DO
 
@@ -430,15 +426,18 @@ CONTAINS
    END SUBROUTINE mulliken_population_analysis
 
 ! **************************************************************************************************
-!> \brief Save the Mulliken charges in results
+!> \brief Save the Mulliken atomic orbital populations and charges in results
 !>
 !> \param orbpop ...
 !> \param atomic_kind_set ...
 !> \param qs_kind_set ...
 !> \param particle_set ...
 !> \param qs_env ...
-!> \date    27.05.2022
+!> \par History
+!>       27.05.2022 BT
+!>       16.07.2025 RK
 !> \author  Bo Thomsen (BT)
+!>          Rangsiman Ketkaew (RK)
 !> \version 1.0
 ! **************************************************************************************************
    SUBROUTINE save_mulliken_charges(orbpop, atomic_kind_set, qs_kind_set, particle_set, qs_env)
@@ -455,7 +454,7 @@ CONTAINS
       INTEGER, DIMENSION(:, :), POINTER                  :: lshell
       REAL(KIND=dp)                                      :: zeff
       REAL(KIND=dp), DIMENSION(3)                        :: sumorbpop
-      REAL(KIND=dp), DIMENSION(:), POINTER               :: charges_save
+      REAL(KIND=dp), DIMENSION(:), POINTER               :: all_sumorbpop, charges_save
       TYPE(cp_result_type), POINTER                      :: results
       TYPE(gto_basis_set_type), POINTER                  :: orb_basis_set
 
@@ -474,6 +473,7 @@ CONTAINS
       CALL get_atomic_kind_set(atomic_kind_set, natom=natom)
       NULLIFY (results)
       CALL get_qs_env(qs_env, results=results)
+      ALLOCATE (all_sumorbpop(natom))
       ALLOCATE (charges_save(natom))
 
       iao = 1
@@ -506,11 +506,25 @@ CONTAINS
             END DO
             IF (nspin == 1) THEN
                charges_save(iatom) = zeff - sumorbpop(1)
+               all_sumorbpop(iatom) = sumorbpop(1)
             ELSE
                charges_save(iatom) = zeff - sumorbpop(1) - sumorbpop(2)
+               all_sumorbpop(iatom) = sumorbpop(1) + sumorbpop(2)
             END IF
          END IF ! atom has an orbital basis
       END DO ! next atom iatom
+
+      ! Store atomic orbital populations in results
+      description = "[MULLIKEN-ORBPOP]"
+      CALL cp_results_erase(results=results, description=description)
+      CALL put_results(results=results, description=description, &
+                       values=orbpop)
+
+      ! Store sum orbital population in results
+      description = "[MULLIKEN-SUMORBPOP]"
+      CALL cp_results_erase(results=results, description=description)
+      CALL put_results(results=results, description=description, &
+                       values=all_sumorbpop)
 
       ! Store charges in results
       description = "[MULLIKEN-CHARGES]"
@@ -518,6 +532,7 @@ CONTAINS
       CALL put_results(results=results, description=description, &
                        values=charges_save)
 
+      DEALLOCATE (all_sumorbpop)
       DEALLOCATE (charges_save)
 
    END SUBROUTINE save_mulliken_charges

@@ -6,6 +6,6 @@
 ./scripts/stage3/install_fftw.sh
 ./scripts/stage3/install_libint.sh
 ./scripts/stage3/install_libxc.sh
-./scripts/stage3/install_libgrpp.sh
+./scripts/stage3/install_greenx.sh
 
 #EOF

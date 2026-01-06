@@ -1,5 +1,7 @@
 # Real-Time Bethe-Salpeter Propagation
 
+**References** : [](#Marek2025)
+
 Instead of solving the Casida equation in the linear response regime, an explicit time-integration
 of the equation of motion of electrons can be carried out to determine the excitation frequencies.
 In the real-time Bethe-Salpeter propagation (RTBSE) method, the equation of motion is the von
@@ -73,9 +75,10 @@ polarizability element.
 ## Running the Propagation
 
 To run the RTBSE propagation, include the
-[REAL_TIME_PROPAGATION](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION) section in the input file
-and set the [RTP_METHOD](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.RTP_METHOD) to `RTBSE` -
-otherwise, the standard TDDFT propagation is employed.
+[RTBSE](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.RTBSE) section in the input file.
+[SECTION_PARAMETERS](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.RTBSE.SECTION_PARAMETERS) can
+be used to choose TDDFT method as a debug method, but including the section alone leads to a RTBSE
+run.
 
 Furthermore, the [TIMESTEP](#CP2K_INPUT.MOTION.MD.TIMESTEP) and [STEPS](#CP2K_INPUT.MOTION.MD.STEPS)
 influence the size of each timestep and the total time of propagation. From the properties of the
@@ -129,9 +132,6 @@ For inexact methods, a threshold for the cutoff of exponential series is provide
 the [MAX_ITER](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.MAX_ITER) keyword also sets the
 maximum number of iterations before the program is stopped and non-convergence is reported.
 
-Use [RTP_METHOD](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.RTP_METHOD) to start the
-calculation by setting it to TDAGW.
-
 ### Excitation Method
 
 The real time pulse can be specified in the [EFIELD](#CP2K_INPUT.FORCE_EVAL.DFT.EFIELD) section.
@@ -177,6 +177,10 @@ RTBSE propagation are listed here
   an element of the Fourier transform of polarizability.
 - [RESTART](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.PRINT.RESTART) - Controls the name of
   the restart file
+  - note that for RT-BSE calculations, the
+    [EACH](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.PRINT.RESTART.EACH) section should have
+    [MD](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.PRINT.RESTART.EACH.MD) keyword set to 1 to
+    enable restarts at arbitrary number of iteration steps
 
 When [RESTART](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.PRINT.RESTART),
 [MOMENTS](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.PRINT.MOMENTS) and
@@ -184,6 +188,42 @@ When [RESTART](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.PRINT.RESTART),
 continue running the calculation in the same directory for longer time without rerunning the already
 calculated time steps. Note that total length of the propagation time controls the energy/frequency
 precision, while timestep size controls the energy/frequency range.
+
+For applied field pulse not centered at zero in time, one can use
+[START_TIME](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.FT.START_TIME) to set the center of
+Fourier transforms to a provided time $t_0$. Furthermore, the damping $\gamma$ in the Fourier
+transform is controlled by [DAMPING](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.FT.DAMPING)
+parameter. Explicilty, in such case, the Fourier transform of function $f(t)$ is
+
+$$ f(\omega) = \int dt e^{i (\omega + i \gamma) t } f(t + t_0)
+$$
+
+### Padé Interpolation
+
+It is possible to apply Padé interpolation to the Fourier transformed observables
+([MOMENTS_FT](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.PRINT.MOMENTS_FT) and
+[POLARIZABILITY](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.PRINT.POLARIZABILITY)) to increase
+the point density in the energy space, which is otherwise limited by the total time of propagation
+($\Delta \omega \approx (2 \pi)/T$, where $T$ is the total time of propagation). The Padé
+interpolation is implemented via interface to the
+[GreenX library](https://github.com/nomad-coe/greenX)\[[Mattiat2018](https://doi.org/10.1063/1.5051250)\],
+specifically the analytic continuation component. In order to use it, CP2K has to be compiled with
+GreenX support (`-DCP2K_USE_GREENX=ON` in `cmake` build).
+
+The parameters of the interpolation are set via
+[PADE](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.FT.PADE) section, whose presence also
+triggers the evaluation of the interpolation. Available parameters are
+
+- [E_MIN](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.FT.PADE.E_MIN) - start of the energy
+  interval for which the interpolation of FT observables is done
+- [E_MAX](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.FT.PADE.E_MAX) - end of the energy
+  interval for which the interpolation of FT observables is done
+- [E_STEP](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.FT.PADE.E_STEP) - required resolution of
+  the interpolation (smaller `E_STEP` means more interpolation evaluation points)
+- [FIT_E_MIN](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.FT.PADE.FIT_E_MIN) - start of the
+  energy interval used to fit the interpolation parameters
+- [FIT_E_MAX](#CP2K_INPUT.FORCE_EVAL.DFT.REAL_TIME_PROPAGATION.FT.PADE.FIT_E_MAX) - end of the
+  energy interval used to fit the interpolation parameters
 
 ### Example Input
 
@@ -193,7 +233,8 @@ one
 
 ```
 &REAL_TIME_PROPAGATION
-    RTP_METHOD RTBSE ! Start the RTBSE method
+    &RTBSE ! Start the RTBSE method
+    &END RTBSE
     EPS_ITER 1.0E-8 ! Check convergence
     MAT_EXP BCH
     EXP_ACCURACY 1.0E-14 ! Less than EPS_ITER
@@ -201,14 +242,21 @@ one
     APPLY_DELTA_PULSE
     DELTA_PULSE_DIRECTION 1 0 0
     DELTA_PULSE_SCALE 0.0001 ! Small
+    &FT
+        &PADE
+            E_MIN [eV] 0.0
+            E_MAX [eV] 100.0
+            E_STEP [eV] 0.02
+            FIT_E_MIN [eV] 0.0
+            FIT_E_MAX [eV] 300.0
+        &END PADE
+    &END FT
     &PRINT
         &MOMENTS
             FILENAME MOMENTS
         &END MOMENTS
         &MOMENTS_FT
             FILENAME MOMENTS-FT
-            DAMPING 0.1 ! Exponential damping
-            START_TIME ! Fourier transform offset
         &END MOMENTS_FT
         &FIELD
             FILENAME FIELD
@@ -216,7 +264,13 @@ one
         &POLARIZABILITY
             FILENAME POLARIZABILITY
             ELEMENT 1 1
+            ELEMENT 2 2 ! print two different elements of tensor
         &END POLARIZABILITY
+        &RESTART
+            &EACH
+                MD 1
+            &END EACH
+        &END RESTART
     &END PRINT
 &END REAL_TIME_PROPAGATION
 ```

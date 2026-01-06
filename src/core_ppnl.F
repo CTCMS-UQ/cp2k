@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -162,6 +162,9 @@ CONTAINS
       IF (PRESENT(deltaR)) do_dR = .TRUE.
       doat = .FALSE.
       IF (PRESENT(atcore)) doat = .TRUE.
+      IF ((calculate_forces .OR. doat) .AND. do_dR) THEN
+         CPABORT("core_ppl: incompatible options")
+      END IF
 
       IF (calculate_forces) THEN
          CALL timeset(routineN//"_forces", handle)
@@ -408,7 +411,7 @@ CONTAINS
                         ! Calculate the primitive angular momentum integrals needed for spin-orbit coupling
                         lab = 0.0_dp
                         CALL angmom(la_max(iset), npgfa(iset), zeta(:, iset), rpgfa(:, iset), la_min(iset), &
-                                    lc_max, 1, zetc, rprjc, -rac, (/0._dp, 0._dp, 0._dp/), lab)
+                                    lc_max, 1, zetc, rprjc, -rac, [0._dp, 0._dp, 0._dp], lab)
                         DO i_dim = 1, 3
                            work_l(1:na, prjc:prjc + nb - 1, i_dim) = &
                               MATMUL(lab(1:na, 1:np, i_dim), cprj(1:np, prjc:prjc + nb - 1))
@@ -495,7 +498,7 @@ CONTAINS
 !$OMP          locks, virial, use_virial, calculate_forces, do_soc, natom) &
 !$OMP PRIVATE (ikind, jkind, iatom, jatom, cell_b, rab, &
 !$OMP          slot, iab, atom_a, f0, irow, icol, h_block, &
-!$OMP          l_block_x, l_block_y, l_block_z, &
+!$OMP          l_block_x, l_block_y, l_block_z, lock_num, &
 !$OMP          r_2block, r_3block, atk, &
 !$OMP          found,p_block, iac, ibc, alist_ac, alist_bc, acint, bcint, &
 !$OMP          achint, bchint, alkint, blkint, &
@@ -660,7 +663,7 @@ CONTAINS
                            END IF
 
                            IF (do_dR) THEN
-                              i = 1; j = 2; 
+                              i = 1; j = 2;
                               katom = alist_ac%clist(kac)%catom
                               IF (iatom <= jatom) THEN
                                  h_block(1:na, 1:nb) = h_block(1:na, 1:nb) + &
@@ -679,7 +682,7 @@ CONTAINS
                                                        MATMUL(bcint(1:nb, 1:np, j), TRANSPOSE(achint(1:na, 1:np, 1)))
                               END IF
 
-                              i = 2; j = 3; 
+                              i = 2; j = 3;
                               katom = alist_ac%clist(kac)%catom
                               IF (iatom <= jatom) THEN
                                  r_2block(1:na, 1:nb) = r_2block(1:na, 1:nb) + &
@@ -698,7 +701,7 @@ CONTAINS
                                                         MATMUL(bcint(1:nb, 1:np, j), TRANSPOSE(achint(1:na, 1:np, 1)))
                               END IF
 
-                              i = 3; j = 4; 
+                              i = 3; j = 4;
                               katom = alist_ac%clist(kac)%catom
                               IF (iatom <= jatom) THEN
                                  r_3block(1:na, 1:nb) = r_3block(1:na, 1:nb) + &

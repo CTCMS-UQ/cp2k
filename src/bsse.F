@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -373,11 +373,11 @@ CONTAINS
       iw = cp_print_key_unit_nr(logger, bsse_section, "PRINT%PROGRAM_RUN_INFO", &
                                 extension=".log")
       IF (iw > 0) THEN
-         WRITE (conf_s, fmt="(1000I0)", iostat=istat) conf; 
-         IF (istat .NE. 0) conf_s = "exceeded"
+         WRITE (conf_s, fmt="(1000I0)", iostat=istat) conf;
+         IF (istat /= 0) conf_s = "exceeded"
          CALL compress(conf_s, full=.TRUE.)
-         WRITE (conf_loc_s, fmt="(1000I0)", iostat=istat) conf_loc; 
-         IF (istat .NE. 0) conf_loc_s = "exceeded"
+         WRITE (conf_loc_s, fmt="(1000I0)", iostat=istat) conf_loc;
+         IF (istat /= 0) conf_loc_s = "exceeded"
          CALL compress(conf_loc_s, full=.TRUE.)
 
          WRITE (UNIT=iw, FMT="(/,T2,A)") REPEAT("-", 79)
@@ -487,7 +487,7 @@ CONTAINS
          WRITE (UNIT=iw, FMT="(T2,A,T20,A,F16.6,T80,A)") "-", "CP-corrected Total energy:", SUM(Em), "-"
          WRITE (UNIT=iw, FMT="(T2,A,T80,A)") "-", "-"
          DO i = 1, SIZE(conf, 1)
-            IF (i .GT. 1) THEN
+            IF (i > 1) THEN
                IF (SUM(conf(i - 1, :)) == 1 .AND. SUM(conf(i, :)) /= 1) THEN
                   WRITE (UNIT=iw, FMT="(T2,A,T80,A)") "-", "-"
                END IF

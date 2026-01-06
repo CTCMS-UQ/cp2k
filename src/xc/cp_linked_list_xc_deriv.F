@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -44,7 +44,7 @@ MODULE cp_linked_list_xc_deriv
                   end if
                end do
             end if
-         end function
+         end function cp_sll_deriv_less_q
       #:enddef
 
       #:set private_routines = get_private_routines()
@@ -52,4 +52,4 @@ MODULE cp_linked_list_xc_deriv
    #:endmute
 
    $:inst(nametype1, type1, type1in, type1out, eq, arrayeq, type1arrayEl, arrayEl, private_routines, default_init)
-END MODULE
+END MODULE cp_linked_list_xc_deriv

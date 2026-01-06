@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -88,7 +88,7 @@ CONTAINS
                           usage="RUN_TYPE (NONE|ENERGY|BASIS_OPTIMIZATION|PSEUDOPOTENTIAL_OPTIMIZATION)", &
                           default_i_val=atom_energy_run, &
                           enum_c_vals=s2a("NONE", "ENERGY", "BASIS_OPTIMIZATION", "PSEUDOPOTENTIAL_OPTIMIZATION"), &
-                          enum_i_vals=(/atom_no_run, atom_energy_run, atom_basis_run, atom_pseudo_run/), &
+                          enum_i_vals=[atom_no_run, atom_energy_run, atom_basis_run, atom_pseudo_run], &
                           enum_desc=s2a("Perform no run", &
                                         "Perform energy optimization", &
                                         "Perform basis optimization", &
@@ -100,10 +100,10 @@ CONTAINS
                           description="Method to calculate Coulomb integrals", &
                           usage="COULOMB_INTEGRALS (ANALYTIC|SEMI_ANALYTIC|NUMERIC)", &
                           default_i_val=do_numeric, &
-                          enum_c_vals=(/"ANALYTIC                 ", &
-                                        "SEMI_ANALYTIC            ", &
-                                        "NUMERIC                  "/), &
-                          enum_i_vals=(/do_analytic, do_semi_analytic, do_numeric/), &
+                          enum_c_vals=["ANALYTIC                 ", &
+                                       "SEMI_ANALYTIC            ", &
+                                       "NUMERIC                  "], &
+                          enum_i_vals=[do_analytic, do_semi_analytic, do_numeric], &
                           enum_desc=s2a("Use analytical method", &
                                         "Use semi-analytical method", &
                                         "Use numerical method"))
@@ -114,10 +114,10 @@ CONTAINS
                           description="Method to calculate Exchange integrals", &
                           usage="EXCHANGE_INTEGRALS (ANALYTIC|SEMI_ANALYTIC|NUMERIC)", &
                           default_i_val=do_numeric, &
-                          enum_c_vals=(/"ANALYTIC                 ", &
-                                        "SEMI_ANALYTIC            ", &
-                                        "NUMERIC                  "/), &
-                          enum_i_vals=(/do_analytic, do_semi_analytic, do_numeric/), &
+                          enum_c_vals=["ANALYTIC                 ", &
+                                       "SEMI_ANALYTIC            ", &
+                                       "NUMERIC                  "], &
+                          enum_i_vals=[do_analytic, do_semi_analytic, do_numeric], &
                           enum_desc=s2a("Use analytical method. Not available for longrange Hartree-Fock", &
                                         "Use semi-analytical method", &
                                         "Use numerical method"))
@@ -168,6 +168,10 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL create_atom_reference_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
       CALL create_atom_print_section(subsection)
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
@@ -197,6 +201,45 @@ CONTAINS
       CALL section_release(subsection)
 
    END SUBROUTINE create_atom_section
+
+! **************************************************************************************************
+!> \brief Create the atom section for reference method
+!> \param section the section to create
+!> \author jgh
+! **************************************************************************************************
+   SUBROUTINE create_atom_reference_section(section)
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(keyword_type), POINTER                        :: keyword
+      TYPE(section_type), POINTER                        :: subsection
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+      CALL section_create(section, __LOCATION__, name="REFERENCE", &
+                          description="Section to specify a reference method for PP optimization.", &
+                          n_keywords=1, n_subsections=1, repeats=.FALSE.)
+
+      NULLIFY (keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="METHOD", &
+                          description="METHOD to be used as reference: [AE|PP] ", &
+                          usage="METHOD PP", &
+                          type_of_var=char_t, default_c_val="AE", n_var=-1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="CORE", &
+                          description="Specifies the core electrons for a pseudopotential", &
+                          usage="CORE 1s2 ... or CORE [Ne] or CORE none for 0 electron cores", repeats=.FALSE., &
+                          n_var=-1, type_of_var=char_t)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      NULLIFY (subsection)
+      CALL create_potential_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+   END SUBROUTINE create_atom_reference_section
 
 ! **************************************************************************************************
 !> \brief Create the print atom section
@@ -320,7 +363,7 @@ CONTAINS
                           description="Algorithm to construct the atomic radial grids", &
                           usage="QUADRATURE (GC_SIMPLE|GC_TRANSFORMED|GC_LOG)", &
                           enum_c_vals=s2a("GC_SIMPLE", "GC_TRANSFORMED", "GC_LOG"), &
-                          enum_i_vals=(/do_gapw_gcs, do_gapw_gct, do_gapw_log/), &
+                          enum_i_vals=[do_gapw_gcs, do_gapw_gct, do_gapw_log], &
                           enum_desc=s2a("Gauss-Chebyshev quadrature", &
                                         "Transformed Gauss-Chebyshev quadrature", &
                                         "Logarithmic transformed Gauss-Chebyshev quadrature"), &
@@ -338,20 +381,20 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name="NUM_GTO_CORE", &
                           description="Number of Gaussian type functions for s, p, d, ... "// &
                           "for the main body of the basis", &
-                          usage="NUM_GTO 6 ", n_var=1, type_of_var=integer_t, &
+                          usage="NUM_GTO_CORE 6 ", n_var=1, type_of_var=integer_t, &
                           default_i_val=-1)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
       CALL keyword_create(keyword, __LOCATION__, name="NUM_GTO_EXTENDED", &
                           description="Number of Gaussian type functions for s, p, d, ... "// &
                           "for the extension set", &
-                          usage="NUM_GTO 4 ", n_var=1, type_of_var=integer_t, &
+                          usage="NUM_GTO_EXTENDED 4 ", n_var=1, type_of_var=integer_t, &
                           default_i_val=-1)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
       CALL keyword_create(keyword, __LOCATION__, name="NUM_GTO_POLARIZATION", &
                           description="Number of Gaussian type functions for the polarization set", &
-                          usage="NUM_GTO 4 ", n_var=1, type_of_var=integer_t, &
+                          usage="NUM_GTO_POLARIZATION 4 ", n_var=1, type_of_var=integer_t, &
                           default_i_val=-1)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
@@ -401,6 +444,14 @@ CONTAINS
       CALL cp_print_key_section_create(print_key, __LOCATION__, "ORBITALS", &
                                        description="Controls the printing of the optimized orbitals information", &
                                        print_level=high_print_level, filename="__STD_OUT__")
+      CALL keyword_create(keyword, __LOCATION__, name="XMGRACE", &
+                          description="Output orbitals in Xmgrace format to files.", &
+                          usage="XMGRACE <logical>", &
+                          type_of_var=logical_t, &
+                          default_l_val=.FALSE., &
+                          lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
       CALL section_add_subsection(section, print_key)
       CALL section_release(print_key)
 
@@ -519,12 +570,12 @@ CONTAINS
                           description="Basis set type", &
                           usage="BASIS_TYPE (GAUSSIAN|GEOMETRICAL_GTO|CONTRACTED_GTO|SLATER|NUMERICAL)", &
                           default_i_val=gaussian, &
-                          enum_c_vals=(/"GAUSSIAN                 ", &
-                                        "GEOMETRICAL_GTO          ", &
-                                        "CONTRACTED_GTO           ", &
-                                        "SLATER                   ", &
-                                        "NUMERICAL                "/), &
-                          enum_i_vals=(/gaussian, geometrical_gto, contracted_gto, slater, numerical/), &
+                          enum_c_vals=["GAUSSIAN                 ", &
+                                       "GEOMETRICAL_GTO          ", &
+                                       "CONTRACTED_GTO           ", &
+                                       "SLATER                   ", &
+                                       "NUMERICAL                "], &
+                          enum_i_vals=[gaussian, geometrical_gto, contracted_gto, slater, numerical], &
                           enum_desc=s2a("Gaussian type orbitals", &
                                         "Geometrical Gaussian type orbitals", &
                                         "Contracted Gaussian type orbitals", &
@@ -629,7 +680,7 @@ CONTAINS
                           description="Algorithm to construct the atomic radial grids", &
                           usage="QUADRATURE (GC_SIMPLE|GC_TRANSFORMED|GC_LOG)", &
                           enum_c_vals=s2a("GC_SIMPLE", "GC_TRANSFORMED", "GC_LOG"), &
-                          enum_i_vals=(/do_gapw_gcs, do_gapw_gct, do_gapw_log/), &
+                          enum_i_vals=[do_gapw_gcs, do_gapw_gct, do_gapw_log], &
                           enum_desc=s2a("Gauss-Chebyshev quadrature", &
                                         "Transformed Gauss-Chebyshev quadrature", &
                                         "Logarithmic transformed Gauss-Chebyshev quadrature"), &
@@ -679,15 +730,15 @@ CONTAINS
                           description="Type of electronic structure method to be used", &
                           usage="METHOD_TYPE (KOHN-SHAM|RKS|UKS|HARTREE-FOCK|RHF|UHF|ROHF)", &
                           default_i_val=do_rks_atom, &
-                          enum_c_vals=(/"KOHN-SHAM                ", &
-                                        "RKS                      ", &
-                                        "UKS                      ", &
-                                        "HARTREE-FOCK             ", &
-                                        "RHF                      ", &
-                                        "UHF                      ", &
-                                        "ROHF                     "/), &
-                          enum_i_vals=(/do_rks_atom, do_rks_atom, do_uks_atom, do_rhf_atom, &
-                                        do_rhf_atom, do_uhf_atom, do_rohf_atom/), &
+                          enum_c_vals=["KOHN-SHAM                ", &
+                                       "RKS                      ", &
+                                       "UKS                      ", &
+                                       "HARTREE-FOCK             ", &
+                                       "RHF                      ", &
+                                       "UHF                      ", &
+                                       "ROHF                     "], &
+                          enum_i_vals=[do_rks_atom, do_rks_atom, do_uks_atom, do_rhf_atom, &
+                                       do_rhf_atom, do_uhf_atom, do_rohf_atom], &
                           enum_desc=s2a("Kohn-Sham electronic structure method", &
                                         "Restricted Kohn-Sham electronic structure method", &
                                         "Unrestricted Kohn-Sham electronic structure method", &
@@ -702,15 +753,15 @@ CONTAINS
                           description="Type of scalar relativistic method to be used", &
                           usage="RELATIVISTIC (OFF|ZORA(MP)|scZORA(MP)|DKH(0)|DKH(1)|DKH(2)|DKH(3))", &
                           default_i_val=do_nonrel_atom, &
-                          enum_c_vals=(/"OFF                      ", &
-                                        "ZORA(MP)                 ", &
-                                        "scZORA(MP)               ", &
-                                        "DKH(0)                   ", &
-                                        "DKH(1)                   ", &
-                                        "DKH(2)                   ", &
-                                        "DKH(3)                   "/), &
-                          enum_i_vals=(/do_nonrel_atom, do_zoramp_atom, do_sczoramp_atom, do_dkh0_atom, &
-                                        do_dkh1_atom, do_dkh2_atom, do_dkh3_atom/), &
+                          enum_c_vals=["OFF                      ", &
+                                       "ZORA(MP)                 ", &
+                                       "scZORA(MP)               ", &
+                                       "DKH(0)                   ", &
+                                       "DKH(1)                   ", &
+                                       "DKH(2)                   ", &
+                                       "DKH(3)                   "], &
+                          enum_i_vals=[do_nonrel_atom, do_zoramp_atom, do_sczoramp_atom, do_dkh0_atom, &
+                                       do_dkh1_atom, do_dkh2_atom, do_dkh3_atom], &
                           enum_desc=s2a("Use no scalar relativistic method", &
                                         "Use ZORA method with atomic model potential", &
                                         "Use scaled ZORA method with atomic model potential", &
@@ -913,10 +964,10 @@ CONTAINS
                           description="Define functional form of confinement potential.", &
                           usage="CONFINEMENT_TYPE (NONE|POLYNOM|BARRIER)", &
                           default_i_val=poly_conf, &
-                          enum_c_vals=(/"NONE                     ", &
-                                        "POLYNOM                  ", &
-                                        "BARRIER                  "/), &
-                          enum_i_vals=(/no_conf, poly_conf, barrier_conf/), &
+                          enum_c_vals=["NONE                     ", &
+                                       "POLYNOM                  ", &
+                                       "BARRIER                  "], &
+                          enum_i_vals=[no_conf, poly_conf, barrier_conf], &
                           enum_desc=s2a("Do not use confinement potential", &
                                         "Use polynomial confinement potential: a*(R/b)^c", &
                                         "Use a smooth barrier potential: a*F[R-c)/b]"))
@@ -927,7 +978,7 @@ CONTAINS
                           description="Definition of parameters for confinement potential (a,b,c)", &
                           usage="CONFINEMENT prefactor range exponent (POLYNOM) "// &
                           "CONFINEMENT prefactor range r_onset (BARRIER)", &
-                          default_r_vals=(/0._dp, 0._dp, 0._dp/), &
+                          default_r_vals=[0._dp, 0._dp, 0._dp], &
                           repeats=.FALSE., n_var=-1)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -936,12 +987,12 @@ CONTAINS
                           description="Pseudopotential type", &
                           usage="PSEUDO_TYPE (NONE|GTH|UPF|ECP)", &
                           default_i_val=no_pseudo, &
-                          enum_c_vals=(/"NONE                     ", &
-                                        "GTH                      ", &
-                                        "UPF                      ", &
-                                        "SGP                      ", &
-                                        "ECP                      "/), &
-                          enum_i_vals=(/no_pseudo, gth_pseudo, upf_pseudo, sgp_pseudo, ecp_pseudo/), &
+                          enum_c_vals=["NONE                     ", &
+                                       "GTH                      ", &
+                                       "UPF                      ", &
+                                       "SGP                      ", &
+                                       "ECP                      "], &
+                          enum_i_vals=[no_pseudo, gth_pseudo, upf_pseudo, sgp_pseudo, ecp_pseudo], &
                           enum_desc=s2a("Do not use pseudopotentials", &
                                         "Use Goedecker-Teter-Hutter pseudopotentials", &
                                         "Use UPF norm-conserving pseudopotentials", &
@@ -958,7 +1009,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="POTENTIAL_NAME", &
-                          variants=(/"POT_NAME"/), &
+                          variants=["POT_NAME"], &
                           description="The name of the pseudopotential for the defined kind.", &
                           usage="POTENTIAL_NAME <PSEUDO-POTENTIAL-NAME>", default_c_val=" ", n_var=1)
       CALL section_add_keyword(section, keyword)

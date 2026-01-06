@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -57,7 +57,7 @@ CONTAINS
       REAL(kind=dp), INTENT(IN)                          :: rho_cutoff
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'qs_elf_calc'
-      INTEGER, DIMENSION(3, 3), PARAMETER :: nd = RESHAPE((/1, 0, 0, 0, 1, 0, 0, 0, 1/), (/3, 3/))
+      INTEGER, DIMENSION(3, 3), PARAMETER :: nd = RESHAPE([1, 0, 0, 0, 1, 0, 0, 0, 1], [3, 3])
       REAL(KIND=dp), PARAMETER                           :: ELFCUT = 0.0001_dp, &
                                                             f18 = (1.0_dp/8.0_dp), &
                                                             f23 = (2.0_dp/3.0_dp), &

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -17,13 +17,16 @@ MODULE rt_propagation_utils
    USE cp_control_types,                ONLY: dft_control_type,&
                                               rtp_control_type
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add, dbcsr_binary_read, dbcsr_checksum, dbcsr_copy, dbcsr_create, &
-        dbcsr_deallocate_matrix, dbcsr_desymmetrize, dbcsr_distribution_type, dbcsr_filter, &
-        dbcsr_get_info, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
-        dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_p_type, dbcsr_scale, &
-        dbcsr_set, dbcsr_type
+        dbcsr_add, dbcsr_binary_read, dbcsr_copy, dbcsr_create, dbcsr_deallocate_matrix, &
+        dbcsr_desymmetrize, dbcsr_distribution_type, dbcsr_filter, dbcsr_get_info, &
+        dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, dbcsr_iterator_start, &
+        dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_p_type, dbcsr_scale, dbcsr_set, dbcsr_type
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_checksum
    USE cp_dbcsr_operations,             ONLY: cp_dbcsr_plus_fm_fm_t,&
                                               dbcsr_deallocate_matrix_set
+   USE cp_files,                        ONLY: close_file,&
+                                              file_exists,&
+                                              open_file
    USE cp_fm_basic_linalg,              ONLY: cp_fm_column_scale
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_get_info,&
@@ -37,14 +40,17 @@ MODULE rt_propagation_utils
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_p_file,&
                                               cp_print_key_finished_output,&
+                                              cp_print_key_generate_filename,&
                                               cp_print_key_should_output,&
                                               cp_print_key_unit_nr
    USE cp_realspace_grid_cube,          ONLY: cp_pw_to_cube
+   USE efield_utils,                    ONLY: make_field
    USE input_constants,                 ONLY: use_restart_wfn,&
                                               use_rt_restart
    USE input_section_types,             ONLY: section_get_ival,&
                                               section_get_ivals,&
                                               section_get_lval,&
+                                              section_vals_get,&
                                               section_vals_get_subs_vals,&
                                               section_vals_type,&
                                               section_vals_val_get
@@ -57,6 +63,7 @@ MODULE rt_propagation_utils
    USE orbital_pointers,                ONLY: ncoset
    USE particle_list_types,             ONLY: particle_list_type
    USE particle_types,                  ONLY: particle_type
+   USE physcon,                         ONLY: femtoseconds
    USE pw_env_types,                    ONLY: pw_env_get,&
                                               pw_env_type
    USE pw_methods,                      ONLY: pw_multiply,&
@@ -103,7 +110,10 @@ MODULE rt_propagation_utils
              calc_update_rho_sparse, &
              calculate_P_imaginary, &
              write_rtp_mos_to_output_unit, &
-             write_rtp_mo_cubes
+             write_rtp_mo_cubes, &
+             warn_section_unused, &
+             read_moments, &
+             recalculate_fields
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'rt_propagation_utils'
 
@@ -129,7 +139,7 @@ CONTAINS
                                                             nder, row_atom
       INTEGER, DIMENSION(6, 2)                           :: c_map_mat
       LOGICAL                                            :: return_s_derivatives
-      REAL(dp), DIMENSION(:), POINTER                    :: block_values
+      REAL(dp), DIMENSION(:, :), POINTER                 :: block_values
       TYPE(dbcsr_iterator_type)                          :: iter
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: C_mat, S_der, s_derivs
       TYPE(dbcsr_type), POINTER                          :: B_mat, tmp_mat, tmp_mat2
@@ -246,7 +256,7 @@ CONTAINS
 
       CALL dbcsr_deallocate_matrix(tmp_mat)
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE calc_S_derivs
 
 ! **************************************************************************************************
 !> \brief reads the restart file. At the moment only SCF (means only real)
@@ -303,8 +313,9 @@ CONTAINS
       dft_section => section_vals_get_subs_vals(input, "DFT")
       SELECT CASE (dft_control%rtp_control%initial_wfn)
       CASE (use_restart_wfn)
-         CALL read_mo_set_from_restart(mo_array, atomic_kind_set, qs_kind_set, particle_set, para_env, &
-                                       id_nr=id_nr, multiplicity=dft_control%multiplicity, dft_section=dft_section)
+         CALL read_mo_set_from_restart(mo_array, qs_kind_set, particle_set, para_env, &
+                                       id_nr=id_nr, multiplicity=dft_control%multiplicity, &
+                                       dft_section=dft_section)
          CALL set_uniform_occupation_mo_array(mo_array, nspin)
 
          IF (dft_control%rtp_control%apply_wfn_mix_init_restart) &
@@ -380,7 +391,7 @@ CONTAINS
             CALL calc_update_rho_sparse(qs_env)
          ELSE
             CALL get_rtp(rtp=rtp, mos_old=mos_old)
-            CALL read_rt_mos_from_restart(mo_array, mos_old, atomic_kind_set, qs_kind_set, particle_set, para_env, &
+            CALL read_rt_mos_from_restart(mo_array, mos_old, qs_kind_set, particle_set, para_env, &
                                           id_nr, dft_control%multiplicity, dft_section)
             CALL set_uniform_occupation_mo_array(mo_array, nspin)
             DO ispin = 1, nspin
@@ -699,8 +710,9 @@ CONTAINS
          !loop for real (odd) and imaginary (even) parts
          DO i = 1, 0, -1
             CALL cp_fm_to_fm(mos_new(2*ispin - i), mo_set_rtp%mo_coeff)
-            CALL write_mo_set_to_output_unit(mo_set_rtp, atomic_kind_set, qs_kind_set, particle_set, &
-                                          dft_section, 4, 0, rtp=.TRUE., spin=TRIM(spin), cpart=MOD(i, 2), sim_step=qs_env%sim_step)
+            CALL write_mo_set_to_output_unit(mo_set_rtp, qs_kind_set, particle_set, &
+                                             dft_section, 4, 0, rtp=.TRUE., spin=TRIM(spin), &
+                                             cpart=MOD(i, 2), sim_step=qs_env%sim_step)
          END DO
 
          CALL deallocate_mo_set(mo_set_rtp)
@@ -871,5 +883,127 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE write_rtp_mo_cubes
+
+! **************************************************************************************************
+!> \brief Warn about unused sections of the print section - only implemented for some of the methods
+!> \param section Parent section
+!> \param subsection_name Name of the subsection which is not used even when explicitly included
+!> \param error_message Message to display as warning
+!> \author Stepan Marek (01.25)
+! **************************************************************************************************
+   SUBROUTINE warn_section_unused(section, subsection_name, error_message)
+      TYPE(section_vals_type), POINTER                   :: section
+      CHARACTER(len=*)                                   :: subsection_name, error_message
+
+      LOGICAL                                            :: explicit
+      TYPE(section_vals_type), POINTER                   :: target_section
+
+      target_section => section_vals_get_subs_vals(section, subsection_name)
+      CALL section_vals_get(target_section, explicit=explicit)
+      IF (explicit) CPWARN(error_message)
+   END SUBROUTINE warn_section_unused
+! **************************************************************************************************
+!> \brief Attempt to read the moments from a previously written file
+!> \param moments_section Print key section for the moments trace
+!> \param orig_start Index from which the original calculation started (given by input file)
+!> \param current_start The current start index from which the calculation continues
+!> \param moments Moment trace, where the read entries are overwritten
+!> \param times Optional time trace, where again the read entries are overwritten
+!> \param mom_read Whether moments were actually read
+!> \author Stepan Marek (11.25)
+! **************************************************************************************************
+   SUBROUTINE read_moments(moments_section, orig_start, current_start, moments, times, mom_read)
+      TYPE(section_vals_type), POINTER                   :: moments_section
+      INTEGER                                            :: orig_start, current_start
+      COMPLEX(kind=dp), DIMENSION(:, :, :), POINTER      :: moments
+      REAL(kind=dp), DIMENSION(:), OPTIONAL, POINTER     :: times
+      LOGICAL, OPTIONAL                                  :: mom_read
+
+      CHARACTER(len=14), DIMENSION(4)                    :: file_extensions
+      CHARACTER(len=default_path_length)                 :: save_name_im, save_name_re
+      INTEGER                                            :: i, k, max_n, n, n_spin, unit_im, unit_re
+      REAL(kind=dp)                                      :: time
+      REAL(kind=dp), DIMENSION(3)                        :: moments_im, moments_re
+      TYPE(cp_logger_type), POINTER                      :: logger
+
+! Whether at least some moments where extracted from the files
+
+      file_extensions(1) = "_SPIN_A_RE.dat"
+      file_extensions(2) = "_SPIN_A_IM.dat"
+      file_extensions(3) = "_SPIN_B_RE.dat"
+      file_extensions(4) = "_SPIN_B_IM.dat"
+
+      IF (PRESENT(mom_read)) mom_read = .FALSE.
+
+      n_spin = SIZE(moments, 1)
+
+      logger => cp_get_default_logger()
+      max_n = current_start - orig_start + 1
+
+      DO i = 1, n_spin
+         ! Open the relevant files
+         save_name_re = cp_print_key_generate_filename(logger, moments_section, &
+                                                       extension=file_extensions(2*i - 1), my_local=.FALSE.)
+         save_name_im = cp_print_key_generate_filename(logger, moments_section, &
+                                                       extension=file_extensions(2*i), my_local=.FALSE.)
+         IF (file_exists(save_name_re) .AND. file_exists(save_name_im)) THEN
+            CALL open_file(save_name_re, file_status="OLD", file_form="FORMATTED", file_action="READ", &
+                           unit_number=unit_re)
+            CALL open_file(save_name_im, file_status="OLD", file_form="FORMATTED", file_action="READ", &
+                           unit_number=unit_im)
+            DO n = 1, max_n
+               READ (unit_re, '(E20.8E3,E20.8E3,E20.8E3,E20.8E3,E20.8E3)') time, &
+                  moments_re(1), moments_re(2), moments_re(3)
+               READ (unit_im, '(E20.8E3,E20.8E3,E20.8E3,E20.8E3,E20.8E3)') time, &
+                  moments_im(1), moments_im(2), moments_im(3)
+               DO k = 1, 3
+                  moments(i, k, n) = CMPLX(moments_re(k), moments_im(k), kind=dp)
+               END DO
+               IF (PRESENT(times)) THEN
+                  times(n) = time/femtoseconds
+               END IF
+            END DO
+            IF (PRESENT(mom_read)) mom_read = .TRUE.
+            CALL close_file(unit_re)
+            CALL close_file(unit_im)
+         ELSE
+            moments(i, :, 1:max_n) = CMPLX(0.0, 0.0, kind=dp)
+            CPWARN("Could not read at least one moments file - missing trace is set to zero.")
+         END IF
+      END DO
+   END SUBROUTINE read_moments
+
+! **************************************************************************************************
+!> \brief Recalculates the field for index range given by orig_start and i_start,
+!>        with times taken from the times array
+!> \param fields Array, where relevant indices are recalculated
+!> \param times Array of input times
+!> \param orig_start original start (in case of restarts)
+!> \param i_start current start
+!> \param dft_control DFT parameters
+!> \date 11.2025
+!> \author Stepan Marek
+! **************************************************************************************************
+   SUBROUTINE recalculate_fields(fields, times, orig_start, i_start, dft_control)
+      COMPLEX(kind=dp), DIMENSION(:, :), POINTER         :: fields
+      REAL(kind=dp), DIMENSION(:), POINTER               :: times
+      INTEGER                                            :: orig_start, i_start
+      TYPE(dft_control_type), POINTER                    :: dft_control
+
+      INTEGER                                            :: i, max_n
+      REAL(kind=dp), DIMENSION(3)                        :: field
+
+      max_n = i_start - orig_start + 1
+
+      IF (dft_control%rtp_control%apply_delta_pulse .OR. &
+          dft_control%rtp_control%apply_delta_pulse_mag) THEN
+         fields(:, 1:max_n) = 0.0_dp
+      ELSE
+         DO i = 1, max_n
+            CALL make_field(dft_control, field, i + orig_start - 1, times(i))
+            fields(:, i) = field(:)
+         END DO
+      END IF
+   END SUBROUTINE recalculate_fields
 
 END MODULE rt_propagation_utils

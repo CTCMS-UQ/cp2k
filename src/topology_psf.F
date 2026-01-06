@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -33,7 +33,8 @@ MODULE topology_psf
                                               section_vals_get_subs_vals,&
                                               section_vals_type,&
                                               section_vals_val_get
-   USE kinds,                           ONLY: default_string_length,&
+   USE kinds,                           ONLY: default_path_length,&
+                                              default_string_length,&
                                               dp
    USE memory_utilities,                ONLY: reallocate
    USE message_passing,                 ONLY: mp_para_env_type
@@ -726,7 +727,8 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'write_topology_psf'
 
       CHARACTER(LEN=2*default_string_length)             :: psf_format
-      CHARACTER(LEN=default_string_length)               :: c_int, my_tag1, my_tag2, my_tag3, record
+      CHARACTER(LEN=default_path_length)                 :: record
+      CHARACTER(LEN=default_string_length)               :: c_int, my_tag1, my_tag2, my_tag3
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: charge_atm
       INTEGER                                            :: handle, i, iw, j, my_index, nchg
@@ -774,7 +776,7 @@ CONTAINS
       END IF
       ! fixup for topology output
       DO j = 1, topology%natoms
-         IF (charges(j) .EQ. -HUGE(0.0_dp)) charges(j) = -99.0_dp
+         IF (charges(j) == -HUGE(0.0_dp)) charges(j) = -99.0_dp
       END DO
       record = cp_print_key_generate_filename(logger, print_key, &
                                               extension=".psf", my_local=.FALSE.)

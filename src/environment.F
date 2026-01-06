@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -26,6 +26,10 @@ MODULE environment
    USE cp_files,                        ONLY: close_file,&
                                               get_data_dir,&
                                               open_file
+   USE cp_fm_cholesky,                  ONLY: FM_CHOLESKY_TYPE_DLAF,&
+                                              FM_CHOLESKY_TYPE_SCALAPACK,&
+                                              cholesky_type,&
+                                              dlaf_cholesky_n_min
    USE cp_fm_diag,                      ONLY: FM_DIAG_TYPE_CUSOLVER,&
                                               FM_DIAG_TYPE_DLAF,&
                                               FM_DIAG_TYPE_ELPA,&
@@ -245,7 +249,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE echo_all_hosts(para_env, output_unit)
       TYPE(mp_para_env_type), POINTER                    :: para_env
-      INTEGER                                            :: output_unit
+      INTEGER, INTENT(IN)                                :: output_unit
 
       CHARACTER(LEN=default_string_length)               :: string
       INTEGER                                            :: ipe
@@ -254,17 +258,15 @@ CONTAINS
 
       ! Print a list of all started processes
 
-      ALLOCATE (all_pid(para_env%num_pe))
-      all_pid(:) = 0
+      ALLOCATE (all_pid(para_env%num_pe), SOURCE=0)
       all_pid(para_env%mepos + 1) = r_pid
 
       CALL para_env%sum(all_pid)
-      ALLOCATE (all_host(30, para_env%num_pe))
-      all_host(:, :) = 0
+      ALLOCATE (all_host(30, para_env%num_pe), SOURCE=0)
+
       CALL string_to_ascii(r_host_name, all_host(:, para_env%mepos + 1))
       CALL para_env%sum(all_host)
       IF (output_unit > 0) THEN
-
          WRITE (UNIT=output_unit, FMT="(T2,A)") ""
          DO ipe = 1, para_env%num_pe
             CALL ascii_to_string(all_host(:, ipe), string)
@@ -272,8 +274,8 @@ CONTAINS
                TRIM(r_user_name)//"@"//TRIM(string)// &
                " has created rank and process ", ipe - 1, all_pid(ipe)
          END DO
-         WRITE (UNIT=output_unit, FMT="(T2,A)") ""
       END IF
+
       DEALLOCATE (all_pid)
       DEALLOCATE (all_host)
 
@@ -283,51 +285,53 @@ CONTAINS
 !> \brief echoes the list the number of process per host
 !> \param para_env ...
 !> \param output_unit ...
+!> \param node_count Count number of distributed systems (nodes)
 ! **************************************************************************************************
-   SUBROUTINE echo_all_process_host(para_env, output_unit)
+   SUBROUTINE echo_all_process_host(para_env, output_unit, node_count)
       TYPE(mp_para_env_type), POINTER                    :: para_env
-      INTEGER                                            :: output_unit
+      INTEGER, INTENT(IN)                                :: output_unit
+      INTEGER, INTENT(OUT), OPTIONAL                     :: node_count
 
       CHARACTER(LEN=default_string_length)               :: string, string_sec
-      INTEGER                                            :: ipe, jpe, nr_occu
+      INTEGER                                            :: ipe, jpe, nr_dist, nr_occu
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: all_pid
       INTEGER, ALLOCATABLE, DIMENSION(:, :)              :: all_host
 
-      ALLOCATE (all_host(30, para_env%num_pe))
-      all_host(:, :) = 0
+      ALLOCATE (all_host(30, para_env%num_pe), SOURCE=0)
+      ALLOCATE (all_pid(para_env%num_pe), SOURCE=0)
 
-      IF (m_procrun(r_pid) .EQ. 1) THEN
+      IF (m_procrun(r_pid) == 1) THEN
          CALL string_to_ascii(r_host_name, all_host(:, para_env%mepos + 1))
          CALL para_env%sum(all_host)
       END IF
 
-      IF (output_unit > 0) THEN
-         ALLOCATE (all_pid(para_env%num_pe))
-         all_pid(:) = 0
-
-         WRITE (UNIT=output_unit, FMT="(T2,A)") ""
-         DO ipe = 1, para_env%num_pe
-            nr_occu = 0
-            IF (all_pid(ipe) .NE. -1) THEN
-               CALL ascii_to_string(all_host(:, ipe), string)
-               DO jpe = 1, para_env%num_pe
-                  CALL ascii_to_string(all_host(:, jpe), string_sec)
-                  IF (string .EQ. string_sec) THEN
-                     nr_occu = nr_occu + 1
-                     all_pid(jpe) = -1
-                  END IF
-               END DO
+      nr_dist = 0
+      IF (output_unit > 0) WRITE (UNIT=output_unit, FMT="(T2,A)") ""
+      DO ipe = 1, para_env%num_pe
+         nr_occu = 0
+         IF (all_pid(ipe) /= -1) THEN
+            CALL ascii_to_string(all_host(:, ipe), string)
+            DO jpe = 1, para_env%num_pe
+               CALL ascii_to_string(all_host(:, jpe), string_sec)
+               IF (string == string_sec) THEN
+                  nr_occu = nr_occu + 1
+                  all_pid(jpe) = -1
+               END IF
+            END DO
+            IF (output_unit > 0) THEN
                WRITE (UNIT=output_unit, FMT="(T2,A,T63,I8,A)") &
                   TRIM(r_user_name)//"@"//TRIM(string)// &
                   " is running ", nr_occu, " processes"
-               WRITE (UNIT=output_unit, FMT="(T2,A)") ""
             END IF
-         END DO
-         DEALLOCATE (all_pid)
+            nr_dist = nr_dist + 1
+         END IF
+      END DO
 
-      END IF
-
+      DEALLOCATE (all_pid)
       DEALLOCATE (all_host)
+
+      CPASSERT(0 < nr_dist)
+      IF (PRESENT(node_count)) node_count = nr_dist
 
    END SUBROUTINE echo_all_process_host
 
@@ -351,7 +355,7 @@ CONTAINS
       TYPE(global_environment_type), POINTER             :: globenv
 
       CHARACTER(LEN=3*default_string_length)             :: message
-      CHARACTER(len=default_string_length)               :: c_val
+      CHARACTER(LEN=default_string_length)               :: c_val
       INTEGER                                            :: i, iw
       TYPE(cp_logger_type), POINTER                      :: logger
 
@@ -444,7 +448,7 @@ CONTAINS
       IF (SIZE(seed_vals) == 1) THEN
          initial_seed(:, :) = REAL(seed_vals(1), KIND=dp)
       ELSE IF (SIZE(seed_vals) == 6) THEN
-         initial_seed(1:3, 1:2) = RESHAPE(REAL(seed_vals(:), KIND=dp), (/3, 2/))
+         initial_seed(1:3, 1:2) = RESHAPE(REAL(seed_vals(:), KIND=dp), [3, 2])
       ELSE
          CPABORT("Supply exactly 1 or 6 arguments for SEED in &GLOBAL only!")
       END IF
@@ -506,17 +510,17 @@ CONTAINS
 
       CHARACTER(LEN=6), PARAMETER                        :: start_section_label = "GLOBAL"
 
-      CHARACTER(len=13)                                  :: omp_stacksize, tracing_string
-      CHARACTER(len=6)                                   :: print_level_string
-      CHARACTER(len=default_path_length)                 :: basis_set_file_name, coord_file_name, &
+      CHARACTER(LEN=13)                                  :: omp_stacksize, tracing_string
+      CHARACTER(LEN=6)                                   :: print_level_string
+      CHARACTER(LEN=default_path_length)                 :: basis_set_file_name, coord_file_name, &
                                                             mm_potential_file_name, &
                                                             potential_file_name
       CHARACTER(LEN=default_string_length)               :: env_num, model_name, project_name
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: trace_routines
-      INTEGER :: cpuid, cpuid_static, i_dgemm, i_diag, i_fft, i_grid_backend, iforce_eval, &
-         method_name_id, n_rep_val, nforce_eval, num_threads, output_unit, print_level, trace_max, &
-         unit_nr
+      INTEGER :: cpuid, cpuid_static, i_cholesky, i_dgemm, i_diag, i_fft, i_grid_backend, &
+         iforce_eval, method_name_id, n_rep_val, nforce_eval, node_count, num_threads, &
+         output_unit, print_level, trace_max, unit_nr
       INTEGER(kind=int_8) :: Buffers, Buffers_avr, Buffers_max, Buffers_min, Cached, Cached_avr, &
          Cached_max, Cached_min, MemFree, MemFree_avr, MemFree_max, MemFree_min, MemLikelyFree, &
          MemLikelyFree_avr, MemLikelyFree_max, MemLikelyFree_min, MemTotal, MemTotal_avr, &
@@ -541,6 +545,7 @@ CONTAINS
       CALL section_vals_val_get(global_section, "BLACS_GRID", i_val=globenv%blacs_grid_layout)
       CALL section_vals_val_get(global_section, "BLACS_REPEATABLE", l_val=globenv%blacs_repeatable)
       CALL section_vals_val_get(global_section, "PREFERRED_DIAG_LIBRARY", i_val=i_diag)
+      CALL section_vals_val_get(global_section, "PREFERRED_CHOLESKY_LIBRARY", i_val=i_cholesky)
       CALL section_vals_val_get(global_section, "PREFERRED_DGEMM_LIBRARY", i_val=i_dgemm)
       CALL section_vals_val_get(global_section, "EPS_CHECK_DIAG", r_val=globenv%eps_check_diag)
       CALL section_vals_val_get(global_section, "ENABLE_MPI_IO", l_val=flag)
@@ -553,6 +558,7 @@ CONTAINS
       IF (unit_nr > 0) globenv%elpa_print = .TRUE.
       CALL cp_print_key_finished_output(unit_nr, logger, global_section, "PRINT_ELPA")
       CALL section_vals_val_get(global_section, "DLAF_NEIGVEC_MIN", i_val=globenv%dlaf_neigvec_min)
+      CALL section_vals_val_get(global_section, "DLAF_CHOLESKY_N_MIN", i_val=globenv%dlaf_cholesky_n_min)
       CALL section_vals_val_get(global_section, "PREFERRED_FFT_LIBRARY", i_val=i_fft)
       CALL section_vals_val_get(global_section, "PRINT_LEVEL", i_val=print_level)
       CALL section_vals_val_get(global_section, "PROGRAM_NAME", i_val=globenv%prog_name_id)
@@ -613,6 +619,19 @@ CONTAINS
          CALL cite_reference(Solca2024)
       CASE DEFAULT
          CPABORT("Unknown diagonalization library specified")
+      END SELECT
+
+      SELECT CASE (i_cholesky)
+      CASE (FM_CHOLESKY_TYPE_SCALAPACK)
+         globenv%cholesky_library = "ScaLAPACK"
+         cholesky_type = FM_CHOLESKY_TYPE_SCALAPACK
+      CASE (FM_CHOLESKY_TYPE_DLAF)
+         globenv%cholesky_library = "DLAF"
+         cholesky_type = FM_CHOLESKY_TYPE_DLAF
+         dlaf_cholesky_n_min = globenv%dlaf_cholesky_n_min
+         CALL cite_reference(Solca2024)
+      CASE DEFAULT
+         CPABORT("Unknown Cholesky decomposition library specified")
       END SELECT
 
       SELECT CASE (i_fft)
@@ -720,12 +739,15 @@ CONTAINS
       SReclaimable = SReclaimable/1024
       MemLikelyFree = MemLikelyFree/1024
 
+      node_count = 1
       ! Print a list of all started processes
       IF (do_echo_all_hosts) THEN
          CALL echo_all_hosts(para_env, output_unit)
 
          ! Print the number of processes per host
-         CALL echo_all_process_host(para_env, output_unit)
+         CALL echo_all_process_host(para_env, output_unit, node_count)
+      ELSE ! no echo
+         CALL echo_all_process_host(para_env, 0, node_count)
       END IF
 
       num_threads = 1
@@ -792,6 +814,8 @@ CONTAINS
             ADJUSTR(globenv%default_fft_library(:40)), &
             start_section_label//"| Diagonalization library", &
             ADJUSTR(globenv%diag_library(:40)), &
+            start_section_label//"| Cholesky decomposition library", &
+            ADJUSTR(globenv%cholesky_library(:40)), &
             start_section_label//"| DGEMM library", &
             ADJUSTR(globenv%default_dgemm_library(:40))
 
@@ -805,6 +829,12 @@ CONTAINS
             WRITE (UNIT=output_unit, FMT="(T2,A,T71,I10)") &
                start_section_label//"| Minimum number of eigenvectors for DLAF usage", &
                globenv%dlaf_neigvec_min
+         END IF
+
+         IF (globenv%cholesky_library == "DLAF") THEN
+            WRITE (UNIT=output_unit, FMT="(T2,A,T71,I10)") &
+               start_section_label//"| Minimum matrix size for Cholesky decomposition with DLAF", &
+               globenv%dlaf_cholesky_n_min
          END IF
 
 #if defined(__CHECK_DIAG)
@@ -891,6 +921,8 @@ CONTAINS
          WRITE (UNIT=output_unit, FMT="(T2,A,T75,I6)") &
             start_section_label//"| Total number of message passing processes", &
             para_env%num_pe, &
+            start_section_label//"| Number of distributed systems (nodes)", &
+            node_count, &
             start_section_label//"| Number of threads for this process", &
             num_threads, &
             start_section_label//"| This output is from process", para_env%mepos
@@ -1104,7 +1136,7 @@ CONTAINS
    SUBROUTINE fm_setup(glob_section)
       TYPE(section_vals_type), POINTER                   :: glob_section
 
-      INTEGER                                            :: multiplication_type, ncb, nrb
+      INTEGER                                            :: mm_type, ncb, nrb
       LOGICAL                                            :: force_me
       TYPE(section_vals_type), POINTER                   :: fm_section
 
@@ -1113,13 +1145,10 @@ CONTAINS
       CALL section_vals_val_get(fm_section, "NROW_BLOCKS", i_val=nrb)
       CALL section_vals_val_get(fm_section, "NCOL_BLOCKS", i_val=ncb)
       CALL section_vals_val_get(fm_section, "FORCE_BLOCK_SIZE", l_val=force_me)
-
       CALL cp_fm_struct_config(nrow_block=nrb, ncol_block=ncb, force_block=force_me)
 
-      CALL section_vals_val_get(fm_section, "TYPE_OF_MATRIX_MULTIPLICATION", &
-                                i_val=multiplication_type)
-
-      CALL cp_fm_setup(multiplication_type)
+      CALL section_vals_val_get(fm_section, "TYPE_OF_MATRIX_MULTIPLICATION", i_val=mm_type)
+      CALL cp_fm_setup(mm_type)
 
    END SUBROUTINE fm_setup
 
@@ -1172,7 +1201,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE cp2k_get_walltime(section, keyword_name, walltime)
       TYPE(section_vals_type), POINTER                   :: section
-      CHARACTER(len=*), INTENT(in)                       :: keyword_name
+      CHARACTER(LEN=*), INTENT(in)                       :: keyword_name
       REAL(KIND=dp), INTENT(out)                         :: walltime
 
       CHARACTER(LEN=1)                                   :: c1, c2
@@ -1189,7 +1218,7 @@ CONTAINS
          IF (ierr /= 0) CPABORT('Could not parse WALLTIME: "'//txt(1:n)//'"')
       ELSE
          READ (txt(1:n), FMT="(I2,A1,I2,A1,I2)", IOSTAT=ierr) hours, c1, minutes, c2, seconds
-         IF (n /= 8 .OR. ierr /= 0 .OR. c1 .NE. ":" .OR. c2 .NE. ":") &
+         IF (n /= 8 .OR. ierr /= 0 .OR. c1 /= ":" .OR. c2 /= ":") &
             CPABORT('Could not parse WALLTIME: "'//txt(1:n)//'"')
          walltime = 3600.0_dp*REAL(hours, dp) + 60.0_dp*REAL(minutes, dp) + REAL(seconds, dp)
       END IF
@@ -1279,7 +1308,7 @@ CONTAINS
       r_timings = section_get_rval(root_section, "GLOBAL%TIMINGS%THRESHOLD")
       sort_by_self_time = section_get_lval(root_section, "GLOBAL%TIMINGS%SORT_BY_SELF_TIME")
       report_maxloc = section_get_lval(root_section, "GLOBAL%TIMINGS%REPORT_MAXLOC")
-      IF (m_energy() .NE. 0.0_dp) THEN
+      IF (m_energy() /= 0.0_dp) THEN
          CALL timings_report_print(iw, r_timings, sort_by_self_time, cost_type_energy, report_maxloc, para_env)
       END IF
       CALL timings_report_print(iw, r_timings, sort_by_self_time, cost_type_time, report_maxloc, para_env)

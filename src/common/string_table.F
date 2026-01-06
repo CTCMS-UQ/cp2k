@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -9,7 +9,7 @@
 !> \brief generates a unique id number for a string (str2id) that can be used
 !>      two compare two strings. I.e.
 !>      if (str1==str2) => str2id(str1)==str2id(str2)
-!>      if (str1.NE.str2) => str2id(str1).NE.str2id(str2)
+!>      if (str1/=str2) => str2id(str1)/=str2id(str2)
 !>      and the other way around. Given an id, the string can be retrieved.
 !> \note
 !>      the purpose of this routine is to speed up string handling,
@@ -49,7 +49,7 @@ MODULE string_table
    TYPE hash_element_type
       CHARACTER(LEN=default_string_length), POINTER :: str => NULL()
       TYPE(hash_element_type), POINTER :: next => NULL()
-   END TYPE
+   END TYPE hash_element_type
 
    ! the array of linked lists of hashed strings
    TYPE(hash_element_type), SAVE, ALLOCATABLE, TARGET, DIMENSION(:) :: hash_table

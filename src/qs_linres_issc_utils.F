@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -529,7 +529,7 @@ CONTAINS
             !
             ! FC term
             !
-            IF (do_fc .AND. iatom .NE. jatom) THEN
+            IF (do_fc .AND. iatom /= jatom) THEN
                !
                ! build the integral for the jatom
                CALL dbcsr_set(matrix_fc(1)%matrix, 0.0_dp)
@@ -550,7 +550,7 @@ CONTAINS
             !
             ! SD term
             !
-            IF (do_sd .AND. iatom .NE. jatom) THEN
+            IF (do_sd .AND. iatom /= jatom) THEN
                !
                ! build the integral for the jatom
                CALL dbcsr_set(matrix_efg(1)%matrix, 0.0_dp)
@@ -577,7 +577,7 @@ CONTAINS
             !
             ! PSO term
             !
-            IF (do_pso .AND. iatom .NE. jatom) THEN
+            IF (do_pso .AND. iatom /= jatom) THEN
                !
                ! build the integral for the jatom
                CALL dbcsr_set(matrix_pso(1)%matrix, 0.0_dp)
@@ -599,7 +599,7 @@ CONTAINS
             ! DSO term
             !
             !>>>>> for debugging we compute here the polarizability and NOT the DSO term!
-            IF (do_dso .AND. iatom .EQ. natom .AND. jatom .EQ. natom) THEN
+            IF (do_dso .AND. iatom == natom .AND. jatom == natom) THEN
                !
                ! build the integral for the jatom
                !CALL dbcsr_set(matrix_dso(1)%matrix,0.0_dp)
@@ -715,7 +715,7 @@ CONTAINS
                   atom_kind_j => particle_set(jatom)%atomic_kind
                   CALL get_atomic_kind(atom_kind_j, name=name_j, element_symbol=element_symbol_j)
                   !
-                  IF (iatom .EQ. jatom .AND. .NOT. do_dso) CYCLE
+                  IF (iatom == jatom .AND. .NOT. do_dso) CYCLE
                   !
                   !
                   ! FC
@@ -877,7 +877,7 @@ CONTAINS
       !
       IF (.NOT. ASSOCIATED(issc_env%issc_on_atom_list)) THEN
          ALLOCATE (issc_env%issc_on_atom_list(natom), STAT=istat)
-         CPASSERT(istat .EQ. 0)
+         CPASSERT(istat == 0)
          DO iatom = 1, natom
             issc_env%issc_on_atom_list(iatom) = iatom
          END DO
@@ -942,7 +942,7 @@ CONTAINS
                         name="efg (3xx-rr)/3", &
                         dist=dbcsr_dist, matrix_type=dbcsr_type_symmetric, &
                         row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                        nze=0, mutable_work=.TRUE.)
+                        mutable_work=.TRUE.)
       CALL cp_dbcsr_alloc_block_from_nbl(issc_env%matrix_efg(1)%matrix, sab_orb)
 
       ALLOCATE (issc_env%matrix_efg(2)%matrix, &
@@ -973,7 +973,7 @@ CONTAINS
                         name="pso x", &
                         dist=dbcsr_dist, matrix_type=dbcsr_type_antisymmetric, &
                         row_blk_size=row_blk_sizes, col_blk_size=row_blk_sizes, &
-                        nze=0, mutable_work=.TRUE.)
+                        mutable_work=.TRUE.)
       CALL cp_dbcsr_alloc_block_from_nbl(issc_env%matrix_pso(1)%matrix, sab_orb)
 
       ALLOCATE (issc_env%matrix_pso(2)%matrix, issc_env%matrix_pso(3)%matrix)

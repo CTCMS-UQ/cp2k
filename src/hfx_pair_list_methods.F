@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -463,7 +463,7 @@ CONTAINS
                               pmax_blocks, atomic_pair_list)
 
       INTEGER, INTENT(IN)                                :: natom
-      TYPE(pair_list_type), INTENT(OUT)                  :: list
+      TYPE(pair_list_type), INTENT(INOUT)                :: list
       TYPE(pair_set_list_type), DIMENSION(:), &
          INTENT(OUT)                                     :: set_list
       INTEGER, INTENT(IN)                                :: i_start, i_end, j_start, j_end, &
@@ -516,8 +516,8 @@ CONTAINS
                  coeffs_kind(jkind, ikind)%x(2)) + coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) CYCLE
 
             n_element = n_element + 1
-            list%elements(n_element)%pair = (/iatom, jatom/)
-            list%elements(n_element)%kind_pair = (/ikind, jkind/)
+            list%elements(n_element)%pair = [iatom, jatom]
+            list%elements(n_element)%kind_pair = [ikind, jkind]
             list%elements(n_element)%r1 = ra
             list%elements(n_element)%r2 = B11
             list%elements(n_element)%dist2 = rab2
@@ -528,7 +528,7 @@ CONTAINS
                   IF (coeffs_set(jset, iset, jkind, ikind)%x(1)*rab2 + coeffs_set(jset, iset, jkind, ikind)%x(2) + &
                       coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) CYCLE
                   nset_ij = nset_ij + 1
-                  set_list(nset_ij)%pair = (/iset, jset/)
+                  set_list(nset_ij)%pair = [iset, jset]
                END DO
             END DO
             list%elements(n_element)%set_bounds(2) = nset_ij
@@ -644,7 +644,7 @@ CONTAINS
                                   pmax_blocks, atomic_pair_list, skip_atom_symmetry)
 
       INTEGER, INTENT(IN)                                :: natom
-      TYPE(pair_list_type_mp2)                           :: list
+      TYPE(pair_list_type_mp2), INTENT(INOUT)            :: list
       TYPE(pair_set_list_type), DIMENSION(:), &
          INTENT(OUT)                                     :: set_list
       INTEGER, INTENT(IN)                                :: i_start, i_end, j_start, j_end, &
@@ -702,8 +702,8 @@ CONTAINS
                  coeffs_kind(jkind, ikind)%x(2)) + coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) CYCLE
 
             n_element = n_element + 1
-            list%elements(n_element)%pair = (/iatom, jatom/)
-            list%elements(n_element)%kind_pair = (/ikind, jkind/)
+            list%elements(n_element)%pair = [iatom, jatom]
+            list%elements(n_element)%kind_pair = [ikind, jkind]
             list%elements(n_element)%r1 = ra
             list%elements(n_element)%r2 = B11
             list%elements(n_element)%dist2 = rab2
@@ -714,7 +714,7 @@ CONTAINS
                   IF (coeffs_set(jset, iset, jkind, ikind)%x(1)*rab2 + coeffs_set(jset, iset, jkind, ikind)%x(2) + &
                       coeffs_kind_max0 + pmax_blocks < log10_eps_schwarz) CYCLE
                   nset_ij = nset_ij + 1
-                  set_list(nset_ij)%pair = (/iset, jset/)
+                  set_list(nset_ij)%pair = [iset, jset]
                END DO
             END DO
             list%elements(n_element)%set_bounds(2) = nset_ij

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -321,7 +321,7 @@ CONTAINS
          ALLOCATE (occup_im(nactive, nactive), interocc(nactive, nactive))
 
          DO iocc = 1, nactive
-            IF (smear%method .EQ. smear_fermi_dirac) THEN
+            IF (smear%method == smear_fermi_dirac) THEN
                ! Different prefactor in comparison to Octopus !
                CALL Fermi(occuptmp, nelec, dummykTS, mos(ispin)%eigenvalues, mos(ispin)%eigenvalues(iocc), &
                           smear%electronic_temperature, mos(ispin)%maxocc)

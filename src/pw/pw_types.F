@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -10,7 +10,7 @@
 !>      If parallel mode is distributed certain combination of
 !>      "in_use" and "in_space" can not be used.
 !>      For performance reasons it would be better to have the loops
-!>      over g-vectros in the gather/scatter routines in new subprograms
+!>      over g-vectors in the gather/scatter routines in new subprograms
 !>      with the actual arrays (also the addressing) in the parameter list
 !> \par History
 !>      JGH (29-Dec-2000) : Changes for parallel use

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -24,10 +24,11 @@ MODULE xas_tdp_utils
         dbcsr_distribution_release, dbcsr_distribution_type, dbcsr_finalize, dbcsr_get_block_p, &
         dbcsr_get_info, dbcsr_iterator_blocks_left, dbcsr_iterator_next_block, &
         dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, dbcsr_multiply, &
-        dbcsr_p_type, dbcsr_put_block, dbcsr_release, dbcsr_reserve_all_blocks, dbcsr_set, &
-        dbcsr_type, dbcsr_type_no_symmetry, dbcsr_type_symmetric
+        dbcsr_p_type, dbcsr_put_block, dbcsr_release, dbcsr_set, dbcsr_type, &
+        dbcsr_type_no_symmetry, dbcsr_type_symmetric
    USE cp_dbcsr_cholesky,               ONLY: cp_dbcsr_cholesky_decompose,&
                                               cp_dbcsr_cholesky_invert
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_reserve_all_blocks
    USE cp_dbcsr_diag,                   ONLY: cp_dbcsr_power
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
@@ -37,7 +38,7 @@ MODULE xas_tdp_utils
    USE cp_fm_basic_linalg,              ONLY: cp_fm_column_scale,&
                                               cp_fm_scale,&
                                               cp_fm_transpose,&
-                                              cp_fm_upper_to_full
+                                              cp_fm_uplo_to_full
    USE cp_fm_diag,                      ONLY: choose_eigv_solver,&
                                               cp_fm_geeig
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
@@ -532,9 +533,9 @@ CONTAINS
                ot_elb = xas_tdp_env%lumo_evals(1)%array(1)
                IF (do_os) ot_elb = MIN(ot_elb, xas_tdp_env%lumo_evals(2)%array(1))
 
-               ot_nevals = COUNT(xas_tdp_env%lumo_evals(1)%array - ot_elb .LE. xas_tdp_control%e_range)
+               ot_nevals = COUNT(xas_tdp_env%lumo_evals(1)%array - ot_elb <= xas_tdp_control%e_range)
                IF (do_os) ot_nevals = ot_nevals + &
-                                      COUNT(xas_tdp_env%lumo_evals(2)%array - ot_elb .LE. xas_tdp_control%e_range)
+                                      COUNT(xas_tdp_env%lumo_evals(2)%array - ot_elb <= xas_tdp_control%e_range)
 
             ELSE
 
@@ -632,7 +633,7 @@ CONTAINS
          CALL dbcsr_multiply('N', 'N', 1.0_dp, donor_state%metric(2)%matrix, tmp_mat2, &
                              0.0_dp, tmp_mat, filter_eps=xas_tdp_control%eps_filter)
          CALL cp_dbcsr_sm_fm_multiply(tmp_mat, c_diff, c_sum, ncol=nrow)
-         WHERE (tmp_evals .NE. 0) scaling = -1.0_dp/tmp_evals
+         WHERE (tmp_evals /= 0) scaling = -1.0_dp/tmp_evals
          CALL cp_fm_column_scale(c_sum, scaling)
 
 !        Full TDDFT specific clean-up
@@ -669,6 +670,7 @@ CONTAINS
 
       END IF
 
+      xas_tdp_env%nvirt = nevals
       ALLOCATE (lr_evals(nevals))
       lr_evals(:) = tmp_evals(first_ex:first_ex + nevals - 1)
 
@@ -736,7 +738,7 @@ CONTAINS
                             xas_tdp_control, qs_env)
 
       TYPE(dbcsr_type), POINTER                          :: matrix_tdp, metric
-      TYPE(cp_fm_type), INTENT(IN)                       :: evecs
+      TYPE(cp_fm_type), INTENT(INOUT)                    :: evecs
       REAL(dp), DIMENSION(:)                             :: evals
       INTEGER, INTENT(IN)                                :: neig
       LOGICAL                                            :: do_sf
@@ -839,7 +841,7 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'prep_for_ot'
 
-      INTEGER :: blk, handle, i, iblk, ido_mo, ispin, jblk, maxel, minel, nao, natom, ndo_mo, &
+      INTEGER :: handle, i, iblk, ido_mo, ispin, jblk, maxel, minel, nao, natom, ndo_mo, &
          nelec_spin(2), nhomo(2), nlumo(2), nspins, start_block, start_col, start_row
       LOGICAL                                            :: do_os, found
       REAL(dp), DIMENSION(:, :), POINTER                 :: pblock
@@ -924,7 +926,7 @@ CONTAINS
          CALL dbcsr_iterator_start(iter, xas_tdp_env%ot_prec(ispin)%matrix)
          DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-            CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk, blk=blk)
+            CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk)
 
             CALL dbcsr_get_block_p(xas_tdp_env%ot_prec(ispin)%matrix, iblk, jblk, pblock, found)
 
@@ -1088,11 +1090,11 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'get_q_projector'
 
-      INTEGER                                            :: blk, handle, iblk, imo, ispin, jblk, &
+      INTEGER                                            :: handle, iblk, imo, ispin, jblk, &
                                                             nblk_row, ndo_mo, nspins
       INTEGER, DIMENSION(:), POINTER                     :: blk_size_q, row_blk_size
       LOGICAL                                            :: found_block, my_dosf
-      REAL(dp), DIMENSION(:), POINTER                    :: work_block
+      REAL(dp), DIMENSION(:, :), POINTER                 :: work_block
       TYPE(dbcsr_distribution_type), POINTER             :: dist_q
       TYPE(dbcsr_iterator_type)                          :: iter
       TYPE(dbcsr_type), POINTER                          :: one_sp
@@ -1126,7 +1128,7 @@ CONTAINS
          CALL dbcsr_iterator_start(iter, one_sp)
          DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-            CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk, blk=blk)
+            CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk)
 
             ! get the block
             CALL dbcsr_get_block_p(one_sp, iblk, jblk, work_block, found_block)
@@ -1176,11 +1178,11 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'build_gs_contribution'
 
-      INTEGER                                            :: blk, handle, iblk, imo, ispin, jblk, &
+      INTEGER                                            :: handle, iblk, imo, ispin, jblk, &
                                                             nblk_row, ndo_mo, nspins
       INTEGER, DIMENSION(:), POINTER                     :: blk_size_a, row_blk_size
       LOGICAL                                            :: found_block, my_dosf
-      REAL(dp), DIMENSION(:), POINTER                    :: work_block
+      REAL(dp), DIMENSION(:, :), POINTER                 :: work_block
       TYPE(dbcsr_distribution_type), POINTER             :: dbcsr_dist, dist_a
       TYPE(dbcsr_iterator_type)                          :: iter
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: m_ks, matrix_ks, matrix_s
@@ -1228,7 +1230,7 @@ CONTAINS
          CALL dbcsr_iterator_start(iter, m_ks(ispin)%matrix)
          DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-            CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk, blk=blk)
+            CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk)
 
 !           Get the block
             CALL dbcsr_get_block_p(m_ks(ispin)%matrix, iblk, jblk, work_block, found_block)
@@ -1253,7 +1255,7 @@ CONTAINS
          CALL dbcsr_iterator_start(iter, matrix_s(1)%matrix)
          DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-            CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk, blk=blk)
+            CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk)
 
 !           Get the block
             CALL dbcsr_get_block_p(matrix_s(1)%matrix, iblk, jblk, work_block, found_block)
@@ -1307,11 +1309,11 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'build_metric'
 
-      INTEGER                                            :: blk, handle, i, iblk, jblk, nao, &
-                                                            nblk_row, ndo_mo, nspins
+      INTEGER                                            :: handle, i, iblk, jblk, nao, nblk_row, &
+                                                            ndo_mo, nspins
       INTEGER, DIMENSION(:), POINTER                     :: blk_size_g, row_blk_size
       LOGICAL                                            :: found_block, my_do_inv
-      REAL(dp), DIMENSION(:), POINTER                    :: work_block
+      REAL(dp), DIMENSION(:, :), POINTER                 :: work_block
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(dbcsr_distribution_type), POINTER             :: dist_g
       TYPE(dbcsr_iterator_type)                          :: iter
@@ -1343,7 +1345,7 @@ CONTAINS
       CALL dbcsr_iterator_start(iter, matrix_s(1)%matrix)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-         CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk, blk=blk)
+         CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk)
 
 !        Get the block
          CALL dbcsr_get_block_p(matrix_s(1)%matrix, iblk, jblk, work_block, found_block)
@@ -1379,13 +1381,13 @@ CONTAINS
          CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
          CALL dbcsr_copy(matrix_sinv, matrix_s(1)%matrix)
          CALL cp_dbcsr_cholesky_decompose(matrix_sinv, para_env=para_env, blacs_env=blacs_env)
-         CALL cp_dbcsr_cholesky_invert(matrix_sinv, para_env=para_env, blacs_env=blacs_env, upper_to_full=.TRUE.)
+         CALL cp_dbcsr_cholesky_invert(matrix_sinv, para_env=para_env, blacs_env=blacs_env, uplo_to_full=.TRUE.)
 
 !     Fill the matrices G^-1 by looping over the block of S^-1 and putting them on the diagonal
          CALL dbcsr_iterator_start(iter, matrix_sinv)
          DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-            CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk, blk=blk)
+            CALL dbcsr_iterator_next_block(iter, row=iblk, column=jblk)
 
 !           Get the block
             CALL dbcsr_get_block_p(matrix_sinv, iblk, jblk, work_block, found_block)
@@ -1587,8 +1589,8 @@ CONTAINS
 ! Creating the real and the imaginary part of the SOC perturbation matrix
       CALL cp_fm_struct_create(full_struct, context=blacs_env, para_env=para_env, &
                                nrow_global=ntot, ncol_global=ntot)
-      CALL cp_fm_create(real_fm, full_struct)
-      CALL cp_fm_create(img_fm, full_struct)
+      CALL cp_fm_create(real_fm, full_struct, set_zero=.TRUE.)
+      CALL cp_fm_create(img_fm, full_struct, set_zero=.TRUE.)
 
 ! Put the excitation energies on the diagonal of the real  matrix. Element 1,1 is the ground state
       DO isc = 1, nsc
@@ -1720,7 +1722,7 @@ CONTAINS
       ! some more useful work matrices
       CALL cp_fm_struct_create(work_struct, context=blacs_env, para_env=para_env, &
                                nrow_global=nex, ncol_global=nex)
-      CALL cp_fm_create(work_fm, work_struct)
+      CALL cp_fm_create(work_fm, work_struct, set_zero=.TRUE.)
 
 !  Looping over the excited states, computing the SOC and filling the perturbation matrix
 !  There are 3 loops to do: sc-sc, sc-sf and sf-sf
@@ -2005,8 +2007,8 @@ CONTAINS
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
       CALL cp_fm_struct_create(full_struct, context=blacs_env, para_env=para_env, &
                                nrow_global=ntot, ncol_global=ntot)
-      CALL cp_fm_create(real_fm, full_struct)
-      CALL cp_fm_create(img_fm, full_struct)
+      CALL cp_fm_create(real_fm, full_struct, set_zero=.TRUE.)
+      CALL cp_fm_create(img_fm, full_struct, set_zero=.TRUE.)
 
 !  Put the excitation energies on the diagonal of the real matrix
       DO isg = 1, nsg
@@ -2404,7 +2406,7 @@ CONTAINS
                                nrow_global=ntot, ncol_global=ntot)
       ALLOCATE (amew_op(dim_op))
       DO i = 1, dim_op
-         CALL cp_fm_create(amew_op(i), full_struct)
+         CALL cp_fm_create(amew_op(i), full_struct, set_zero=.TRUE.)
       END DO
 
 !  Before looping, need to evaluate sum_j,sigma <phi^0_j,sgima|op|phi^0_j,sigma>, for each dimension
@@ -2417,8 +2419,8 @@ CONTAINS
       CALL cp_fm_get_info(mo_coeff, matrix_struct=vec_struct)
       CALL cp_fm_struct_create(prod_struct, context=blacs_env, para_env=para_env, &
                                nrow_global=homo, ncol_global=homo)
-      CALL cp_fm_create(vec_work, vec_struct)
-      CALL cp_fm_create(prod_work, prod_struct)
+      CALL cp_fm_create(vec_work, vec_struct, set_zero=.TRUE.)
+      CALL cp_fm_create(prod_work, prod_struct, set_zero=.TRUE.)
 
       DO i = 1, dim_op
 
@@ -2547,7 +2549,7 @@ CONTAINS
                                  s_firstrow=1, s_firstcol=1, t_firstrow=1 + nsc + 1, t_firstcol=1 + nsc + 1)
 
          !Symmetry => only upper diag explicitly built
-         CALL cp_fm_upper_to_full(amew_op(i), work_fm)
+         CALL cp_fm_uplo_to_full(amew_op(i), work_fm)
 
       END DO !i
 
@@ -2635,7 +2637,7 @@ CONTAINS
                                nrow_global=ntot, ncol_global=ntot)
       ALLOCATE (amew_op(dim_op))
       DO i = 1, dim_op
-         CALL cp_fm_create(amew_op(i), full_struct)
+         CALL cp_fm_create(amew_op(i), full_struct, set_zero=.TRUE.)
       END DO !i
 
 !  Deal with the GS-GS contribution <0|0> = 2*sum_j <phi_j|op|phi_j>
@@ -2750,7 +2752,7 @@ CONTAINS
                                  t_firstcol=1 + nsg + 2*ntp + 1)
 
          ! Symmetrize the matrix (only upper triangle built)
-         CALL cp_fm_upper_to_full(amew_op(i), work_fm)
+         CALL cp_fm_uplo_to_full(amew_op(i), work_fm)
 
       END DO !i
 
@@ -2800,7 +2802,7 @@ CONTAINS
       LOGICAL, OPTIONAL                                  :: symmetric
       INTEGER, DIMENSION(2), OPTIONAL                    :: tracea_start, traceb_start
 
-      INTEGER                                            :: blk, iex, jex, ndo_mo, ndo_so
+      INTEGER                                            :: iex, jex, ndo_mo, ndo_so
       INTEGER, DIMENSION(2)                              :: tas, tbs
       LOGICAL                                            :: do_diags, found, my_symm
       REAL(dp)                                           :: soc_elem
@@ -2830,7 +2832,7 @@ CONTAINS
       CALL dbcsr_iterator_start(iter, amew_soc)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-         CALL dbcsr_iterator_next_block(iter, row=iex, column=jex, blk=blk)
+         CALL dbcsr_iterator_next_block(iter, row=iex, column=jex)
 
          IF (my_symm .AND. iex > jex) CYCLE
 
@@ -2887,7 +2889,7 @@ CONTAINS
       REAL(dp), OPTIONAL                                 :: pref_diags
       LOGICAL, OPTIONAL                                  :: symmetric
 
-      INTEGER                                            :: blk, iex, jex
+      INTEGER                                            :: iex, jex
       LOGICAL                                            :: do_diags, found, my_symm
       REAL(dp)                                           :: soc_elem
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: diag
@@ -2905,7 +2907,7 @@ CONTAINS
       CALL dbcsr_iterator_start(iter, amew_soc)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
 
-         CALL dbcsr_iterator_next_block(iter, row=iex, column=jex, blk=blk)
+         CALL dbcsr_iterator_next_block(iter, row=iex, column=jex)
 
          IF (my_symm .AND. iex > jex) CYCLE
 
@@ -2992,9 +2994,9 @@ CONTAINS
       CALL cp_fm_struct_create(dip_struct, context=blacs_env, para_env=para_env, &
                                nrow_global=ntot, ncol_global=1)
       CALL cp_cfm_get_info(soc_evecs_cfm, matrix_struct=full_struct)
-      CALL cp_cfm_create(dip_cfm, dip_struct)
-      CALL cp_cfm_create(work1_cfm, full_struct)
-      CALL cp_cfm_create(work2_cfm, full_struct)
+      CALL cp_cfm_create(dip_cfm, dip_struct, set_zero=.TRUE.)
+      CALL cp_cfm_create(work1_cfm, full_struct, set_zero=.TRUE.)
+      CALL cp_cfm_create(work2_cfm, full_struct, set_zero=.TRUE.)
       ALLOCATE (transdip(ntot, 1))
 
       !get the dipole in the AMEW basis

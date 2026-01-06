@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -46,12 +46,10 @@ MODULE topology_util
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'topology_util'
 
-! **************************************************************************************************
    TYPE array1_list_type
       INTEGER, POINTER, DIMENSION(:) :: array1 => NULL()
    END TYPE array1_list_type
 
-! **************************************************************************************************
    TYPE array2_list_type
       INTEGER, POINTER, DIMENSION(:) :: array1 => NULL()
       INTEGER, POINTER, DIMENSION(:) :: array2 => NULL()
@@ -182,7 +180,7 @@ CONTAINS
       iindex = 0
       imol = 0
       DO i = 1, natom
-         IF (old_mol .NE. atom_info%map_mol_num(I)) THEN
+         IF (old_mol /= atom_info%map_mol_num(I)) THEN
             old_mol = atom_info%map_mol_num(I)
             iindex = 0
             IF (imol > 0) THEN
@@ -227,7 +225,7 @@ CONTAINS
             "New ones will be provided on the basis of the connectivity!"
       END IF
       DO j = 1, max_mol_num
-         IF (mol_hash(j) .NE. old_hash) THEN
+         IF (mol_hash(j) /= old_hash) THEN
             unique_mol = unique_mol + 1
             old_hash = mol_hash(j)
             CALL setup_graph_set(reference_set, unique_mol, map_mol_hash(j), &
@@ -974,7 +972,7 @@ CONTAINS
          END DO
          ! If name didn't match let's try with the element
          IF (.NOT. user_defined) THEN
-            upper_sym_1 = id2str(atom_info%id_element(iatom))
+            upper_sym_1 = TRIM(id2str(atom_info%id_element(iatom)))
             CALL get_ptable_info(symbol=upper_sym_1, ielement=ielem_found, amass=atom_info%atm_mass(iatom))
          END IF
          IF (iw > 0) WRITE (iw, '(7X,A,A5,A,F12.5)') "In topology_set_atm_mass :: element = ", &
@@ -1009,20 +1007,24 @@ CONTAINS
       TYPE(connectivity_info_type), POINTER              :: conn_info
       TYPE(cp_logger_type), POINTER                      :: logger
 
+      CALL timeset(routineN, handle)
+
       NULLIFY (logger)
       logger => cp_get_default_logger()
       iw = cp_print_key_unit_nr(logger, subsys_section, "PRINT%TOPOLOGY_INFO/UTIL_INFO", &
                                 extension=".subsysLog")
-      CALL timeset(routineN, handle)
 
       atom_info => topology%atom_info
       conn_info => topology%conn_info
       natom = topology%natoms
 
-      IF (iw > 0) WRITE (iw, '(A)') "Start of Molecule_Check", &
-         "  Checking consistency between the generated molecules"
+      IF (iw > 0) THEN
+         WRITE (UNIT=iw, FMT="(/,T2,A)") &
+            "FORCEFIELD| Checking consistency of the generated molecules"
+      END IF
 
       ALLOCATE (atom_bond_list(natom))
+
       DO I = 1, natom
          ALLOCATE (atom_bond_list(I)%array1(0))
       END DO
@@ -1041,16 +1043,17 @@ CONTAINS
          icheck_typ = (atom_info%map_mol_typ(iatom) == mol_typ)
          IF ((icheck_typ .AND. (.NOT. icheck_num)) .OR. (.NOT. icheck_typ)) THEN
             !-----------------------------------------------------------------------------
-            !-----------------------------------------------------------------------------
             ! 1. Check each molecule have the same number of atoms
             !-----------------------------------------------------------------------------
             IF (counter /= loc_counter) THEN
                CALL cp_abort(__LOCATION__, &
-                             "different number of atoms for same molecule kind"// &
-                             " molecule type  = "//cp_to_string(mol_typ)// &
-                             " molecule number= "//cp_to_string(mol_num)// &
-                             " expected number of atoms="//cp_to_string(counter)//" found="// &
-                             cp_to_string(loc_counter))
+                             "Different number of atoms for the same molecule kind found "// &
+                             "(molecule type = "//TRIM(ADJUSTL(cp_to_string(mol_typ)))// &
+                             ", molecule number = "//TRIM(ADJUSTL(cp_to_string(mol_num)))// &
+                             ", expected number of atoms = "// &
+                             TRIM(ADJUSTL(cp_to_string(counter)))// &
+                             ", number of atoms found = "// &
+                             TRIM(ADJUSTL(cp_to_string(loc_counter)))//").")
             END IF
          END IF
          IF (.NOT. icheck_typ) THEN
@@ -1063,42 +1066,42 @@ CONTAINS
          IF (icheck_num) THEN
             IF (icheck_typ) loc_counter = loc_counter + 1
             !-----------------------------------------------------------------------------
-            !-----------------------------------------------------------------------------
             ! 2. Check that each molecule has the same atom sequences
             !-----------------------------------------------------------------------------
             IF (atom_info%id_atmname(iatom) /= &
                 atom_info%id_atmname(first + loc_counter - 1)) THEN
                CALL cp_abort(__LOCATION__, &
-                             "different atom name for same molecule kind"// &
-                             " atom number    = "//cp_to_string(iatom)// &
-                             " molecule type  = "//cp_to_string(mol_typ)// &
-                             " molecule number= "//cp_to_string(mol_num)// &
-                             " expected atom name="//TRIM(id2str(atom_info%id_atmname(first + loc_counter - 1)))// &
-                             " found="//TRIM(id2str(atom_info%id_atmname(iatom))))
+                             "Different atom names for the same molecule kind found "// &
+                             "(atom number = "//TRIM(ADJUSTL(cp_to_string(iatom)))// &
+                             ", molecule type = "//TRIM(ADJUSTL(cp_to_string(mol_typ)))// &
+                             ", molecule number = "//TRIM(ADJUSTL(cp_to_string(mol_num)))// &
+                             ", expected atom name = "// &
+                             TRIM(ADJUSTL(id2str(atom_info%id_atmname(first + loc_counter - 1))))// &
+                             ", atom name found = "// &
+                             TRIM(ADJUSTL(id2str(atom_info%id_atmname(iatom))))//").")
             END IF
-            !-----------------------------------------------------------------------------
             !-----------------------------------------------------------------------------
             ! 3. Check that each molecule have the same bond sequences
             !-----------------------------------------------------------------------------
             IF (SIZE(atom_bond_list(iatom)%array1) /= SIZE(atom_bond_list(first + loc_counter - 1)%array1)) THEN
                CALL cp_abort(__LOCATION__, &
-                             "different number of bonds for same molecule kind"// &
-                             " molecule type  = "//cp_to_string(mol_typ)// &
-                             " molecule number= "//cp_to_string(mol_num)// &
-                             " expected bonds="// &
-                             cp_to_string(SIZE(atom_bond_list(first + loc_counter - 1)%array1))//" - "// &
-                             cp_to_string(SIZE(atom_bond_list(iatom)%array1))// &
-                             " NOT FOUND! Check the connectivity of your system.")
+                             "Different number of bonds for the same molecule kind found "// &
+                             "(molecule type = "//TRIM(ADJUSTL(cp_to_string(mol_typ)))// &
+                             ", molecule number = "//TRIM(ADJUSTL(cp_to_string(mol_num)))// &
+                             ", expected number of bonds = "// &
+                             TRIM(ADJUSTL(cp_to_string(SIZE(atom_bond_list(first + loc_counter - 1)%array1))))// &
+                             ", number of bonds found = "// &
+                             TRIM(ADJUSTL(cp_to_string(SIZE(atom_bond_list(iatom)%array1))))// &
+                             "). Check the connectivity of your system.")
             END IF
-
             DO k = 1, SIZE(atom_bond_list(iatom)%array1)
                IF (ALL(atom_bond_list(first + loc_counter - 1)%array1 - first /= &
                        atom_bond_list(iatom)%array1(k) - first_loc)) THEN
                   CALL cp_abort(__LOCATION__, &
-                                "different sequence of bonds for same molecule kind"// &
-                                " molecule type  = "//cp_to_string(mol_typ)// &
-                                " molecule number= "//cp_to_string(mol_num)// &
-                                " NOT FOUND! Check the connectivity of your system.")
+                                "Different sequence of bonds for the same molecule kind found "// &
+                                "(molecule type = "//TRIM(ADJUSTL(cp_to_string(mol_typ)))// &
+                                ", molecule number = "//TRIM(ADJUSTL(cp_to_string(mol_num)))// &
+                                "). Check the connectivity of your system.")
                END IF
             END DO
          ELSE
@@ -1108,15 +1111,21 @@ CONTAINS
          END IF
          IF (mol_num == 1 .AND. icheck_typ) counter = counter + 1
       END DO
-      IF (iw > 0) WRITE (iw, '(A)') "End of Molecule_Check"
+
+      IF (iw > 0) THEN
+         WRITE (UNIT=iw, FMT="(T2,A)") &
+            "FORCEFIELD| Consistency check for molecules completed"
+      END IF
 
       DO I = 1, natom
          DEALLOCATE (atom_bond_list(I)%array1)
       END DO
       DEALLOCATE (atom_bond_list)
-      CALL timestop(handle)
+
       CALL cp_print_key_finished_output(iw, logger, subsys_section, &
                                         "PRINT%TOPOLOGY_INFO/UTIL_INFO")
+
+      CALL timestop(handle)
 
    END SUBROUTINE topology_molecules_check
 

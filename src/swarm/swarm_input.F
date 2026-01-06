@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -60,7 +60,7 @@ CONTAINS
                           default_i_val=swarm_do_glbopt, &
                           enum_c_vals=s2a("GLOBAL_OPT"), &
                           enum_desc=s2a("Runs global geometry optimisation"), &
-                          enum_i_vals=(/swarm_do_glbopt/))
+                          enum_i_vals=[swarm_do_glbopt])
       CALL section_add_keyword(swarm_section, keyword)
       CALL keyword_release(keyword)
 

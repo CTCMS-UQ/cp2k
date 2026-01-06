@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -31,7 +31,8 @@ MODULE qs_linres_nmr_shift
    USE kinds,                           ONLY: default_string_length,&
                                               dp
    USE mathconstants,                   ONLY: gaussi,&
-                                              twopi
+                                              twopi,&
+                                              z_zero
    USE mathlib,                         ONLY: diamat_all
    USE message_passing,                 ONLY: mp_para_env_type
    USE particle_types,                  ONLY: particle_type
@@ -367,7 +368,7 @@ CONTAINS
                DO jatom = 1, natom_tot
                   rij(:) = pbc(particle_set(iatom)%r, particle_set(jatom)%r, cell)
                   dist = SQRT(rij(1)*rij(1) + rij(2)*rij(2) + rij(3)*rij(3))
-                  IF (dist .LE. shift_gapw_radius) THEN
+                  IF (dist <= shift_gapw_radius) THEN
                      natom_local = natom_local + 1
                      list_j(natom_local) = jatom
                      dist_ij(:, natom_local) = rij(:)
@@ -381,7 +382,7 @@ CONTAINS
                      r_jatom(:) = r_nics(:, jatom)
                      rij(:) = pbc(particle_set(iatom)%r, r_jatom, cell)
                      dist = SQRT(rij(1)*rij(1) + rij(2)*rij(2) + rij(3)*rij(3))
-                     IF (dist .LE. shift_gapw_radius) THEN
+                     IF (dist <= shift_gapw_radius) THEN
                         nnics_local = nnics_local + 1
                         list_nics_j(nnics_local) = jatom
                         dist_nics_ij(:, nnics_local) = rij(:)
@@ -418,7 +419,7 @@ CONTAINS
                         !
                         rdiff(:) = rij(:) - r_grid(:, ira)
                         ddiff = SQRT(rdiff(1)*rdiff(1) + rdiff(2)*rdiff(2) + rdiff(3)*rdiff(3))
-                        IF (ddiff .GT. 1.0E-12_dp) THEN
+                        IF (ddiff > 1.0E-12_dp) THEN
                            dum = scale_fac_1*j_grid(ira)/(ddiff*ddiff*ddiff)
                            s_1 = s_1 + rdiff(idir2_1)*dum
                            s_2 = s_2 + rdiff(idir3_1)*dum
@@ -439,7 +440,7 @@ CONTAINS
                            !
                            rdiff(:) = rij(:) - r_grid(:, ira)
                            ddiff = SQRT(rdiff(1)*rdiff(1) + rdiff(2)*rdiff(2) + rdiff(3)*rdiff(3))
-                           IF (ddiff .GT. 1.0E-12_dp) THEN
+                           IF (ddiff > 1.0E-12_dp) THEN
                               dum = scale_fac_1*j_grid(ira)/(ddiff*ddiff*ddiff)
                               s_1 = s_1 + rdiff(idir2_1)*dum
                               s_2 = s_2 + rdiff(idir3_1)*dum
@@ -665,7 +666,7 @@ CONTAINS
       TYPE(pw_grid_type), POINTER                        :: grid
 
       grid => pw%pw_grid
-      cplx = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+      cplx = z_zero
       DO ig = grid%first_gne0, grid%ngpts_cut_local
          rg = (grid%g(1, ig)*r(1) + grid%g(2, ig)*r(2) + grid%g(3, ig)*r(3))*gaussi
          cplx = cplx + pw%array(ig)*EXP(rg)

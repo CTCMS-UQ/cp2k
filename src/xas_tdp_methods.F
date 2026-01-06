@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -27,10 +27,11 @@ MODULE xas_tdp_methods
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: &
-        dbcsr_add_on_diag, dbcsr_complete_redistribute, dbcsr_copy, dbcsr_create, dbcsr_filter, &
-        dbcsr_finalize, dbcsr_get_info, dbcsr_get_occupation, dbcsr_multiply, dbcsr_p_type, &
-        dbcsr_release, dbcsr_set, dbcsr_type, dbcsr_type_antisymmetric, dbcsr_type_no_symmetry, &
+        dbcsr_complete_redistribute, dbcsr_copy, dbcsr_create, dbcsr_filter, dbcsr_finalize, &
+        dbcsr_get_info, dbcsr_get_occupation, dbcsr_multiply, dbcsr_p_type, dbcsr_release, &
+        dbcsr_set, dbcsr_type, dbcsr_type_antisymmetric, dbcsr_type_no_symmetry, &
         dbcsr_type_symmetric
+   USE cp_dbcsr_contrib,                ONLY: dbcsr_add_on_diag
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               copy_fm_to_dbcsr,&
                                               cp_dbcsr_sm_fm_multiply
@@ -120,6 +121,7 @@ MODULE xas_tdp_methods
    USE qs_rho_types,                    ONLY: qs_rho_get,&
                                               qs_rho_type
    USE qs_scf_types,                    ONLY: ot_method_nr
+   USE rixs_types,                      ONLY: rixs_env_type
    USE util,                            ONLY: get_limit,&
                                               locate,&
                                               sort_unique
@@ -157,25 +159,34 @@ CONTAINS
 ! **************************************************************************************************
 !> \brief Driver for XAS TDDFT calculations.
 !> \param qs_env the inherited qs_environment
+!> \param rixs_env ...
 !> \author AB
 !> \note Empty for now...
 ! **************************************************************************************************
-   SUBROUTINE xas_tdp(qs_env)
+   SUBROUTINE xas_tdp(qs_env, rixs_env)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(rixs_env_type), OPTIONAL, POINTER             :: rixs_env
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'xas_tdp'
 
       CHARACTER(default_string_length)                   :: rst_filename
       INTEGER                                            :: handle, n_rep, output_unit
-      LOGICAL                                            :: do_restart
+      LOGICAL                                            :: do_restart, do_rixs
       TYPE(section_vals_type), POINTER                   :: xas_tdp_section
 
       CALL timeset(routineN, handle)
 
 !  Logger initialization and XAS TDP banner printing
       NULLIFY (xas_tdp_section)
-      xas_tdp_section => section_vals_get_subs_vals(qs_env%input, "DFT%XAS_TDP")
+
+      ! check if subroutine is called as part of rixs calculation
+      CALL get_qs_env(qs_env, do_rixs=do_rixs)
+      IF (do_rixs) THEN
+         xas_tdp_section => section_vals_get_subs_vals(qs_env%input, "PROPERTIES%RIXS%XAS_TDP")
+      ELSE
+         xas_tdp_section => section_vals_get_subs_vals(qs_env%input, "DFT%XAS_TDP")
+      END IF
       output_unit = cp_logger_get_default_io_unit()
 
       IF (output_unit > 0) THEN
@@ -210,7 +221,11 @@ CONTAINS
 
 !  or run the core XAS_TDP routine if not
       ELSE
-         CALL xas_tdp_core(xas_tdp_section, qs_env)
+         IF (PRESENT(rixs_env)) THEN
+            CALL xas_tdp_core(xas_tdp_section, qs_env, rixs_env)
+         ELSE
+            CALL xas_tdp_core(xas_tdp_section, qs_env)
+         END IF
       END IF
 
       IF (output_unit > 0) THEN
@@ -228,18 +243,20 @@ CONTAINS
 !> \brief The core workflow of the XAS_TDP method
 !> \param xas_tdp_section the input values for XAS_TDP
 !> \param qs_env ...
+!> \param rixs_env ...
 ! **************************************************************************************************
-   SUBROUTINE xas_tdp_core(xas_tdp_section, qs_env)
+   SUBROUTINE xas_tdp_core(xas_tdp_section, qs_env, rixs_env)
 
       TYPE(section_vals_type), POINTER                   :: xas_tdp_section
       TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(rixs_env_type), OPTIONAL, POINTER             :: rixs_env
 
       CHARACTER(LEN=default_string_length)               :: kind_name
       INTEGER :: batch_size, bo(2), current_state_index, iat, iatom, ibatch, ikind, ispin, istate, &
          nbatch, nex_atom, output_unit, tmp_index
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: batch_atoms, ex_atoms_of_kind
       INTEGER, DIMENSION(:), POINTER                     :: atoms_of_kind
-      LOGICAL                                            :: do_os, end_of_batch, unique
+      LOGICAL                                            :: do_os, do_rixs, end_of_batch, unique
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks
@@ -261,8 +278,12 @@ CONTAINS
          WRITE (UNIT=output_unit, FMT="(/,T3,A)") &
             "# Create and initialize the XAS_TDP environment"
       END IF
-      CALL get_qs_env(qs_env, dft_control=dft_control)
-      CALL xas_tdp_init(xas_tdp_env, xas_tdp_control, qs_env)
+      CALL get_qs_env(qs_env, dft_control=dft_control, do_rixs=do_rixs)
+      IF (PRESENT(rixs_env)) THEN
+         CALL xas_tdp_init(xas_tdp_env, xas_tdp_control, qs_env, rixs_env)
+      ELSE
+         CALL xas_tdp_init(xas_tdp_env, xas_tdp_control, qs_env)
+      END IF
       CALL print_info(output_unit, xas_tdp_control, qs_env)
 
       IF (output_unit > 0) THEN
@@ -507,8 +528,7 @@ CONTAINS
                   IF (xas_tdp_control%do_gw2x) CALL print_xps(current_state, xas_tdp_env, xas_tdp_control, qs_env)
 
 !                 Free some unneeded attributes of current_state
-                  CALL free_ds_memory(current_state)
-
+                  IF (.NOT. do_rixs) CALL free_ds_memory(current_state) ! donor-state will be cleaned in rixs
                   current_state_index = current_state_index + 1
                   NULLIFY (current_state)
 
@@ -541,7 +561,7 @@ CONTAINS
       END IF
 
 !  Clean-up
-      CALL xas_tdp_env_release(xas_tdp_env)
+      IF (.NOT. do_rixs) CALL xas_tdp_env_release(xas_tdp_env) ! is released at the end of rixs
       CALL xas_tdp_control_release(xas_tdp_control)
 
    END SUBROUTINE xas_tdp_core
@@ -551,12 +571,14 @@ CONTAINS
 !> \param xas_tdp_env the environment type to initialize
 !> \param xas_tdp_control the control type to initialize
 !> \param qs_env the inherited qs environement type
+!> \param rixs_env ...
 ! **************************************************************************************************
-   SUBROUTINE xas_tdp_init(xas_tdp_env, xas_tdp_control, qs_env)
+   SUBROUTINE xas_tdp_init(xas_tdp_env, xas_tdp_control, qs_env, rixs_env)
 
       TYPE(xas_tdp_env_type), POINTER                    :: xas_tdp_env
       TYPE(xas_tdp_control_type), POINTER                :: xas_tdp_control
       TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(rixs_env_type), OPTIONAL, POINTER             :: rixs_env
 
       CHARACTER(LEN=default_string_length)               :: kind_name
       INTEGER                                            :: at_ind, i, ispin, j, k, kind_ind, &
@@ -565,7 +587,7 @@ CONTAINS
                                                             nex_kinds, nmatch, nspins
       INTEGER, DIMENSION(2)                              :: homo, n_mo, n_moloc
       INTEGER, DIMENSION(:), POINTER                     :: ind_of_kind
-      LOGICAL                                            :: do_os, do_uks, unique
+      LOGICAL                                            :: do_os, do_rixs, do_uks, unique
       REAL(dp)                                           :: fact
       REAL(dp), DIMENSION(:), POINTER                    :: mo_evals
       TYPE(admm_type), POINTER                           :: admm_env
@@ -589,9 +611,14 @@ CONTAINS
       NULLIFY (mo_coeff, matrix_ks, admm_env, dummy_section)
 
 !  XAS TDP control type initialization
-      xas_tdp_section => section_vals_get_subs_vals(qs_env%input, "DFT%XAS_TDP")
+      CALL get_qs_env(qs_env, dft_control=dft_control, do_rixs=do_rixs)
 
-      CALL get_qs_env(qs_env, dft_control=dft_control)
+      IF (do_rixs) THEN
+         xas_tdp_section => section_vals_get_subs_vals(qs_env%input, "PROPERTIES%RIXS%XAS_TDP")
+      ELSE
+         xas_tdp_section => section_vals_get_subs_vals(qs_env%input, "DFT%XAS_TDP")
+      END IF
+
       CALL xas_tdp_control_create(xas_tdp_control)
       CALL read_xas_tdp_control(xas_tdp_control, xas_tdp_section)
 
@@ -602,7 +629,11 @@ CONTAINS
       do_os = do_uks .OR. xas_tdp_control%do_roks
 
 !  XAS TDP environment type initialization
-      CALL xas_tdp_env_create(xas_tdp_env)
+      IF (PRESENT(rixs_env)) THEN
+         xas_tdp_env => rixs_env%core_state
+      ELSE
+         CALL xas_tdp_env_create(xas_tdp_env)
+      END IF
 
 !  Retrieving the excited atoms indices and correspondig state types
       IF (xas_tdp_control%define_excited == xas_tdp_by_index) THEN
@@ -629,7 +660,7 @@ CONTAINS
          DO i = 1, nex_atoms
             at_ind = xas_tdp_env%ex_atom_indices(i)
             CALL get_atomic_kind(particle_set(at_ind)%atomic_kind, kind_number=j)
-            IF (ALL(ABS(xas_tdp_env%ex_kind_indices - j) .NE. 0)) THEN
+            IF (ALL(ABS(xas_tdp_env%ex_kind_indices - j) /= 0)) THEN
                k = k + 1
                xas_tdp_env%ex_kind_indices(k) = j
             END IF
@@ -683,7 +714,7 @@ CONTAINS
          CALL set_xas_tdp_env(xas_tdp_env, nex_atoms=nex_atoms, nex_kinds=nex_kinds)
 
 !        Verifying that the input was valid
-         IF (nmatch .NE. SIZE(xas_tdp_control%list_ex_kinds)) THEN
+         IF (nmatch /= SIZE(xas_tdp_control%list_ex_kinds)) THEN
             CPABORT("Invalid kind(s) for the KIND_LIST keyword.")
          END IF
 
@@ -927,7 +958,7 @@ CONTAINS
       CALL rng_stream%shuffle(ex_atoms_of_kind(1:nex_atom))
 
       nbatch = nex_atom/batch_size
-      IF (nbatch*batch_size .NE. nex_atom) nbatch = nbatch + 1
+      IF (nbatch*batch_size /= nex_atom) nbatch = nbatch + 1
 
    END SUBROUTINE get_ri_3c_batches
 
@@ -1048,7 +1079,7 @@ CONTAINS
       !Overlap matrix sparsity
       occ = dbcsr_get_occupation(matrix_s(1)%matrix)
 
-      IF (ou .LE. 0) RETURN
+      IF (ou <= 0) RETURN
 
       !Reference calculation
       IF (xas_tdp_control%do_uks) THEN
@@ -1125,7 +1156,11 @@ CONTAINS
          WRITE (UNIT=ou, FMT="(T3,A,/)") &
             "XAS_TDP| XC Kernel Functional(s) used for the kernel:"
 
-         kernel_section => section_vals_get_subs_vals(input, "DFT%XAS_TDP%KERNEL")
+         IF (qs_env%do_rixs) THEN
+            kernel_section => section_vals_get_subs_vals(input, "PROPERTIES%RIXS%XAS_TDP%KERNEL")
+         ELSE
+            kernel_section => section_vals_get_subs_vals(input, "DFT%XAS_TDP%KERNEL")
+         END IF
          CALL xc_write(ou, kernel_section, lsd=.TRUE.)
       END IF
 
@@ -1210,7 +1245,7 @@ CONTAINS
          WRITE (UNIT=ou, FMT="(T3,A,I5)") &
             "GW2X| contraction batch size: ", xas_tdp_control%batch_size
 
-         IF ((INT(xas_tdp_control%c_os) .NE. 1) .OR. (INT(xas_tdp_control%c_ss) .NE. 1)) THEN
+         IF ((INT(xas_tdp_control%c_os) /= 1) .OR. (INT(xas_tdp_control%c_ss) /= 1)) THEN
             WRITE (UNIT=ou, FMT="(T3,A,F7.4,/,T3,A,F7.4)") &
                "GW2X| Same-spin scaling factor: ", xas_tdp_control%c_ss, &
                "GW2X| Opposite-spin scaling factor: ", xas_tdp_control%c_os
@@ -1482,7 +1517,7 @@ CONTAINS
       REAL(dp), DIMENSION(:), POINTER                    :: mo_evals, zeta
       REAL(dp), DIMENSION(:, :), POINTER                 :: overlap_matrix, tmp_coeff
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(cp_fm_struct_type), POINTER                   :: eval_mat_struct, gs_struct
+      TYPE(cp_fm_struct_type), POINTER                   :: eval_mat_struct, gs_struct, matrix_struct
       TYPE(cp_fm_type)                                   :: eval_mat, work_mat
       TYPE(cp_fm_type), POINTER                          :: gs_coeffs, mo_coeff
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks
@@ -1649,8 +1684,21 @@ CONTAINS
          ALLOCATE (donor_state%gs_coeffs)
          CALL cp_fm_create(donor_state%gs_coeffs, gs_struct)
 
+         IF (.NOT. ASSOCIATED(xas_tdp_env%mo_coeff)) THEN
+            ALLOCATE (xas_tdp_env%mo_coeff(nspins))
+         END IF
+
          DO ispin = 1, nspins
             CALL get_mo_set(mos(ispin), mo_coeff=mo_coeff)
+            ! check if mo_coeff is copied before for another donor_state
+            IF (.NOT. ASSOCIATED(xas_tdp_env%mo_coeff(ispin)%local_data)) THEN
+               ! copy mo_coeff
+               CALL cp_fm_get_info(matrix=mo_coeff, &
+                                   matrix_struct=matrix_struct)
+               CALL cp_fm_create(xas_tdp_env%mo_coeff(ispin), matrix_struct)
+               CALL cp_fm_to_fm(mo_coeff, xas_tdp_env%mo_coeff(ispin))
+            END IF
+
             DO i = 1, n_states
                CALL cp_fm_to_fm_submat(msource=mo_coeff, mtarget=donor_state%gs_coeffs, nrow=nao, &
                                        ncol=1, s_firstrow=1, s_firstcol=my_mos(i, ispin), &
@@ -2045,11 +2093,11 @@ CONTAINS
       INTEGER                                            :: handle, iosc, j, nao, ndo_mo, ndo_so, &
                                                             ngs, nosc, nspins
       LOGICAL                                            :: do_sc, do_sg
-      REAL(dp)                                           :: osc_xyz, pref
-      REAL(dp), ALLOCATABLE, DIMENSION(:)                :: tot_contr
+      REAL(dp)                                           :: alpha_xyz, beta_xyz, osc_xyz, pref
+      REAL(dp), ALLOCATABLE, DIMENSION(:)                :: alpha_contr, beta_contr, tot_contr
       REAL(dp), ALLOCATABLE, DIMENSION(:, :)             :: dip_block
       REAL(dp), DIMENSION(:), POINTER                    :: lr_evals
-      REAL(dp), DIMENSION(:, :), POINTER                 :: osc_str
+      REAL(dp), DIMENSION(:, :), POINTER                 :: alpha_osc, beta_osc, osc_str
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: col_struct, mat_struct
       TYPE(cp_fm_type)                                   :: col_work, mat_work
@@ -2058,7 +2106,7 @@ CONTAINS
       TYPE(mp_para_env_type), POINTER                    :: para_env
 
       NULLIFY (dipmat, col_struct, mat_struct, para_env, blacs_env, lr_coeffs)
-      NULLIFY (lr_evals, osc_str)
+      NULLIFY (lr_evals, osc_str, alpha_osc, beta_osc)
 
       CALL timeset(routineN, handle)
 
@@ -2080,9 +2128,13 @@ CONTAINS
       ndo_so = ndo_mo*nspins
       ngs = ndo_so; IF (xas_tdp_control%do_roks) ngs = ndo_mo !in ROKS, same gs coeffs
       nosc = SIZE(lr_evals)
-      ALLOCATE (donor_state%osc_str(nosc, 4))
+      ALLOCATE (donor_state%osc_str(nosc, 4), donor_state%alpha_osc(nosc, 4), donor_state%beta_osc(nosc, 4))
       osc_str => donor_state%osc_str
+      alpha_osc => donor_state%alpha_osc
+      beta_osc => donor_state%beta_osc
       osc_str = 0.0_dp
+      alpha_osc = 0.0_dp
+      beta_osc = 0.0_dp
       dipmat => xas_tdp_env%dipmat
 
       ! do some work matrix initialization
@@ -2093,7 +2145,7 @@ CONTAINS
       CALL cp_fm_create(mat_work, mat_struct)
       CALL cp_fm_create(col_work, col_struct)
 
-      ALLOCATE (tot_contr(ndo_mo), dip_block(ndo_so, ngs))
+      ALLOCATE (tot_contr(ndo_mo), dip_block(ndo_so, ngs), alpha_contr(ndo_mo), beta_contr(ndo_mo))
       pref = 2.0_dp; IF (do_sc) pref = 1.0_dp !because of singlet definition u = 1/sqrt(2)(c_a+c_b)
 
 !  Looping over cartesian coord
@@ -2113,15 +2165,26 @@ CONTAINS
             IF (do_sg) THEN
                tot_contr(:) = get_diag(dip_block)
             ELSE IF (do_sc .AND. xas_tdp_control%do_uks) THEN
-               tot_contr(:) = get_diag(dip_block(1:ndo_mo, 1:ndo_mo)) !alpha
-               tot_contr(:) = tot_contr(:) + get_diag(dip_block(ndo_mo + 1:ndo_so, ndo_mo + 1:ndo_so)) !beta
+               alpha_contr(:) = get_diag(dip_block(1:ndo_mo, 1:ndo_mo))
+               beta_contr(:) = get_diag(dip_block(ndo_mo + 1:ndo_so, ndo_mo + 1:ndo_so))
+               tot_contr(:) = alpha_contr(:) + beta_contr(:)
             ELSE
                !roks
-               tot_contr(:) = get_diag(dip_block(1:ndo_mo, :)) !alpha
-               tot_contr(:) = tot_contr(:) + get_diag(dip_block(ndo_mo + 1:ndo_so, :)) !beta
+               alpha_contr(:) = get_diag(dip_block(1:ndo_mo, :))
+               beta_contr(:) = get_diag(dip_block(ndo_mo + 1:ndo_so, :))
+               tot_contr(:) = alpha_contr(:) + beta_contr(:)
             END IF
 
             osc_xyz = SUM(tot_contr)**2
+            alpha_xyz = SUM(alpha_contr)**2
+            beta_xyz = SUM(beta_contr)**2
+
+            alpha_osc(iosc, 4) = alpha_osc(iosc, 4) + alpha_xyz
+            alpha_osc(iosc, j) = alpha_xyz
+
+            beta_osc(iosc, 4) = beta_osc(iosc, 4) + beta_xyz
+            beta_osc(iosc, j) = beta_xyz
+
             osc_str(iosc, 4) = osc_str(iosc, 4) + osc_xyz
             osc_str(iosc, j) = osc_xyz
 
@@ -2132,8 +2195,12 @@ CONTAINS
       DO j = 1, 4
          IF (xas_tdp_control%dipole_form == xas_dip_len) THEN
             osc_str(:, j) = pref*2.0_dp/3.0_dp*lr_evals(:)*osc_str(:, j)
+            alpha_osc(:, j) = pref*2.0_dp/3.0_dp*lr_evals(:)*alpha_osc(:, j)
+            beta_osc(:, j) = pref*2.0_dp/3.0_dp*lr_evals(:)*beta_osc(:, j)
          ELSE
             osc_str(:, j) = pref*2.0_dp/3.0_dp/lr_evals(:)*osc_str(:, j)
+            alpha_osc(:, j) = pref*2.0_dp/3.0_dp/lr_evals(:)*alpha_osc(:, j)
+            beta_osc(:, j) = pref*2.0_dp/3.0_dp/lr_evals(:)*beta_osc(:, j)
          END IF
       END DO
 
@@ -2628,7 +2695,7 @@ CONTAINS
 
          !Check on NLUMO
          CALL section_vals_val_get(xas_tdp_section, "PRINT%PDOS%NLUMO", i_val=nlumo)
-         IF (nlumo .NE. 0) THEN
+         IF (nlumo /= 0) THEN
             CPWARN("NLUMO is irrelevant for XAS_TDP PDOS. It was overwritten to 0.")
          END IF
          CALL section_vals_val_set(xas_tdp_section, "PRINT%PDOS%NLUMO", i_val=0)
@@ -2884,7 +2951,7 @@ CONTAINS
       IF (xas_tdp_control%n_excited > 0 .AND. xas_tdp_control%n_excited < nguess) THEN
          nguess = xas_tdp_control%n_excited/nspins
       ELSE IF (xas_tdp_control%e_range > 0.0_dp) THEN
-         nguess = COUNT(evals(nocc + 1:nao) - evals(nocc + 1) .LE. xas_tdp_control%e_range)
+         nguess = COUNT(evals(nocc + 1:nao) - evals(nocc + 1) <= xas_tdp_control%e_range)
       END IF
 
       !Give max weight to the first LUMOs
@@ -3043,6 +3110,14 @@ CONTAINS
                      i, donor_state%sc_evals(i)*evolt, donor_state%osc_str(i, 4), &
                      donor_state%osc_str(i, 1), donor_state%osc_str(i, 2), donor_state%osc_str(i, 3)
                END DO
+            ELSE IF (xas_tdp_control%spin_dip) THEN
+               WRITE (xas_tdp_unit, FMT="(T3,A)") &
+                  " Index     Excitation energy (eV)    fosc dipole (a.u.)    alpha-comp     beta-comp"
+               DO i = 1, SIZE(donor_state%sc_evals)
+                  WRITE (xas_tdp_unit, FMT="(T3,I6,F27.6,F22.6,F14.6,F14.6)") &
+                     i, donor_state%sc_evals(i)*evolt, donor_state%osc_str(i, 4), &
+                     donor_state%alpha_osc(i, 4), donor_state%beta_osc(i, 4)
+               END DO
             ELSE
                WRITE (xas_tdp_unit, FMT="(T3,A)") &
                   " Index     Excitation energy (eV)    fosc dipole (a.u.)"
@@ -3089,6 +3164,13 @@ CONTAINS
                DO i = 1, SIZE(donor_state%sf_evals)
                   WRITE (xas_tdp_unit, FMT="(T3,I6,F27.6,F22.6,F14.6,F14.6,F14.6)") &
                      i, donor_state%sf_evals(i)*evolt, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp
+               END DO
+            ELSE IF (xas_tdp_control%spin_dip) THEN
+               WRITE (xas_tdp_unit, FMT="(T3,A)") &
+                  " Index     Excitation energy (eV)    fosc dipole (a.u.)    alpha-comp     beta-comp"
+               DO i = 1, SIZE(donor_state%sf_evals)
+                  WRITE (xas_tdp_unit, FMT="(T3,I6,F27.6,F22.6,F14.6,F14.6)") &
+                     i, donor_state%sf_evals(i)*evolt, 0.0_dp, 0.0_dp, 0.0_dp
                END DO
             ELSE
                WRITE (xas_tdp_unit, FMT="(T3,A)") &
@@ -3183,6 +3265,13 @@ CONTAINS
                DO i = 1, SIZE(donor_state%tp_evals)
                   WRITE (xas_tdp_unit, FMT="(T3,I6,F27.6,F22.6,F14.6,F14.6,F14.6)") &
                      i, donor_state%tp_evals(i)*evolt, 0.0_dp, 0.0_dp, 0.0_dp, 0.0_dp
+               END DO
+            ELSE IF (xas_tdp_control%spin_dip) THEN
+               WRITE (xas_tdp_unit, FMT="(T3,A)") &
+                  " Index     Excitation energy (eV)    fosc dipole (a.u.)    alpha-comp     beta-comp"
+               DO i = 1, SIZE(donor_state%tp_evals)
+                  WRITE (xas_tdp_unit, FMT="(T3,I6,F27.6,F22.6,F14.6,F14.6)") &
+                     i, donor_state%tp_evals(i)*evolt, 0.0_dp, 0.0_dp, 0.0_dp
                END DO
             ELSE
                WRITE (xas_tdp_unit, FMT="(T3,A)") &

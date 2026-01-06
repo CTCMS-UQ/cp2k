@@ -1,6 +1,6 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
@@ -19,9 +19,8 @@
 #include "grid_dgemm_utils.h"
 
 struct collocation_integration_ *collocate_create_handle(void) {
-  struct collocation_integration_ *handle = NULL;
-  handle = (struct collocation_integration_ *)malloc(
-      sizeof(struct collocation_integration_));
+  struct collocation_integration_ *handle =
+      malloc(sizeof(struct collocation_integration_));
   assert(handle != NULL);
   memset(handle, 0, sizeof(struct collocation_integration_));
 

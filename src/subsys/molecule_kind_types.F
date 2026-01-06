@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -11,12 +11,13 @@
 !> \par History
 !>      Teodoro Laino [tlaino] 12.2008 - Preparing for VIRTUAL SITE constraints
 !>                                       (patch by Marcel Baer)
-!> \author MK (22.08.2003)
+!> \author Matthias Krack (22.08.2003)
 ! **************************************************************************************************
 MODULE molecule_kind_types
    USE atomic_kind_types,               ONLY: atomic_kind_type,&
                                               get_atomic_kind
-   USE cell_types,                      ONLY: use_perd_x,&
+   USE cell_types,                      ONLY: periodicity_string,&
+                                              use_perd_x,&
                                               use_perd_xy,&
                                               use_perd_xyz,&
                                               use_perd_xz,&
@@ -24,16 +25,18 @@ MODULE molecule_kind_types
                                               use_perd_yz,&
                                               use_perd_z
    USE colvar_types,                    ONLY: &
-        acid_hyd_dist_colvar_id, acid_hyd_shell_colvar_id, angle_colvar_id, colvar_counters, &
-        combine_colvar_id, coord_colvar_id, dfunct_colvar_id, dist_colvar_id, gyration_colvar_id, &
-        hydronium_dist_colvar_id, hydronium_shell_colvar_id, no_colvar_id, &
-        plane_distance_colvar_id, plane_plane_angle_colvar_id, population_colvar_id, &
-        qparm_colvar_id, reaction_path_colvar_id, rotation_colvar_id, torsion_colvar_id, &
-        xyz_diag_colvar_id, xyz_outerdiag_colvar_id
+        Wc_colvar_id, acid_hyd_dist_colvar_id, acid_hyd_shell_colvar_id, angle_colvar_id, &
+        colvar_counters, combine_colvar_id, coord_colvar_id, dfunct_colvar_id, dist_colvar_id, &
+        distance_from_path_colvar_id, gyration_colvar_id, hbp_colvar_id, hydronium_dist_colvar_id, &
+        hydronium_shell_colvar_id, mindist_colvar_id, no_colvar_id, plane_distance_colvar_id, &
+        plane_plane_angle_colvar_id, population_colvar_id, qparm_colvar_id, &
+        reaction_path_colvar_id, ring_puckering_colvar_id, rmsd_colvar_id, rotation_colvar_id, &
+        torsion_colvar_id, u_colvar_id, xyz_diag_colvar_id, xyz_outerdiag_colvar_id
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                               cp_print_key_unit_nr
+   USE cp_units,                        ONLY: cp_unit_from_cp2k
    USE force_field_kind_types,          ONLY: &
         bend_kind_type, bond_kind_type, do_ff_undef, impr_kind_dealloc_ref, impr_kind_type, &
         opbend_kind_type, torsion_kind_dealloc_ref, torsion_kind_type, ub_kind_dealloc_ref, &
@@ -50,168 +53,167 @@ MODULE molecule_kind_types
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'molecule_kind_types'
 
-! *** Define the derived structure types ***
+   ! Define the derived structure types
 
-! **************************************************************************************************
    TYPE atom_type
       TYPE(atomic_kind_type), POINTER :: atomic_kind => NULL()
       INTEGER :: id_name = 0
    END TYPE atom_type
 
-! **************************************************************************************************
    TYPE shell_type
       INTEGER :: a = 0
-      CHARACTER(LEN=default_string_length)  :: name = ""
+      CHARACTER(LEN=default_string_length) :: name = ""
       TYPE(shell_kind_type), POINTER :: shell_kind => NULL()
    END TYPE shell_type
 
-! **************************************************************************************************
    TYPE bond_type
       INTEGER :: a = 0, b = 0
       INTEGER :: id_type = do_ff_undef, itype = 0
       TYPE(bond_kind_type), POINTER :: bond_kind => NULL()
    END TYPE bond_type
 
-! **************************************************************************************************
    TYPE bend_type
       INTEGER :: a = 0, b = 0, c = 0
       INTEGER :: id_type = do_ff_undef, itype = 0
       TYPE(bend_kind_type), POINTER :: bend_kind => NULL()
    END TYPE bend_type
 
-! **************************************************************************************************
    TYPE ub_type
       INTEGER :: a = 0, b = 0, c = 0
       INTEGER :: id_type = do_ff_undef, itype = 0
       TYPE(ub_kind_type), POINTER :: ub_kind => NULL()
    END TYPE ub_type
 
-! **************************************************************************************************
    TYPE torsion_type
       INTEGER :: a = 0, b = 0, c = 0, d = 0
       INTEGER :: id_type = do_ff_undef, itype = 0
       TYPE(torsion_kind_type), POINTER :: torsion_kind => NULL()
    END TYPE torsion_type
 
-! **************************************************************************************************
    TYPE impr_type
       INTEGER :: a = 0, b = 0, c = 0, d = 0
       INTEGER :: id_type = do_ff_undef, itype = 0
       TYPE(impr_kind_type), POINTER :: impr_kind => NULL()
    END TYPE impr_type
 
-! **************************************************************************************************
    TYPE opbend_type
       INTEGER :: a = 0, b = 0, c = 0, d = 0
       INTEGER :: id_type = do_ff_undef, itype = 0
       TYPE(opbend_kind_type), POINTER :: opbend_kind => NULL()
    END TYPE opbend_type
 
-! **************************************************************************************************
    TYPE restraint_type
-      LOGICAL       :: active = .FALSE.
+      LOGICAL :: active = .FALSE.
       REAL(KIND=dp) :: k0 = 0.0_dp
    END TYPE restraint_type
 
-! **************************************************************************************************
+   ! Constraint types
    TYPE colvar_constraint_type
       INTEGER                        :: type_id = no_colvar_id
       INTEGER                        :: inp_seq_num = 0
       LOGICAL                        :: use_points = .FALSE.
-      REAL(KIND=dp)                :: expected_value = 0.0_dp
-      REAL(KIND=dp)                :: expected_value_growth_speed = 0.0_dp
+      REAL(KIND=dp)                  :: expected_value = 0.0_dp
+      REAL(KIND=dp)                  :: expected_value_growth_speed = 0.0_dp
       INTEGER, POINTER, DIMENSION(:) :: i_atoms => NULL()
       TYPE(restraint_type)           :: restraint = restraint_type()
    END TYPE colvar_constraint_type
 
-! **************************************************************************************************
    TYPE g3x3_constraint_type
       INTEGER                        :: a = 0, b = 0, c = 0
-      REAL(KIND=dp)                :: dab = 0.0_dp, dac = 0.0_dp, dbc = 0.0_dp
+      REAL(KIND=dp)                  :: dab = 0.0_dp, dac = 0.0_dp, dbc = 0.0_dp
       TYPE(restraint_type)           :: restraint = restraint_type()
    END TYPE g3x3_constraint_type
 
-! **************************************************************************************************
    TYPE g4x6_constraint_type
       INTEGER                        :: a = 0, b = 0, c = 0, d = 0
-      REAL(KIND=dp)                :: dab = 0.0_dp, dac = 0.0_dp, dbc = 0.0_dp, dad = 0.0_dp, dbd = 0.0_dp, dcd = 0.0_dp
+      REAL(KIND=dp)                  :: dab = 0.0_dp, dac = 0.0_dp, dbc = 0.0_dp, &
+                                        dad = 0.0_dp, dbd = 0.0_dp, dcd = 0.0_dp
       TYPE(restraint_type)           :: restraint = restraint_type()
    END TYPE g4x6_constraint_type
 
-! **************************************************************************************************
    TYPE vsite_constraint_type
       INTEGER                        :: a = 0, b = 0, c = 0, d = 0
-      REAL(KIND=dp)                :: wbc = 0.0_dp, wdc = 0.0_dp
+      REAL(KIND=dp)                  :: wbc = 0.0_dp, wdc = 0.0_dp
       TYPE(restraint_type)           :: restraint = restraint_type()
    END TYPE vsite_constraint_type
 
-! **************************************************************************************************
    TYPE fixd_constraint_type
       TYPE(restraint_type)           :: restraint = restraint_type()
       INTEGER                        :: fixd = 0, itype = 0
       REAL(KIND=dp), DIMENSION(3)    :: coord = 0.0_dp
    END TYPE fixd_constraint_type
 
-! **************************************************************************************************
    TYPE local_fixd_constraint_type
       INTEGER                        :: ifixd_index = 0, ikind = 0
    END TYPE local_fixd_constraint_type
 
-! **************************************************************************************************
+   ! Molecule kind type
    TYPE molecule_kind_type
-      TYPE(atom_type), DIMENSION(:), POINTER            :: atom_list => NULL()
-      TYPE(bond_kind_type), DIMENSION(:), POINTER       :: bond_kind_set => NULL()
-      TYPE(bond_type), DIMENSION(:), POINTER            :: bond_list => NULL()
-      TYPE(bend_kind_type), DIMENSION(:), POINTER       :: bend_kind_set => NULL()
-      TYPE(bend_type), DIMENSION(:), POINTER            :: bend_list => NULL()
-      TYPE(ub_kind_type), DIMENSION(:), POINTER         :: ub_kind_set => NULL()
-      TYPE(ub_type), DIMENSION(:), POINTER              :: ub_list => NULL()
-      TYPE(torsion_kind_type), DIMENSION(:), POINTER    :: torsion_kind_set => NULL()
-      TYPE(torsion_type), DIMENSION(:), POINTER         :: torsion_list => NULL()
-      TYPE(impr_kind_type), DIMENSION(:), POINTER       :: impr_kind_set => NULL()
-      TYPE(impr_type), DIMENSION(:), POINTER            :: impr_list => NULL()
-      TYPE(opbend_kind_type), DIMENSION(:), POINTER     :: opbend_kind_set => NULL()
-      TYPE(opbend_type), DIMENSION(:), POINTER          :: opbend_list => NULL()
-      TYPE(colvar_constraint_type), DIMENSION(:), POINTER :: colv_list => NULL()
-      TYPE(g3x3_constraint_type), DIMENSION(:), POINTER   :: g3x3_list => NULL()
-      TYPE(g4x6_constraint_type), DIMENSION(:), POINTER   :: g4x6_list => NULL()
-      TYPE(vsite_constraint_type), DIMENSION(:), POINTER  :: vsite_list => NULL()
-      TYPE(fixd_constraint_type), DIMENSION(:), POINTER   :: fixd_list => NULL()
-      TYPE(shell_type), DIMENSION(:), POINTER           :: shell_list => NULL()
-      CHARACTER(LEN=default_string_length)              :: name = ""
-      REAL(KIND=dp)                                   :: charge = 0.0_dp, &
-                                                         mass = 0.0_dp
-      INTEGER                                           :: kind_number = 0, &
-                                                           natom = 0, &
-                                                           nbond = 0, &
-                                                           nbend = 0, &
-                                                           nimpr = 0, &
-                                                           nopbend = 0, &
-                                                           ntorsion = 0, &
-                                                           nub = 0, &
-                                                           ng3x3 = 0, ng3x3_restraint = 0, &
-                                                           ng4x6 = 0, ng4x6_restraint = 0, &
-                                                           nvsite = 0, nvsite_restraint = 0, &
-                                                           nfixd = 0, nfixd_restraint = 0, &
-                                                           nmolecule = 0, nshell = 0
-      TYPE(colvar_counters)                             :: ncolv = colvar_counters()
-      INTEGER                                           :: nsgf = 0, nelectron = 0, &
-                                                           nelectron_alpha = 0, &
-                                                           nelectron_beta = 0
-      INTEGER, DIMENSION(:), POINTER                    :: molecule_list => NULL()
-      LOGICAL                                           :: molname_generated = .FALSE.
+      TYPE(atom_type), DIMENSION(:), POINTER             :: atom_list => NULL()
+      TYPE(bond_kind_type), DIMENSION(:), POINTER        :: bond_kind_set => NULL()
+      TYPE(bond_type), DIMENSION(:), POINTER             :: bond_list => NULL()
+      TYPE(bend_kind_type), DIMENSION(:), POINTER        :: bend_kind_set => NULL()
+      TYPE(bend_type), DIMENSION(:), POINTER             :: bend_list => NULL()
+      TYPE(ub_kind_type), DIMENSION(:), POINTER          :: ub_kind_set => NULL()
+      TYPE(ub_type), DIMENSION(:), POINTER               :: ub_list => NULL()
+      TYPE(torsion_kind_type), DIMENSION(:), POINTER     :: torsion_kind_set => NULL()
+      TYPE(torsion_type), DIMENSION(:), POINTER          :: torsion_list => NULL()
+      TYPE(impr_kind_type), DIMENSION(:), POINTER        :: impr_kind_set => NULL()
+      TYPE(impr_type), DIMENSION(:), POINTER             :: impr_list => NULL()
+      TYPE(opbend_kind_type), DIMENSION(:), POINTER      :: opbend_kind_set => NULL()
+      TYPE(opbend_type), DIMENSION(:), POINTER           :: opbend_list => NULL()
+      TYPE(colvar_constraint_type), DIMENSION(:), &
+         POINTER                                         :: colv_list => NULL()
+      TYPE(g3x3_constraint_type), DIMENSION(:), POINTER  :: g3x3_list => NULL()
+      TYPE(g4x6_constraint_type), DIMENSION(:), POINTER  :: g4x6_list => NULL()
+      TYPE(vsite_constraint_type), DIMENSION(:), POINTER :: vsite_list => NULL()
+      TYPE(fixd_constraint_type), DIMENSION(:), POINTER  :: fixd_list => NULL()
+      TYPE(shell_type), DIMENSION(:), POINTER            :: shell_list => NULL()
+      CHARACTER(LEN=default_string_length)               :: name = ""
+      REAL(KIND=dp)                                      :: charge = 0.0_dp, &
+                                                            mass = 0.0_dp
+      INTEGER                                            :: kind_number = 0, &
+                                                            natom = 0, &
+                                                            nbond = 0, &
+                                                            nbend = 0, &
+                                                            nimpr = 0, &
+                                                            nopbend = 0, &
+                                                            ntorsion = 0, &
+                                                            nub = 0, &
+                                                            ng3x3 = 0, &
+                                                            ng3x3_restraint = 0, &
+                                                            ng4x6 = 0, &
+                                                            ng4x6_restraint = 0, &
+                                                            nvsite = 0, &
+                                                            nvsite_restraint = 0, &
+                                                            nfixd = 0, &
+                                                            nfixd_restraint = 0, &
+                                                            nmolecule = 0, &
+                                                            nshell = 0
+      TYPE(colvar_counters)                              :: ncolv = colvar_counters()
+      INTEGER                                            :: nsgf = 0, &
+                                                            nelectron = 0, &
+                                                            nelectron_alpha = 0, &
+                                                            nelectron_beta = 0
+      INTEGER, DIMENSION(:), POINTER                     :: molecule_list => NULL()
+      LOGICAL                                            :: molname_generated = .FALSE.
    END TYPE molecule_kind_type
 
-   ! *** Public subroutines ***
+   ! Public subroutines
    PUBLIC :: allocate_molecule_kind_set, &
              deallocate_molecule_kind_set, &
              get_molecule_kind, &
              get_molecule_kind_set, &
              set_molecule_kind, &
              write_molecule_kind_set, &
-             setup_colvar_counters
+             setup_colvar_counters, &
+             write_colvar_constraint, &
+             write_fixd_constraint, &
+             write_g3x3_constraint, &
+             write_g4x6_constraint, &
+             write_vsite_constraint
 
-   ! *** Public data types ***
+   ! Public data types
    PUBLIC :: atom_type, &
              bend_type, &
              bond_type, &
@@ -316,7 +318,7 @@ CONTAINS
 !> \param molecule_kind_set ...
 !> \param nmolecule_kind ...
 !> \date    22.08.2003
-!> \author  MK
+!> \author  Matthias Krack
 !> \version 1.0
 ! **************************************************************************************************
    SUBROUTINE allocate_molecule_kind_set(molecule_kind_set, nmolecule_kind)
@@ -343,7 +345,7 @@ CONTAINS
 !> \brief   Deallocate a molecule kind set.
 !> \param molecule_kind_set ...
 !> \date    22.08.2003
-!> \author  MK
+!> \author  Matthias Krack
 !> \version 1.0
 ! **************************************************************************************************
    SUBROUTINE deallocate_molecule_kind_set(molecule_kind_set)
@@ -493,7 +495,7 @@ CONTAINS
 !> \param torsion_kind_set ...
 !> \param molname_generated ...
 !> \date    27.08.2003
-!> \author  MK
+!> \author  Matthias Krack
 !> \version 1.0
 ! **************************************************************************************************
    SUBROUTINE get_molecule_kind(molecule_kind, atom_list, bond_list, bend_list, &
@@ -648,7 +650,7 @@ CONTAINS
 !> \param nmolecule ...
 !> \param nrestraints ...
 !> \date    27.08.2003
-!> \author  MK
+!> \author  Matthias Krack
 !> \version 1.0
 ! **************************************************************************************************
    SUBROUTINE get_molecule_kind_set(molecule_kind_set, maxatom, natom, &
@@ -761,7 +763,7 @@ CONTAINS
 !> \param nsgf ...
 !> \param molname_generated ...
 !> \date    27.08.2003
-!> \author  MK
+!> \author  Matthias Krack
 !> \version 1.0
 ! **************************************************************************************************
    SUBROUTINE set_molecule_kind(molecule_kind, name, mass, charge, kind_number, &
@@ -889,7 +891,7 @@ CONTAINS
 !> \param molecule_kind ...
 !> \param output_unit ...
 !> \date    24.09.2003
-!> \author  MK
+!> \author  Matthias Krack
 !> \version 1.0
 ! **************************************************************************************************
    SUBROUTINE write_molecule_kind(molecule_kind, output_unit)
@@ -959,7 +961,7 @@ CONTAINS
 !> \param molecule_kind_set ...
 !> \param subsys_section ...
 !> \date    24.09.2003
-!> \author  MK
+!> \author  Matthias Krack
 !> \version 1.0
 ! **************************************************************************************************
    SUBROUTINE write_molecule_kind_set(molecule_kind_set, subsys_section)
@@ -1032,5 +1034,254 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE write_molecule_kind_set
+
+! **************************************************************************************************
+!> \brief Write collective variable constraint information to output unit
+!> \param colvar_constraint Data set of the collective variable constraint
+!> \param icolv Collective variable number (index)
+!> \param iw Logical unit number of the output unit
+!> \author Matthias Krack (25.11.2025)
+! **************************************************************************************************
+   SUBROUTINE write_colvar_constraint(colvar_constraint, icolv, iw)
+
+      TYPE(colvar_constraint_type), INTENT(IN), POINTER  :: colvar_constraint
+      INTEGER, INTENT(IN)                                :: icolv, iw
+
+      CHARACTER(LEN=30)                                  :: type_string
+
+      IF (iw > 0) THEN
+         CPASSERT(ASSOCIATED(colvar_constraint))
+         WRITE (UNIT=iw, FMT="(/,T2,A,T71,I10)") &
+            "COLVAR| Number", icolv
+         SELECT CASE (colvar_constraint%type_id)
+         CASE (no_colvar_id)
+            type_string = "Undefined"
+         CASE (dist_colvar_id)
+            type_string = "Distance"
+         CASE (coord_colvar_id)
+            type_string = "Coordination number"
+         CASE (torsion_colvar_id)
+            type_string = "Torsion"
+         CASE (angle_colvar_id)
+            type_string = "Angle"
+         CASE (plane_distance_colvar_id)
+            type_string = "Plane distance"
+         CASE (rotation_colvar_id)
+            type_string = "Rotation"
+         CASE (dfunct_colvar_id)
+            type_string = "Distance function"
+         CASE (qparm_colvar_id)
+            type_string = "Q parameter"
+         CASE (hydronium_shell_colvar_id)
+            type_string = "Hydronium shell"
+         CASE (reaction_path_colvar_id)
+            type_string = "Reaction path"
+         CASE (combine_colvar_id)
+            type_string = "Combine"
+         CASE (population_colvar_id)
+            type_string = "Population"
+         CASE (plane_plane_angle_colvar_id)
+            type_string = "Angle plane-plane"
+         CASE (gyration_colvar_id)
+            type_string = "Gyration radius"
+         CASE (rmsd_colvar_id)
+            type_string = "RMSD"
+         CASE (distance_from_path_colvar_id)
+            type_string = "Distance from path"
+         CASE (xyz_diag_colvar_id)
+            type_string = "XYZ diag"
+         CASE (xyz_outerdiag_colvar_id)
+            type_string = "XYZ outerdiag"
+         CASE (u_colvar_id)
+            type_string = "U"
+         CASE (Wc_colvar_id)
+            type_string = "WC"
+         CASE (HBP_colvar_id)
+            type_string = "HBP"
+         CASE (ring_puckering_colvar_id)
+            type_string = "Ring puckering"
+         CASE (mindist_colvar_id)
+            type_string = "Distance point-plane"
+         CASE (acid_hyd_dist_colvar_id)
+            type_string = "Acid hydronium distance"
+         CASE (acid_hyd_shell_colvar_id)
+            type_string = "Acid hydronium shell"
+         CASE (hydronium_dist_colvar_id)
+            type_string = "Hydronium distance"
+         CASE DEFAULT
+            CPABORT("Invalid collective variable ID specified. Check the code!")
+         END SELECT
+         IF (colvar_constraint%restraint%active) THEN
+            WRITE (UNIT=iw, FMT="(T2,A,T51,A30)") &
+               "COLVAR| Restraint type", ADJUSTR(TRIM(type_string))
+            WRITE (UNIT=iw, FMT="(T2,A,T66,ES15.6)") &
+               "COLVAR| Restraint constant k [a.u.]", colvar_constraint%restraint%k0
+         ELSE
+            WRITE (UNIT=iw, FMT="(T2,A,T51,A30)") &
+               "COLVAR| Constraint type", ADJUSTR(TRIM(type_string))
+         END IF
+         WRITE (UNIT=iw, FMT="(T2,A,T66,ES15.6)") &
+            "COLVAR| Target value", colvar_constraint%expected_value, &
+            "COLVAR| Target value growth speed", colvar_constraint%expected_value_growth_speed
+         IF (colvar_constraint%use_points) THEN
+            WRITE (UNIT=iw, FMT="(T2,A,T78,A3)") "COLVAR| Use points", "Yes"
+         ELSE
+            WRITE (UNIT=iw, FMT="(T2,A,T79,A2)") "COLVAR| Use points", "No"
+         END IF
+      END IF
+
+   END SUBROUTINE write_colvar_constraint
+
+! **************************************************************************************************
+!> \brief Write fix atom constraint information to output unit
+!> \param fixd_constraint Data set of the fix atom constraint
+!> \param ifixd Fix atom constraint/restraint number (index)
+!> \param iw Logical unit number of the output unit
+!> \author Matthias Krack (26.11.2025)
+! **************************************************************************************************
+   SUBROUTINE write_fixd_constraint(fixd_constraint, ifixd, iw)
+
+      TYPE(fixd_constraint_type), INTENT(IN), POINTER    :: fixd_constraint
+      INTEGER, INTENT(IN)                                :: ifixd, iw
+
+      IF (iw > 0) THEN
+         CPASSERT(ASSOCIATED(fixd_constraint))
+         IF (fixd_constraint%restraint%active) THEN
+            WRITE (UNIT=iw, FMT="(/,T2,A,T71,I10)") &
+               "FIX_ATOM| Number (restraint)", ifixd
+            WRITE (UNIT=iw, FMT="(T2,A,T66,ES15.6)") &
+               "FIX_ATOM| Restraint constant k [a.u.]", fixd_constraint%restraint%k0
+         ELSE
+            WRITE (UNIT=iw, FMT="(/,T2,A,T71,I10)") &
+               "FIX_ATOM| Number (constraint)", ifixd
+         END IF
+         WRITE (UNIT=iw, FMT="(T2,A,T71,I10)") &
+            "FIX_ATOM| Atom index", fixd_constraint%fixd
+         WRITE (UNIT=iw, FMT="(T2,A,T78,A3)") &
+            "FIX_ATOM| Fixed Cartesian components", periodicity_string(fixd_constraint%itype)
+         IF (INDEX(periodicity_string(fixd_constraint%itype), "X") > 0) THEN
+            WRITE (UNIT=iw, FMT="(T2,A,T66,F15.8)") &
+               "FIX_ATOM| X coordinate [Angstrom]", cp_unit_from_cp2k(fixd_constraint%coord(1), "Angstrom")
+         END IF
+         IF (INDEX(periodicity_string(fixd_constraint%itype), "Y") > 0) THEN
+            WRITE (UNIT=iw, FMT="(T2,A,T66,F15.8)") &
+               "FIX_ATOM| Y coordinate [Angstrom]", cp_unit_from_cp2k(fixd_constraint%coord(2), "Angstrom")
+         END IF
+         IF (INDEX(periodicity_string(fixd_constraint%itype), "Z") > 0) THEN
+            WRITE (UNIT=iw, FMT="(T2,A,T66,F15.8)") &
+               "FIX_ATOM| Z coordinate [Angstrom]", cp_unit_from_cp2k(fixd_constraint%coord(3), "Angstrom")
+         END IF
+      END IF
+
+   END SUBROUTINE write_fixd_constraint
+
+! **************************************************************************************************
+!> \brief Write G3x3 constraint information to output unit
+!> \param g3x3_constraint Data set of the g3x3 constraint
+!> \param ig3x3 G3x3 constraint/restraint number (index)
+!> \param iw Logical unit number of the output unit
+!> \author Matthias Krack (26.11.2025)
+! **************************************************************************************************
+   SUBROUTINE write_g3x3_constraint(g3x3_constraint, ig3x3, iw)
+
+      TYPE(g3x3_constraint_type), INTENT(IN), POINTER    :: g3x3_constraint
+      INTEGER, INTENT(IN)                                :: ig3x3, iw
+
+      IF (iw > 0) THEN
+         CPASSERT(ASSOCIATED(g3x3_constraint))
+         IF (g3x3_constraint%restraint%active) THEN
+            WRITE (UNIT=iw, FMT="(/,T2,A,T71,I10)") &
+               "G3X3| Number (restraint)", ig3x3
+            WRITE (UNIT=iw, FMT="(T2,A,T66,ES15.6)") &
+               "G3X3| Restraint constant k [a.u.]", g3x3_constraint%restraint%k0
+         ELSE
+            WRITE (UNIT=iw, FMT="(/,T2,A,T71,I10)") &
+               "G3X3| Number (constraint)", ig3x3
+         END IF
+         WRITE (UNIT=iw, FMT="(T2,A,T71,I10)") &
+            "G3X3| Atom index a", g3x3_constraint%a, &
+            "G3X3| Atom index b", g3x3_constraint%b, &
+            "G3X3| Atom index c", g3x3_constraint%c
+         WRITE (UNIT=iw, FMT="(T2,A,T66,F15.8)") &
+            "G3X3| Distance (a,b) [Angstrom]", cp_unit_from_cp2k(g3x3_constraint%dab, "Angstrom"), &
+            "G3X3| Distance (a,c) [Angstrom]", cp_unit_from_cp2k(g3x3_constraint%dac, "Angstrom"), &
+            "G3X3| Distance (b,c) [Angstrom]", cp_unit_from_cp2k(g3x3_constraint%dbc, "Angstrom")
+      END IF
+
+   END SUBROUTINE write_g3x3_constraint
+
+! **************************************************************************************************
+!> \brief Write G4x6 constraint information to output unit
+!> \param g4x6_constraint Data set of the g4x6 constraint
+!> \param ig4x6 G4x6 constraint/restraint number (index)
+!> \param iw Logical unit number of the output unit
+!> \author Matthias Krack (26.11.2025)
+! **************************************************************************************************
+   SUBROUTINE write_g4x6_constraint(g4x6_constraint, ig4x6, iw)
+
+      TYPE(g4x6_constraint_type), INTENT(IN), POINTER    :: g4x6_constraint
+      INTEGER, INTENT(IN)                                :: ig4x6, iw
+
+      IF (iw > 0) THEN
+         CPASSERT(ASSOCIATED(g4x6_constraint))
+         IF (g4x6_constraint%restraint%active) THEN
+            WRITE (UNIT=iw, FMT="(/,T2,A,T71,I10)") &
+               "G4X6| Number (restraint)", ig4x6
+            WRITE (UNIT=iw, FMT="(T2,A,T66,ES15.6)") &
+               "G4X6| Restraint constant k [a.u.]", g4x6_constraint%restraint%k0
+         ELSE
+            WRITE (UNIT=iw, FMT="(/,T2,A,T71,I10)") &
+               "G4X6| Number (constraint)", ig4x6
+         END IF
+         WRITE (UNIT=iw, FMT="(T2,A,T71,I10)") &
+            "G4X6| Atom index a", g4x6_constraint%a, &
+            "G4X6| Atom index b", g4x6_constraint%b, &
+            "G4X6| Atom index c", g4x6_constraint%c, &
+            "G4X6| Atom index d", g4x6_constraint%d
+         WRITE (UNIT=iw, FMT="(T2,A,T66,F15.8)") &
+            "G4X6| Distance (a,b) [Angstrom]", cp_unit_from_cp2k(g4x6_constraint%dab, "Angstrom"), &
+            "G4X6| Distance (a,c) [Angstrom]", cp_unit_from_cp2k(g4x6_constraint%dac, "Angstrom"), &
+            "G4X6| Distance (a,d) [Angstrom]", cp_unit_from_cp2k(g4x6_constraint%dad, "Angstrom"), &
+            "G4X6| Distance (b,c) [Angstrom]", cp_unit_from_cp2k(g4x6_constraint%dbc, "Angstrom"), &
+            "G4X6| Distance (b,d) [Angstrom]", cp_unit_from_cp2k(g4x6_constraint%dbd, "Angstrom"), &
+            "G4X6| Distance (c,d) [Angstrom]", cp_unit_from_cp2k(g4x6_constraint%dcd, "Angstrom")
+      END IF
+
+   END SUBROUTINE write_g4x6_constraint
+
+! **************************************************************************************************
+!> \brief Write virtual site constraint information to output unit
+!> \param vsite_constraint Data set of the vsite constraint
+!> \param ivsite Virtual site constraint/restraint number (index)
+!> \param iw Logical unit number of the output unit
+!> \author Matthias Krack (01.12.2025)
+! **************************************************************************************************
+   SUBROUTINE write_vsite_constraint(vsite_constraint, ivsite, iw)
+
+      TYPE(vsite_constraint_type), INTENT(IN), POINTER   :: vsite_constraint
+      INTEGER, INTENT(IN)                                :: ivsite, iw
+
+      IF (iw > 0) THEN
+         CPASSERT(ASSOCIATED(vsite_constraint))
+         IF (vsite_constraint%restraint%active) THEN
+            WRITE (UNIT=iw, FMT="(/,T2,A,T71,I10)") &
+               "VSITE| Number (restraint)", ivsite
+            WRITE (UNIT=iw, FMT="(T2,A,T66,ES15.6)") &
+               "VSITE| Restraint constant k [a.u.]", vsite_constraint%restraint%k0
+         ELSE
+            WRITE (UNIT=iw, FMT="(/,T2,A,T71,I10)") &
+               "VSITE| Number (constraint)", ivsite
+         END IF
+         WRITE (UNIT=iw, FMT="(T2,A,T71,I10)") &
+            "VSITE| Atom index of virtual site", vsite_constraint%a, &
+            "VSITE| Atom index b", vsite_constraint%b, &
+            "VSITE| Atom index c", vsite_constraint%c, &
+            "VSITE| Atom index d", vsite_constraint%d
+         WRITE (UNIT=iw, FMT="(T2,A,T66,F15.8)") &
+            "VSITE| Distance (b,c) [Angstrom]", cp_unit_from_cp2k(vsite_constraint%wbc, "Angstrom"), &
+            "VSITE| Distance (d,c) [Angstrom]", cp_unit_from_cp2k(vsite_constraint%wdc, "Angstrom")
+      END IF
+
+   END SUBROUTINE write_vsite_constraint
 
 END MODULE molecule_kind_types

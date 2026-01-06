@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -318,7 +318,7 @@ CONTAINS
                                      particle_set, iw)
          ! Check for an external exit command
          CALL external_control(should_stop, "NEB", globenv=globenv)
-         IF (should_stop) EXIT
+         IF (should_stop) EXIT md_opt_loop
          ! Control on velocity - II part [check vels VS forces, Steepest Descent like]
          CALL control_vels_b(vels, forces, vc_section)
          ! Velocity Verlet (second part)
@@ -335,7 +335,7 @@ CONTAINS
                             distances=distances, &
                             output_unit=output_unit)
          converged = check_convergence(neb_env, Dcoords, forces)
-         IF (converged) EXIT
+         IF (converged) EXIT md_opt_loop
       END DO md_opt_loop
 
       DEALLOCATE (mass)

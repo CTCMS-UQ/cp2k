@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -15,11 +15,7 @@ MODULE mp2_cphf
    USE admm_methods,                    ONLY: admm_projection_derivative
    USE admm_types,                      ONLY: admm_type,&
                                               get_admm_env
-   USE atomic_kind_types,               ONLY: atomic_kind_type
    USE cell_types,                      ONLY: cell_type
-   USE core_ae,                         ONLY: build_core_ae
-   USE core_ppl,                        ONLY: build_core_ppl
-   USE core_ppnl,                       ONLY: build_core_ppnl
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: dbcsr_add,&
@@ -32,7 +28,7 @@ MODULE mp2_cphf
                                               cp_dbcsr_plus_fm_fm_t,&
                                               dbcsr_allocate_matrix_set,&
                                               dbcsr_deallocate_matrix_set
-   USE cp_fm_basic_linalg,              ONLY: cp_fm_upper_to_full
+   USE cp_fm_basic_linalg,              ONLY: cp_fm_uplo_to_full
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                               cp_fm_struct_p_type,&
                                               cp_fm_struct_release,&
@@ -74,7 +70,6 @@ MODULE mp2_cphf
    USE mp2_types,                       ONLY: mp2_type,&
                                               ri_rpa_method_gpw
    USE parallel_gemm_api,               ONLY: parallel_gemm
-   USE particle_types,                  ONLY: particle_type
    USE pw_env_types,                    ONLY: pw_env_get,&
                                               pw_env_type
    USE pw_methods,                      ONLY: pw_axpy,&
@@ -90,6 +85,8 @@ MODULE mp2_cphf
    USE pw_types,                        ONLY: pw_c1d_gs_type,&
                                               pw_r3d_rs_type
    USE qs_2nd_kernel_ao,                ONLY: apply_2nd_order_kernel
+   USE qs_core_matrices,                ONLY: core_matrices,&
+                                              kinetic_energy_matrix
    USE qs_density_matrices,             ONLY: calculate_whz_matrix
    USE qs_dispersion_pairpot,           ONLY: calculate_dispersion_pairpot
    USE qs_dispersion_types,             ONLY: qs_dispersion_type
@@ -103,8 +100,6 @@ MODULE mp2_cphf
                                               zero_qs_force
    USE qs_integrate_potential,          ONLY: integrate_v_core_rspace,&
                                               integrate_v_rspace
-   USE qs_kind_types,                   ONLY: qs_kind_type
-   USE qs_kinetic,                      ONLY: build_kinetic_matrix
    USE qs_ks_reference,                 ONLY: ks_ref_potential
    USE qs_ks_types,                     ONLY: qs_ks_env_type,&
                                               set_ks_env
@@ -150,28 +145,26 @@ CONTAINS
 !> \param para_env ...
 !> \param dft_control ...
 !> \param mo_coeff ...
-!> \param nmo ...
 !> \param homo ...
 !> \param Eigenval ...
 !> \param unit_nr ...
 !> \author Mauro Del Ben, Vladimir Rybkin
 ! **************************************************************************************************
    SUBROUTINE solve_z_vector_eq(qs_env, mp2_env, para_env, dft_control, &
-                                mo_coeff, nmo, homo, Eigenval, unit_nr)
+                                mo_coeff, homo, Eigenval, unit_nr)
       TYPE(qs_environment_type), INTENT(IN), POINTER     :: qs_env
       TYPE(mp2_type), INTENT(INOUT)                      :: mp2_env
       TYPE(mp_para_env_type), INTENT(IN), POINTER        :: para_env
       TYPE(dft_control_type), INTENT(IN), POINTER        :: dft_control
       TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: mo_coeff
-      INTEGER, INTENT(IN)                                :: nmo
       INTEGER, DIMENSION(:), INTENT(IN)                  :: homo
       REAL(KIND=dp), DIMENSION(:, :), INTENT(IN)         :: Eigenval
       INTEGER, INTENT(IN)                                :: unit_nr
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'solve_z_vector_eq'
 
-      INTEGER :: bin, dimen, handle, handle2, i, i_global, i_thread, iiB, irep, ispin, j_global, &
-         jjB, my_bin_size, n_rep_hf, n_threads, ncol_local, nrow_local, nspins, transf_type_in
+      INTEGER :: bin, handle, handle2, i, i_global, i_thread, iiB, irep, ispin, j_global, jjB, &
+         my_bin_size, n_rep_hf, n_threads, nao, ncol_local, nmo, nrow_local, nspins, transf_type_in
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: virtual
       INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
       LOGICAL                                            :: alpha_beta, do_dynamic_load_balancing, &
@@ -179,7 +172,7 @@ CONTAINS
       REAL(KIND=dp)                                      :: focc
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct_tmp
-      TYPE(cp_fm_type)                                   :: fm_back, fm_G_mu_nu
+      TYPE(cp_fm_type)                                   :: fm_back, fm_G_mu_nu, fm_mo_mo
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: L_jb, mo_coeff_o, mo_coeff_v, P_ia, &
                                                             P_mo, W_Mo
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks, matrix_p_mp2, &
@@ -197,7 +190,9 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       ! start collecting stuff
-      dimen = nmo
+      CALL cp_fm_get_info(mo_coeff(1), nrow_global=nao, ncol_global=nmo)
+      CPASSERT(SIZE(eigenval, 1) == nmo)
+      CPASSERT(nao >= nmo)
       NULLIFY (input, matrix_s, blacs_env, rho, &
                matrix_p_mp2, matrix_p_mp2_admm, matrix_ks)
       CALL get_qs_env(qs_env, &
@@ -221,7 +216,7 @@ CONTAINS
       CALL MOVE_ALLOC(mp2_env%ri_grad%L_jb, L_jb)
 
       ALLOCATE (virtual(nspins))
-      virtual(:) = dimen - homo(:)
+      virtual(:) = nmo - homo(:)
 
       NULLIFY (P_mu_nu)
       CALL dbcsr_allocate_matrix_set(P_mu_nu, nspins)
@@ -233,7 +228,7 @@ CONTAINS
 
       NULLIFY (fm_struct_tmp)
       CALL cp_fm_struct_create(fm_struct_tmp, para_env=para_env, context=blacs_env, &
-                               nrow_global=dimen, ncol_global=dimen)
+                               nrow_global=nao, ncol_global=nao)
       CALL cp_fm_create(fm_G_mu_nu, fm_struct_tmp, name="G_mu_nu")
       CALL cp_fm_create(fm_back, fm_struct_tmp, name="fm_back")
       CALL cp_fm_struct_release(fm_struct_tmp)
@@ -244,23 +239,23 @@ CONTAINS
       DO ispin = 1, nspins
          NULLIFY (fm_struct_tmp)
          CALL cp_fm_struct_create(fm_struct_tmp, para_env=para_env, context=blacs_env, &
-                                  nrow_global=dimen, ncol_global=homo(ispin))
+                                  nrow_global=nao, ncol_global=homo(ispin))
          CALL cp_fm_create(mo_coeff_o(ispin), fm_struct_tmp, name="mo_coeff_o")
          CALL cp_fm_struct_release(fm_struct_tmp)
          CALL cp_fm_set_all(mo_coeff_o(ispin), 0.0_dp)
          CALL cp_fm_to_fm_submat(msource=mo_coeff(ispin), mtarget=mo_coeff_o(ispin), &
-                                 nrow=dimen, ncol=homo(ispin), &
+                                 nrow=nao, ncol=homo(ispin), &
                                  s_firstrow=1, s_firstcol=1, &
                                  t_firstrow=1, t_firstcol=1)
 
          NULLIFY (fm_struct_tmp)
          CALL cp_fm_struct_create(fm_struct_tmp, para_env=para_env, context=blacs_env, &
-                                  nrow_global=dimen, ncol_global=virtual(ispin))
+                                  nrow_global=nao, ncol_global=virtual(ispin))
          CALL cp_fm_create(mo_coeff_v(ispin), fm_struct_tmp, name="mo_coeff_v")
          CALL cp_fm_struct_release(fm_struct_tmp)
          CALL cp_fm_set_all(mo_coeff_v(ispin), 0.0_dp)
          CALL cp_fm_to_fm_submat(msource=mo_coeff(ispin), mtarget=mo_coeff_v(ispin), &
-                                 nrow=dimen, ncol=virtual(ispin), &
+                                 nrow=nao, ncol=virtual(ispin), &
                                  s_firstrow=1, s_firstcol=homo(ispin) + 1, &
                                  t_firstrow=1, t_firstcol=1)
       END DO
@@ -340,11 +335,11 @@ CONTAINS
          DO ispin = 1, nspins
             CALL dbcsr_add(P_mu_nu(ispin)%matrix, matrix_ks(ispin)%matrix, 1.0_dp, -1.0_dp)
             CALL copy_dbcsr_to_fm(matrix=P_mu_nu(ispin)%matrix, fm=fm_G_mu_nu)
-            CALL parallel_gemm("N", "N", dimen, homo(ispin), dimen, 1.0_dp, &
+            CALL parallel_gemm("N", "N", nao, homo(ispin), nao, 1.0_dp, &
                                fm_G_mu_nu, mo_coeff_o(ispin), 0.0_dp, fm_back)
-            CALL parallel_gemm("T", "N", homo(ispin), virtual(ispin), dimen, focc, &
+            CALL parallel_gemm("T", "N", homo(ispin), virtual(ispin), nao, focc, &
                                fm_back, mo_coeff_v(ispin), 1.0_dp, L_jb(ispin))
-            CALL parallel_gemm("T", "N", homo(ispin), homo(ispin), dimen, -focc, &
+            CALL parallel_gemm("T", "N", homo(ispin), homo(ispin), nao, -focc, &
                                fm_back, mo_coeff_o(ispin), 1.0_dp, W_mo(ispin))
          END DO
       END IF
@@ -379,11 +374,8 @@ CONTAINS
       ! Complete in closed shell case, alpha-alpha (Coulomb and XC)
       ! part of L_bj(alpha) for open shell
 
-      CALL cphf_like_update(qs_env, homo, virtual, dimen, nspins, &
-                            mo_coeff_o, &
-                            mo_coeff_v, Eigenval, p_env, &
-                            P_mo, fm_G_mu_nu, fm_back, transf_type_in, &
-                            L_jb, &
+      CALL cphf_like_update(qs_env, mo_coeff_o, mo_coeff_v, Eigenval, p_env, &
+                            P_mo, fm_G_mu_nu, fm_back, transf_type_in, L_jb, &
                             recalc_hfx_integrals=(.NOT. do_exx .AND. mp2_env%ri_grad%free_hfx_buffer) &
                             .OR. (do_exx .AND. .NOT. mp2_env%ri_rpa%reuse_hfx))
 
@@ -399,7 +391,7 @@ CONTAINS
          CALL cp_fm_set_all(P_ia(ispin), 0.0_dp)
       END DO
 
-      CALL solve_z_vector_eq_low(qs_env, mp2_env, homo, virtual, dimen, unit_nr, nspins, &
+      CALL solve_z_vector_eq_low(qs_env, mp2_env, unit_nr, &
                                  mo_coeff_o, mo_coeff_v, Eigenval, p_env, &
                                  L_jb, fm_G_mu_nu, fm_back, P_ia)
 
@@ -409,6 +401,8 @@ CONTAINS
       CALL cp_fm_release(mo_coeff_o)
       CALL cp_fm_release(mo_coeff_v)
 
+      CALL cp_fm_create(fm_mo_mo, P_mo(1)%matrix_struct)
+
       DO ispin = 1, nspins
          ! update the MP2-MO density matrix with the occ-virt block
          CALL cp_fm_to_fm_submat(msource=P_ia(ispin), mtarget=P_mo(ispin), &
@@ -416,11 +410,12 @@ CONTAINS
                                  s_firstrow=1, s_firstcol=1, &
                                  t_firstrow=1, t_firstcol=homo(ispin) + 1)
          ! transpose P_MO matrix (easy way to symmetrize)
-         CALL cp_fm_set_all(fm_back, 0.0_dp)
+         CALL cp_fm_set_all(fm_mo_mo, 0.0_dp)
          ! P_mo now is ready
-         CALL cp_fm_upper_to_full(matrix=P_mo(ispin), work=fm_back)
+         CALL cp_fm_uplo_to_full(matrix=P_mo(ispin), work=fm_mo_mo)
       END DO
       CALL cp_fm_release(P_ia)
+      CALL cp_fm_release(fm_mo_mo)
 
       ! do the final update to the energy weighted matrix W_MO
       DO ispin = 1, nspins
@@ -468,9 +463,9 @@ CONTAINS
 
       ! backtnsform the collected parts of the energy-weighted density matrix into AO basis
       DO ispin = 1, nspins
-         CALL parallel_gemm('N', 'N', dimen, dimen, dimen, 1.0_dp, &
+         CALL parallel_gemm('N', 'N', nao, nmo, nmo, 1.0_dp, &
                             mo_coeff(ispin), W_mo(ispin), 0.0_dp, fm_back)
-         CALL cp_dbcsr_plus_fm_fm_t(p_env%w1(1)%matrix, fm_back, mo_coeff(ispin), dimen, 1.0_dp, .TRUE., 1)
+         CALL cp_dbcsr_plus_fm_fm_t(p_env%w1(1)%matrix, fm_back, mo_coeff(ispin), nmo, 1.0_dp, .TRUE., 1)
       END DO
       CALL cp_fm_release(W_mo)
 
@@ -479,9 +474,9 @@ CONTAINS
       DO ispin = 1, nspins
          CALL dbcsr_set(p_env%p1(ispin)%matrix, 0.0_dp)
 
-         CALL parallel_gemm('N', 'N', dimen, dimen, dimen, 1.0_dp, &
+         CALL parallel_gemm('N', 'N', nao, nmo, nmo, 1.0_dp, &
                             mo_coeff(ispin), P_mo(ispin), 0.0_dp, fm_back)
-         CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(ispin)%matrix, fm_back, mo_coeff(ispin), dimen, 1.0_dp, .TRUE.)
+         CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(ispin)%matrix, fm_back, mo_coeff(ispin), nmo, 1.0_dp, .TRUE.)
 
          CALL dbcsr_copy(rho1_ao(ispin)%matrix, p_env%p1(ispin)%matrix)
       END DO
@@ -529,10 +524,6 @@ CONTAINS
 !>        transf_type_in = 3 -> occ-virt back transformation including the
 !>                              eigenvalues energy differences for the diagonal elements
 !> \param qs_env ...
-!> \param homo ...
-!> \param virtual ...
-!> \param dimen ...
-!> \param nspins ...
 !> \param mo_coeff_o ...
 !> \param mo_coeff_v ...
 !> \param Eigenval ...
@@ -545,31 +536,31 @@ CONTAINS
 !> \param recalc_hfx_integrals ...
 !> \author Mauro Del Ben, Vladimir Rybkin
 ! **************************************************************************************************
-   SUBROUTINE cphf_like_update(qs_env, homo, virtual, dimen, nspins, &
-                               mo_coeff_o, mo_coeff_v, Eigenval, p_env, &
+   SUBROUTINE cphf_like_update(qs_env, mo_coeff_o, mo_coeff_v, Eigenval, p_env, &
                                fm_mo, fm_ao, fm_back, transf_type_in, &
                                fm_mo_out, recalc_hfx_integrals)
       TYPE(qs_environment_type), INTENT(IN), POINTER     :: qs_env
-      INTEGER, INTENT(IN)                                :: nspins, dimen
-      INTEGER, DIMENSION(nspins), INTENT(IN)             :: virtual, homo
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: mo_coeff_o, mo_coeff_v
-      REAL(KIND=dp), DIMENSION(dimen, nspins), &
-         INTENT(IN)                                      :: Eigenval
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: mo_coeff_o, mo_coeff_v
+      REAL(KIND=dp), DIMENSION(:, :), INTENT(IN)         :: Eigenval
       TYPE(qs_p_env_type)                                :: p_env
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: fm_mo
-      TYPE(cp_fm_type), INTENT(IN)                       :: fm_ao, fm_back
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: fm_mo
+      TYPE(cp_fm_type), INTENT(INOUT)                    :: fm_ao
+      TYPE(cp_fm_type), INTENT(IN)                       :: fm_back
       INTEGER, INTENT(IN)                                :: transf_type_in
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: fm_mo_out
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: fm_mo_out
       LOGICAL, INTENT(IN), OPTIONAL                      :: recalc_hfx_integrals
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'cphf_like_update'
 
-      INTEGER                                            :: handle, i_global, iiB, ispin, j_global, &
-                                                            jjB, ncol_local, nrow_local
+      INTEGER                                            :: handle, homo, i_global, iiB, ispin, &
+                                                            j_global, jjB, nao, ncol_local, &
+                                                            nrow_local, nspins, virtual
       INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: rho1_ao
 
       CALL timeset(routineN, handle)
+
+      nspins = SIZE(Eigenval, 2)
 
       CALL qs_rho_get(p_env%rho1, rho_ao=rho1_ao)
 
@@ -577,31 +568,34 @@ CONTAINS
       DO ispin = 1, nspins
          CALL dbcsr_set(p_env%p1(ispin)%matrix, 0.0_dp)
 
+         CALL cp_fm_get_info(mo_coeff_o(ispin), nrow_global=nao, ncol_global=homo)
+         CALL cp_fm_get_info(mo_coeff_v(ispin), nrow_global=nao, ncol_global=virtual)
+
          ASSOCIATE (mat_in => fm_mo(ispin))
 
             ! perform back transformation
             SELECT CASE (transf_type_in)
             CASE (1)
                ! occ-occ block
-               CALL parallel_gemm('N', 'N', dimen, homo(ispin), homo(ispin), 1.0_dp, &
+               CALL parallel_gemm('N', 'N', nao, homo, homo, 1.0_dp, &
                                   mo_coeff_o(ispin), mat_in, 0.0_dp, fm_back)
-               CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(ispin)%matrix, fm_back, mo_coeff_o(ispin), homo(ispin), 1.0_dp, .TRUE.)
+               CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(ispin)%matrix, fm_back, mo_coeff_o(ispin), homo, 1.0_dp, .TRUE.)
                ! virt-virt block
-               CALL parallel_gemm('N', 'N', dimen, virtual(ispin), virtual(ispin), 1.0_dp, &
+               CALL parallel_gemm('N', 'N', nao, virtual, virtual, 1.0_dp, &
                                   mo_coeff_v(ispin), mat_in, 0.0_dp, fm_back, &
-                                  b_first_col=homo(ispin) + 1, &
-                                  b_first_row=homo(ispin) + 1)
-               CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(ispin)%matrix, fm_back, mo_coeff_v(ispin), virtual(ispin), 1.0_dp, .TRUE.)
+                                  b_first_col=homo + 1, &
+                                  b_first_row=homo + 1)
+               CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(ispin)%matrix, fm_back, mo_coeff_v(ispin), virtual, 1.0_dp, .TRUE.)
 
             CASE (3)
                ! virt-occ blocks
-               CALL parallel_gemm('N', 'N', dimen, virtual(ispin), homo(ispin), 1.0_dp, &
+               CALL parallel_gemm('N', 'N', nao, virtual, homo, 1.0_dp, &
                                   mo_coeff_o(ispin), mat_in, 0.0_dp, fm_back)
-               CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(ispin)%matrix, fm_back, mo_coeff_v(ispin), virtual(ispin), 1.0_dp, .TRUE.)
+               CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(ispin)%matrix, fm_back, mo_coeff_v(ispin), virtual, 1.0_dp, .TRUE.)
                ! and symmetrize (here again multiply instead of transposing)
-               CALL parallel_gemm('N', 'T', dimen, homo(ispin), virtual(ispin), 1.0_dp, &
+               CALL parallel_gemm('N', 'T', nao, homo, virtual, 1.0_dp, &
                                   mo_coeff_v(ispin), mat_in, 0.0_dp, fm_back)
-               CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(ispin)%matrix, fm_back, mo_coeff_o(ispin), homo(ispin), 1.0_dp, .TRUE.)
+               CALL cp_dbcsr_plus_fm_fm_t(p_env%p1(ispin)%matrix, fm_back, mo_coeff_o(ispin), homo, 1.0_dp, .TRUE.)
 
             CASE DEFAULT
                ! nothing
@@ -613,8 +607,13 @@ CONTAINS
 
       CALL p_env_update_rho(p_env, qs_env)
 
-      IF (transf_type_in == 3) THEN
-         DO ispin = 1, nspins
+      CALL apply_2nd_order_kernel(qs_env, p_env, recalc_hfx_integrals)
+
+      DO ispin = 1, nspins
+         CALL cp_fm_get_info(mo_coeff_o(ispin), nrow_global=nao, ncol_global=homo)
+         CALL cp_fm_get_info(mo_coeff_v(ispin), nrow_global=nao, ncol_global=virtual)
+
+         IF (transf_type_in == 3) THEN
 
             ! scale for the orbital energy differences for the diagonal elements
             CALL cp_fm_get_info(matrix=fm_mo_out(ispin), &
@@ -627,29 +626,25 @@ CONTAINS
                DO iiB = 1, nrow_local
                   i_global = row_indices(iiB)
                   fm_mo_out(ispin)%local_data(iiB, jjB) = fm_mo(ispin)%local_data(iiB, jjB)* &
-                                                          (Eigenval(j_global + homo(ispin), ispin) - Eigenval(i_global, ispin))
+                                                          (Eigenval(j_global + homo, ispin) - Eigenval(i_global, ispin))
                END DO
             END DO
-         END DO
-      END IF
+         END IF
 
-      CALL apply_2nd_order_kernel(qs_env, p_env, recalc_hfx_integrals)
-
-      DO ispin = 1, nspins
          ! copy back to fm
          CALL cp_fm_set_all(fm_ao, 0.0_dp)
          CALL copy_dbcsr_to_fm(matrix=p_env%kpp1(ispin)%matrix, fm=fm_ao)
          CALL cp_fm_set_all(fm_back, 0.0_dp)
-         CALL cp_fm_upper_to_full(fm_ao, fm_back)
+         CALL cp_fm_uplo_to_full(fm_ao, fm_back)
 
          ASSOCIATE (mat_out => fm_mo_out(ispin))
 
             ! transform to MO basis, here we always sum the result into the input matrix
 
             ! occ-virt block
-            CALL parallel_gemm('T', 'N', homo(ispin), dimen, dimen, 1.0_dp, &
+            CALL parallel_gemm('T', 'N', homo, nao, nao, 1.0_dp, &
                                mo_coeff_o(ispin), fm_ao, 0.0_dp, fm_back)
-            CALL parallel_gemm('N', 'N', homo(ispin), virtual(ispin), dimen, 1.0_dp, &
+            CALL parallel_gemm('N', 'N', homo, virtual, nao, 1.0_dp, &
                                fm_back, mo_coeff_v(ispin), 1.0_dp, mat_out)
          END ASSOCIATE
       END DO
@@ -663,11 +658,7 @@ CONTAINS
 !>        system of linear equation
 !> \param qs_env ...
 !> \param mp2_env ...
-!> \param homo ...
-!> \param virtual ...
-!> \param dimen ...
 !> \param unit_nr ...
-!> \param nspins ...
 !> \param mo_coeff_o ...
 !> \param mo_coeff_v ...
 !> \param Eigenval ...
@@ -678,29 +669,32 @@ CONTAINS
 !> \param P_ia ...
 !> \author Mauro Del Ben, Vladimir Rybkin
 ! **************************************************************************************************
-   SUBROUTINE solve_z_vector_eq_low(qs_env, mp2_env, homo, virtual, dimen, unit_nr, nspins, &
+   SUBROUTINE solve_z_vector_eq_low(qs_env, mp2_env, unit_nr, &
                                     mo_coeff_o, mo_coeff_v, Eigenval, p_env, &
                                     L_jb, fm_G_mu_nu, fm_back, P_ia)
       TYPE(qs_environment_type), INTENT(IN), POINTER     :: qs_env
       TYPE(mp2_type), INTENT(IN)                         :: mp2_env
-      INTEGER, INTENT(IN)                                :: nspins, unit_nr, dimen
-      INTEGER, DIMENSION(nspins), INTENT(IN)             :: virtual, homo
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: mo_coeff_o, mo_coeff_v
-      REAL(KIND=dp), DIMENSION(dimen, nspins), &
-         INTENT(IN)                                      :: Eigenval
+      INTEGER, INTENT(IN)                                :: unit_nr
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: mo_coeff_o, mo_coeff_v
+      REAL(KIND=dp), DIMENSION(:, :), INTENT(IN)         :: Eigenval
       TYPE(qs_p_env_type), INTENT(IN), POINTER           :: p_env
-      TYPE(cp_fm_type), DIMENSION(dimen), INTENT(IN)     :: L_jb
-      TYPE(cp_fm_type), INTENT(IN)                       :: fm_G_mu_nu, fm_back
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: P_ia
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: L_jb
+      TYPE(cp_fm_type), INTENT(INOUT)                    :: fm_G_mu_nu
+      TYPE(cp_fm_type), INTENT(IN)                       :: fm_back
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: P_ia
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'solve_z_vector_eq_low'
 
       INTEGER                                            :: handle, i_global, iiB, ispin, j_global, &
-                                                            jjB, ncol_local, nrow_local
+                                                            jjB, ncol_local, nmo, nrow_local, &
+                                                            nspins, virtual
       INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
       TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: precond
 
       CALL timeset(routineN, handle)
+
+      nmo = SIZE(eigenval, 1)
+      nspins = SIZE(eigenval, 2)
 
       ! Pople method
       ! change sign to L_jb
@@ -718,27 +712,24 @@ CONTAINS
                              nrow_local=nrow_local, &
                              ncol_local=ncol_local, &
                              row_indices=row_indices, &
-                             col_indices=col_indices)
+                             col_indices=col_indices, &
+                             ncol_global=virtual)
          DO jjB = 1, ncol_local
             j_global = col_indices(jjB)
             DO iiB = 1, nrow_local
                i_global = row_indices(iiB)
-               precond(ispin)%local_data(iiB, jjB) = Eigenval(j_global + homo(ispin), ispin) - Eigenval(i_global, ispin)
+               precond(ispin)%local_data(iiB, jjB) = 1.0_dp/(Eigenval(j_global + nmo - virtual, ispin) - Eigenval(i_global, ispin))
             END DO
          END DO
       END DO
 
-      DO ispin = 1, nspins
-         precond(ispin)%local_data(:, :) = 1.0_dp/precond(ispin)%local_data(:, :)
-      END DO
-
       SELECT CASE (mp2_env%ri_grad%z_solver_method)
       CASE (z_solver_pople)
-         CALL solve_z_vector_pople(qs_env, mp2_env, homo, virtual, dimen, unit_nr, nspins, &
+         CALL solve_z_vector_pople(qs_env, mp2_env, unit_nr, &
                                    mo_coeff_o, mo_coeff_v, Eigenval, p_env, &
                                    L_jb, fm_G_mu_nu, fm_back, P_ia, precond)
       CASE (z_solver_cg, z_solver_richardson, z_solver_sd)
-         CALL solve_z_vector_cg(qs_env, mp2_env, homo, virtual, dimen, unit_nr, nspins, &
+         CALL solve_z_vector_cg(qs_env, mp2_env, unit_nr, &
                                 mo_coeff_o, mo_coeff_v, Eigenval, p_env, &
                                 L_jb, fm_G_mu_nu, fm_back, P_ia, precond)
       CASE DEFAULT
@@ -755,11 +746,7 @@ CONTAINS
 !> \brief ...
 !> \param qs_env ...
 !> \param mp2_env ...
-!> \param homo ...
-!> \param virtual ...
-!> \param dimen ...
 !> \param unit_nr ...
-!> \param nspins ...
 !> \param mo_coeff_o ...
 !> \param mo_coeff_v ...
 !> \param Eigenval ...
@@ -770,25 +757,25 @@ CONTAINS
 !> \param P_ia ...
 !> \param precond ...
 ! **************************************************************************************************
-   SUBROUTINE solve_z_vector_pople(qs_env, mp2_env, homo, virtual, dimen, unit_nr, nspins, &
+   SUBROUTINE solve_z_vector_pople(qs_env, mp2_env, unit_nr, &
                                    mo_coeff_o, mo_coeff_v, Eigenval, p_env, &
                                    L_jb, fm_G_mu_nu, fm_back, P_ia, precond)
       TYPE(qs_environment_type), INTENT(IN), POINTER     :: qs_env
       TYPE(mp2_type), INTENT(IN)                         :: mp2_env
-      INTEGER, INTENT(IN)                                :: nspins, unit_nr, dimen
-      INTEGER, DIMENSION(nspins), INTENT(IN)             :: virtual, homo
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: mo_coeff_o, mo_coeff_v
-      REAL(KIND=dp), DIMENSION(dimen, nspins), &
-         INTENT(IN)                                      :: Eigenval
+      INTEGER, INTENT(IN)                                :: unit_nr
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: mo_coeff_o, mo_coeff_v
+      REAL(KIND=dp), DIMENSION(:, :), INTENT(IN)         :: Eigenval
       TYPE(qs_p_env_type), INTENT(IN), POINTER           :: p_env
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: L_jb
-      TYPE(cp_fm_type), INTENT(IN)                       :: fm_G_mu_nu, fm_back
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: P_ia, precond
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: L_jb
+      TYPE(cp_fm_type), INTENT(INOUT)                    :: fm_G_mu_nu
+      TYPE(cp_fm_type), INTENT(IN)                       :: fm_back
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: P_ia, precond
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'solve_z_vector_pople'
 
       INTEGER                                            :: cycle_counter, handle, iiB, iiter, &
-                                                            ispin, max_num_iter, transf_type_in
+                                                            ispin, max_num_iter, nspins, &
+                                                            transf_type_in
       LOGICAL                                            :: converged
       REAL(KIND=dp)                                      :: conv, eps_conv, scale_cphf, t1, t2
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: proj_bi_xj, temp_vals, x_norm, xi_b
@@ -800,9 +787,11 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
+      nspins = SIZE(eigenval, 2)
+
       eps_conv = mp2_env%ri_grad%cphf_eps_conv
 
-      IF (SQRT(accurate_dot_product_spin(L_jb, L_jb)) >= eps_conv) THEN
+      IF (accurate_dot_product_spin(L_jb, L_jb) >= (eps_conv*eps_conv)) THEN
 
          max_num_iter = mp2_env%ri_grad%cphf_max_num_iter
          scale_cphf = mp2_env%ri_grad%scale_step_size
@@ -883,8 +872,7 @@ CONTAINS
                CALL cp_fm_set_all(Ax(ispin, iiter), 0.0_dp)
             END DO
 
-            CALL cphf_like_update(qs_env, homo, virtual, dimen, nspins, &
-                                  mo_coeff_o, &
+            CALL cphf_like_update(qs_env, mo_coeff_o, &
                                   mo_coeff_v, Eigenval, p_env, &
                                   xn(:, iiter), fm_G_mu_nu, fm_back, transf_type_in, &
                                   Ax(:, iiter))
@@ -1004,11 +992,7 @@ CONTAINS
 !> \brief ...
 !> \param qs_env ...
 !> \param mp2_env ...
-!> \param homo ...
-!> \param virtual ...
-!> \param dimen ...
 !> \param unit_nr ...
-!> \param nspins ...
 !> \param mo_coeff_o ...
 !> \param mo_coeff_v ...
 !> \param Eigenval ...
@@ -1019,24 +1003,23 @@ CONTAINS
 !> \param P_ia ...
 !> \param precond ...
 ! **************************************************************************************************
-   SUBROUTINE solve_z_vector_cg(qs_env, mp2_env, homo, virtual, dimen, unit_nr, nspins, &
+   SUBROUTINE solve_z_vector_cg(qs_env, mp2_env, unit_nr, &
                                 mo_coeff_o, mo_coeff_v, Eigenval, p_env, &
                                 L_jb, fm_G_mu_nu, fm_back, P_ia, precond)
       TYPE(qs_environment_type), INTENT(IN), POINTER     :: qs_env
       TYPE(mp2_type), INTENT(IN)                         :: mp2_env
-      INTEGER, INTENT(IN)                                :: nspins, unit_nr, dimen
-      INTEGER, DIMENSION(nspins), INTENT(IN)             :: virtual, homo
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: mo_coeff_o, mo_coeff_v
-      REAL(KIND=dp), DIMENSION(dimen, nspins), &
-         INTENT(IN)                                      :: Eigenval
+      INTEGER, INTENT(IN)                                :: unit_nr
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: mo_coeff_o, mo_coeff_v
+      REAL(KIND=dp), DIMENSION(:, :), INTENT(IN)         :: Eigenval
       TYPE(qs_p_env_type), INTENT(IN), POINTER           :: p_env
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: L_jb
-      TYPE(cp_fm_type), INTENT(IN)                       :: fm_G_mu_nu, fm_back
-      TYPE(cp_fm_type), DIMENSION(nspins), INTENT(IN)    :: P_ia, precond
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: L_jb
+      TYPE(cp_fm_type), INTENT(INOUT)                    :: fm_G_mu_nu
+      TYPE(cp_fm_type), INTENT(IN)                       :: fm_back
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(IN)         :: P_ia, precond
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'solve_z_vector_cg'
 
-      INTEGER :: cycles_passed, handle, iiter, ispin, max_num_iter, restart_counter, &
+      INTEGER :: cycles_passed, handle, iiter, ispin, max_num_iter, nspins, restart_counter, &
          restart_every, transf_type_in, z_solver_method
       LOGICAL                                            :: converged, do_restart
       REAL(KIND=dp) :: eps_conv, norm_residual, norm_residual_old, &
@@ -1056,6 +1039,7 @@ CONTAINS
       restart_every = mp2_env%ri_grad%cphf_restart
       scale_step_size = mp2_env%ri_grad%scale_step_size
       transf_type_in = 3
+      nspins = SIZE(eigenval, 2)
 
       IF (unit_nr > 0) THEN
          WRITE (unit_nr, *)
@@ -1116,8 +1100,7 @@ CONTAINS
             ! Do not recalculate residual if it is already enforced to save FLOPs
             IF (.NOT. mp2_env%ri_grad%recalc_residual .OR. (iiter == 1)) THEN
                IF (iiter > 1) THEN
-                  CALL cphf_like_update(qs_env, homo, virtual, dimen, nspins, &
-                                        mo_coeff_o, &
+                  CALL cphf_like_update(qs_env, mo_coeff_o, &
                                         mo_coeff_v, Eigenval, p_env, &
                                         P_ia, fm_G_mu_nu, fm_back, transf_type_in, &
                                         residual)
@@ -1148,8 +1131,7 @@ CONTAINS
 
          residual_dot_diff_search_vec_old = accurate_dot_product_spin(residual, diff_search_vector)
 
-         CALL cphf_like_update(qs_env, homo, virtual, dimen, nspins, &
-                               mo_coeff_o, &
+         CALL cphf_like_update(qs_env, mo_coeff_o, &
                                mo_coeff_v, Eigenval, p_env, &
                                search_vector, fm_G_mu_nu, fm_back, transf_type_in, &
                                A_dot_search_vector)
@@ -1184,8 +1166,7 @@ CONTAINS
                                                   - scale_result*A_dot_search_vector(ispin)%local_data(:, :)
             END DO
          ELSE
-            CALL cphf_like_update(qs_env, homo, virtual, dimen, nspins, &
-                                  mo_coeff_o, &
+            CALL cphf_like_update(qs_env, mo_coeff_o, &
                                   mo_coeff_v, Eigenval, p_env, &
                                   P_ia, fm_G_mu_nu, fm_back, transf_type_in, &
                                   residual)
@@ -1305,13 +1286,11 @@ CONTAINS
       INTEGER                                            :: alpha, beta, handle, idir, iounit, &
                                                             ispin, nimages, nocc, nspins
       INTEGER, DIMENSION(3)                              :: comp
-      INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
       LOGICAL                                            :: do_exx, do_hfx, use_virial
       REAL(KIND=dp)                                      :: e_dummy, e_hartree, e_xc, ehartree, exc
       REAL(KIND=dp), DIMENSION(3)                        :: deb
       REAL(KIND=dp), DIMENSION(3, 3)                     :: h_stress, pv_virial
       TYPE(admm_type), POINTER                           :: admm_env
-      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), ALLOCATABLE, DIMENSION(:), &
@@ -1319,15 +1298,14 @@ CONTAINS
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks, matrix_p_mp2, &
                                                             matrix_p_mp2_admm, matrix_s, rho1, &
                                                             rho_ao, rho_ao_aux, scrm
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: rho_ao_kp, scrm_kp
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_p, rho_ao_kp, scrm_kp
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(hfx_type), DIMENSION(:, :), POINTER           :: x_data
       TYPE(linres_control_type), POINTER                 :: linres_control
       TYPE(mo_set_type), DIMENSION(:), POINTER           :: mos
       TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
-         POINTER                                         :: sab_orb, sac_ae, sac_ppl, sap_ppnl
-      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
+         POINTER                                         :: sab_orb
       TYPE(pw_c1d_gs_type)                               :: pot_g, rho_tot_g, temp_pw_g
       TYPE(pw_c1d_gs_type), ALLOCATABLE, DIMENSION(:)    :: dvg
       TYPE(pw_c1d_gs_type), DIMENSION(:), POINTER        :: rho_g, rho_mp2_g
@@ -1342,7 +1320,6 @@ CONTAINS
       TYPE(qs_dispersion_type), POINTER                  :: dispersion_env
       TYPE(qs_energy_type), POINTER                      :: energy
       TYPE(qs_force_type), DIMENSION(:), POINTER         :: force
-      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(qs_p_env_type), POINTER                       :: p_env
       TYPE(qs_rho_type), POINTER                         :: rho, rho_aux
@@ -1387,7 +1364,6 @@ CONTAINS
 
       nimages = dft_control%nimages
       CPASSERT(nimages == 1)
-      NULLIFY (cell_to_index)
 
       p_env => qs_env%mp2_env%ri_grad%p_env
 
@@ -1405,101 +1381,17 @@ CONTAINS
          CALL dbcsr_add(rho_ao(ispin)%matrix, matrix_p_mp2(ispin)%matrix, 1.0_dp, 1.0_dp)
       END DO
 
-      IF (nspins == 2) THEN
-         CALL dbcsr_add(rho_ao(1)%matrix, rho_ao(2)%matrix, 1.0_dp, 1.0_dp)
-      END IF
+      ! kinetic energy
+      NULLIFY (scrm_kp)
+      matrix_p(1:nspins, 1:1) => rho_ao(1:nspins)
+      CALL kinetic_energy_matrix(qs_env, matrixkp_t=scrm_kp, matrix_p=matrix_p, &
+                                 calculate_forces=.TRUE., &
+                                 debug_forces=debug_forces, debug_stress=debug_forces)
+      CALL dbcsr_deallocate_matrix_set(scrm_kp)
 
-      ! Kinetic energy matrix
-      NULLIFY (scrm)
-      IF (debug_forces) THEN
-         deb(1:3) = force(1)%kinetic(1:3, 1)
-         IF (use_virial) e_dummy = third_tr(virial%pv_virial)
-      END IF
-      CALL build_kinetic_matrix(ks_env, matrix_t=scrm, &
-                                matrix_name="KINETIC ENERGY MATRIX", &
-                                basis_type="ORB", &
-                                sab_nl=sab_orb, calculate_forces=.TRUE., &
-                                matrix_p=rho_ao(1)%matrix)
-      IF (debug_forces) THEN
-         deb(1:3) = force(1)%kinetic(1:3, 1) - deb(1:3)
-         CALL para_env%sum(deb)
-         IF (iounit > 0) WRITE (iounit, "(T3,A,T33,3F16.8)") "DEBUG:: P*dT       ", deb
-         IF (use_virial) THEN
-            e_dummy = third_tr(virial%pv_virial) - e_dummy
-            CALL para_env%sum(e_dummy)
-            IF (iounit > 0) WRITE (iounit, "(T3,A,T33,F16.8)") "DEBUG VIRIAL:: T          ", e_dummy
-         END IF
-      END IF
-      CALL dbcsr_deallocate_matrix_set(scrm)
-
-      IF (nspins == 2) THEN
-         CALL dbcsr_add(rho_ao(1)%matrix, rho_ao(2)%matrix, 1.0_dp, -1.0_dp)
-      END IF
-
-      ! Add pseudo potential terms
       scrm_kp(1:nspins, 1:1) => matrix_ks(1:nspins)
-      CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set, particle_set=particle_set, &
-                      atomic_kind_set=atomic_kind_set, sac_ae=sac_ae, sac_ppl=sac_ppl, sap_ppnl=sap_ppnl)
-      IF (ASSOCIATED(sac_ae)) THEN
-         IF (debug_forces) THEN
-            deb(1:3) = force(1)%all_potential(1:3, 1)
-            IF (use_virial) e_dummy = third_tr(virial%pv_virial)
-         END IF
-         CALL build_core_ae(scrm_kp, rho_ao_kp, force, &
-                            virial, .TRUE., use_virial, 1, &
-                            qs_kind_set, atomic_kind_set, particle_set, sab_orb, sac_ae, &
-                            nimages, cell_to_index)
-         IF (debug_forces) THEN
-            deb(1:3) = force(1)%all_potential(1:3, 1) - deb(1:3)
-            CALL para_env%sum(deb)
-            IF (iounit > 0) WRITE (iounit, "(T3,A,T33,3F16.8)") "DEBUG:: P*dHae     ", deb
-            IF (use_virial) THEN
-               e_dummy = third_tr(virial%pv_virial) - e_dummy
-               CALL para_env%sum(e_dummy)
-               IF (iounit > 0) WRITE (iounit, "(T3,A,T33,F16.8)") "DEBUG VIRIAL:: Hae        ", e_dummy
-            END IF
-         END IF
-      END IF
-      IF (ASSOCIATED(sac_ppl)) THEN
-         IF (debug_forces) THEN
-            deb(1:3) = force(1)%gth_ppl(1:3, 1)
-            IF (use_virial) e_dummy = third_tr(virial%pv_virial)
-         END IF
-         CALL build_core_ppl(scrm_kp, rho_ao_kp, force, &
-                             virial, .TRUE., use_virial, 1, &
-                             qs_kind_set, atomic_kind_set, particle_set, sab_orb, sac_ppl, &
-                             nimages=1, basis_type="ORB")
-         IF (debug_forces) THEN
-            deb(1:3) = force(1)%gth_ppl(1:3, 1) - deb(1:3)
-            CALL para_env%sum(deb)
-            IF (iounit > 0) WRITE (iounit, "(T3,A,T33,3F16.8)") "DEBUG:: P*dHppl    ", deb
-            IF (use_virial) THEN
-               e_dummy = third_tr(virial%pv_virial) - e_dummy
-               CALL para_env%sum(e_dummy)
-               IF (iounit > 0) WRITE (iounit, "(T3,A,T33,F16.8)") "DEBUG VIRIAL:: Hppl       ", e_dummy
-            END IF
-         END IF
-      END IF
-      IF (ASSOCIATED(sap_ppnl)) THEN
-         IF (debug_forces) THEN
-            deb(1:3) = force(1)%gth_ppnl(1:3, 1)
-            IF (use_virial) e_dummy = third_tr(virial%pv_virial)
-         END IF
-         CALL build_core_ppnl(scrm_kp, rho_ao_kp, force, &
-                              virial, .TRUE., use_virial, 1, &
-                              qs_kind_set, atomic_kind_set, particle_set, sab_orb, sap_ppnl, dft_control%qs_control%eps_ppnl, &
-                              nimages=1, basis_type="ORB")
-         IF (debug_forces) THEN
-            deb(1:3) = force(1)%gth_ppnl(1:3, 1) - deb(1:3)
-            CALL para_env%sum(deb)
-            IF (iounit > 0) WRITE (iounit, "(T3,A,T33,3F16.8)") "DEBUG:: P*dHppnl   ", deb
-            IF (use_virial) THEN
-               e_dummy = third_tr(virial%pv_virial) - e_dummy
-               CALL para_env%sum(e_dummy)
-               IF (iounit > 0) WRITE (iounit, "(T3,A,T33,F16.8)") "DEBUG VIRIAL:: Hppnl      ", e_dummy
-            END IF
-         END IF
-      END IF
+      CALL core_matrices(qs_env, scrm_kp, rho_ao_kp, .TRUE., 1, &
+                         debug_forces=debug_forces, debug_stress=debug_forces)
 
       ! Get the different components of the KS potential
       NULLIFY (vxc_rspace, vtau_rspace, vadmm_rspace)

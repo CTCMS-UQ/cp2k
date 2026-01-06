@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -16,7 +16,7 @@ MODULE rpa_grad
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_fm_basic_linalg,              ONLY: cp_fm_geadd,&
                                               cp_fm_scale_and_add,&
-                                              cp_fm_upper_to_full
+                                              cp_fm_uplo_to_full
    USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_invert
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                               cp_fm_struct_get,&
@@ -84,7 +84,7 @@ MODULE rpa_grad
       INTEGER, DIMENSION(:, :), ALLOCATABLE :: pair_list
       TYPE(one_dim_int_array), DIMENSION(:), ALLOCATABLE :: index2send, index2recv
       REAL(KIND=dp), DIMENSION(:), ALLOCATABLE :: P
-   END TYPE
+   END TYPE sos_mp2_grad_work_type
 
    TYPE rpa_grad_work_type
       TYPE(cp_fm_type) :: fm_mat_Q_copy = cp_fm_type()
@@ -93,7 +93,7 @@ MODULE rpa_grad
       TYPE(group_dist_d1_type), DIMENSION(:), ALLOCATABLE :: gd_homo, gd_virtual
       INTEGER, DIMENSION(2) :: grid = -1, mepos = -1
       TYPE(two_dim_real_array), DIMENSION(:), ALLOCATABLE :: P_ij, P_ab
-   END TYPE
+   END TYPE rpa_grad_work_type
 
    TYPE rpa_grad_type
       PRIVATE
@@ -101,7 +101,7 @@ MODULE rpa_grad
       TYPE(cp_fm_type), DIMENSION(:), ALLOCATABLE :: fm_Y
       TYPE(sos_mp2_grad_work_type), ALLOCATABLE, DIMENSION(:) :: sos_mp2_work_occ, sos_mp2_work_virt
       TYPE(rpa_grad_work_type) :: rpa_work
-   END TYPE
+   END TYPE rpa_grad_type
 
    INTEGER, PARAMETER :: spla_threshold = 128*128*128*2
    INTEGER, PARAMETER :: blksize_threshold = 4
@@ -187,7 +187,7 @@ CONTAINS
 
       ALLOCATE (rpa_grad%fm_Y(nspins))
       DO ispin = 1, nspins
-         CALL cp_fm_create(rpa_grad%fm_Y(ispin), fm_mat_S(ispin)%matrix_struct)
+         CALL cp_fm_create(rpa_grad%fm_Y(ispin), fm_mat_S(ispin)%matrix_struct, set_zero=.TRUE.)
       END DO
 
       IF (do_ri_sos_laplace_mp2) THEN
@@ -261,7 +261,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE sos_mp2_work_type_create
 
 ! **************************************************************************************************
 !> \brief ...
@@ -397,7 +397,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE rpa_work_type_create
 
 ! **************************************************************************************************
 !> \brief ...
@@ -571,7 +571,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE prepare_comm_Pij
 
 ! **************************************************************************************************
 !> \brief ...
@@ -702,7 +702,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE prepare_comm_Pab
 
 ! **************************************************************************************************
 !> \brief ...
@@ -715,7 +715,7 @@ CONTAINS
 
       CALL cp_fm_to_fm(fm_mat_Q, rpa_grad%rpa_work%fm_mat_Q_copy)
 
-   END SUBROUTINE
+   END SUBROUTINE rpa_grad_copy_Q
 
 ! **************************************************************************************************
 !> \brief ...
@@ -771,7 +771,7 @@ CONTAINS
          ! calculate [1+Q(iw')]^-1
          CALL cp_fm_cholesky_invert(fm_mat_Q(1))
          ! symmetrize the result, fm_work_PQ is only a work matrix
-         CALL cp_fm_upper_to_full(fm_mat_Q(1), fm_work_PQ)
+         CALL cp_fm_uplo_to_full(fm_mat_Q(1), fm_work_PQ)
 
          CALL cp_fm_release(fm_work_PQ)
 
@@ -877,7 +877,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE rpa_grad_matrix_operations
 
 ! **************************************************************************************************
 !> \brief ...
@@ -972,7 +972,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE calc_P_sos_mp2
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1271,7 +1271,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE calc_P_rpa
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1490,7 +1490,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE kahan_step
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1742,7 +1742,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE calc_Pij_degen
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1901,7 +1901,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE calc_Pab_degen
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2009,7 +2009,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE redistribute_fm_mat_S
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2170,16 +2170,16 @@ CONTAINS
 
       ALLOCATE (mp2_env%ri_grad%Gamma_PQ(my_P_size, my_group_L_size))
       CALL fm2array(mp2_env%ri_grad%Gamma_PQ, &
-                    my_P_size, my_P_start, my_P_end, &
-                    my_group_L_size, my_group_L_start, my_group_L_end, &
+                    my_P_start, my_P_end, &
+                    my_group_L_start, my_group_L_end, &
                     group_grid_2_mepos, mepos_2_grid_group, &
                     para_env_sub%num_pe, ngroup, &
                     fm_PQ)
 
       IF (.NOT. compare_potential_types(mp2_env%ri_metric, mp2_env%potential_parameter)) THEN
          ALLOCATE (mp2_env%ri_grad%Gamma_PQ_2(my_P_size, my_group_L_size))
-         CALL fm2array(mp2_env%ri_grad%Gamma_PQ_2, my_P_size, my_P_start, my_P_end, &
-                       my_group_L_size, my_group_L_start, my_group_L_end, &
+         CALL fm2array(mp2_env%ri_grad%Gamma_PQ_2, my_P_start, my_P_end, &
+                       my_group_L_start, my_group_L_end, &
                        group_grid_2_mepos, mepos_2_grid_group, &
                        para_env_sub%num_pe, ngroup, &
                        fm_PQ_2)
@@ -2220,8 +2220,8 @@ CONTAINS
          CALL create_group_dist(gd_ia, para_env_sub%num_pe, dimen_ia)
          CALL get_group_dist(gd_ia, para_env_sub%mepos, my_ia_start, my_ia_end, my_ia_size)
 
-         CALL fm2array(Gamma_2D, my_ia_size, my_ia_start, my_ia_end, &
-                       my_group_L_size, my_group_L_start, my_group_L_end, &
+         CALL fm2array(Gamma_2D, my_ia_start, my_ia_end, &
+                       my_group_L_start, my_group_L_end, &
                        group_grid_2_mepos, mepos_2_grid_group, &
                        para_env_sub%num_pe, ngroup, &
                        fm_G_P_ia)
@@ -2388,7 +2388,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE sos_mp2_grad_finalize
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2584,7 +2584,7 @@ CONTAINS
       END IF
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE rpa_grad_work_finalize
 
 ! **************************************************************************************************
 !> \brief Dereplicate data from fm_sub and collect in fm_global, overlapping data will be added
@@ -2806,7 +2806,7 @@ CONTAINS
 
       INTEGER                                            :: i_global, i_local, np_global, proc
 
-      CALL struct_global%context%get(number_of_process_rows=np_global)
+      CALL struct_global%context%get(number_of_process_columns=np_global)
 
       ALLOCATE (data2send(0:np_global - 1))
       data2send = 0
@@ -2831,7 +2831,7 @@ CONTAINS
          index2send(proc)%array(data2send(proc)) = i_local
       END DO
 
-   END SUBROUTINE
+   END SUBROUTINE get_elements2send_col
 
 ! **************************************************************************************************
 !> \brief ...
@@ -2874,6 +2874,6 @@ CONTAINS
          index2send(proc)%array(data2send(proc)) = i_local
       END DO
 
-   END SUBROUTINE
+   END SUBROUTINE get_elements2send_row
 
 END MODULE rpa_grad

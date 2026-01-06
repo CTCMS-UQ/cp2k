@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -91,6 +91,7 @@ MODULE pw_env_methods
                                               pw_pool_p_type,&
                                               pw_pool_release,&
                                               pw_pools_dealloc
+   USE qs_cneo_types,                   ONLY: cneo_potential_type
    USE qs_dispersion_types,             ONLY: qs_dispersion_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
@@ -312,9 +313,10 @@ CONTAINS
          spherical = .FALSE.
       END IF
 
+      poisson_section => section_vals_get_subs_vals(qs_env%input, "DFT%POISSON")
       CALL setup_super_ref_grid(super_ref_grid, mt_super_ref_grid, &
                                 xc_super_ref_grid, cutilev, grid_span, spherical, my_cell, para_env, &
-                                qs_env%input, ncommensurate, uf_grid=uf_grid, &
+                                poisson_section, ncommensurate, uf_grid=uf_grid, &
                                 print_section=print_section)
       old_pw_grid => super_ref_grid
       IF (.NOT. ASSOCIATED(mt_super_ref_grid)) vdw_ref_grid => super_ref_grid
@@ -397,13 +399,13 @@ CONTAINS
          ! qmmm does not support a ray distribution
          ! FIXME ... check if a plane distributed lower grid is sufficient
          IF (qs_env%qmmm) THEN
-            distribution_layout = (/para_env%num_pe, 1/)
+            distribution_layout = [para_env%num_pe, 1]
          END IF
 
          ! If splines are required
          ! FIXME.... should only be true for the highest grid
          IF (smooth_required) THEN
-            distribution_layout = (/para_env%num_pe, 1/)
+            distribution_layout = [para_env%num_pe, 1]
          END IF
 
          IF (igrid_level == 1) THEN
@@ -496,7 +498,7 @@ CONTAINS
          ALLOCATE (pw_env%poisson_env)
          CALL pw_env%poisson_env%create()
       END IF
-      poisson_section => section_vals_get_subs_vals(input, "DFT%POISSON")
+      ! poisson_section => section_vals_get_subs_vals(input, "DFT%POISSON")
 
       CALL pw_poisson_read_parameters(poisson_section, poisson_params)
       CALL pw_poisson_set(pw_env%poisson_env, cell_hmat=my_cell%hmat, pw_pools=pw_env%pw_pools, &
@@ -519,24 +521,24 @@ CONTAINS
                              dct_pw_grid=dct_pw_grid, use_level=pw_env%auxbas_grid)
       END IF
 
-      IF ((poisson_params%ps_implicit_params%boundary_condition .EQ. MIXED_PERIODIC_BC) .OR. &
-          (poisson_params%ps_implicit_params%boundary_condition .EQ. MIXED_BC)) THEN
+      IF ((poisson_params%ps_implicit_params%boundary_condition == MIXED_PERIODIC_BC) .OR. &
+          (poisson_params%ps_implicit_params%boundary_condition == MIXED_BC)) THEN
          pw_env%poisson_env%parameters%dbc_params%do_dbc_cube = &
             BTEST(cp_print_key_should_output(logger%iter_info, input, &
                                              "DFT%PRINT%IMPLICIT_PSOLVER%DIRICHLET_BC_CUBE"), cp_p_file)
       END IF
       ! setup dct_pw_grid (an extended pw_grid) for Discrete Cosine Transformation (DCT)
-      IF ((poisson_params%ps_implicit_params%boundary_condition .EQ. NEUMANN_BC) .OR. &
-          (poisson_params%ps_implicit_params%boundary_condition .EQ. MIXED_BC)) THEN
+      IF ((poisson_params%ps_implicit_params%boundary_condition == NEUMANN_BC) .OR. &
+          (poisson_params%ps_implicit_params%boundary_condition == MIXED_BC)) THEN
          CALL setup_dct_pw_grids(pw_env%poisson_env%pw_pools(pw_env%poisson_env%pw_level)%pool%pw_grid, &
                                  my_cell%hmat, poisson_params%ps_implicit_params%neumann_directions, &
                                  pw_env%poisson_env%dct_pw_grid)
       END IF
       ! setup real space grid for finite difference derivatives of dielectric constant function
       IF (poisson_params%has_dielectric .AND. &
-          ((poisson_params%dielectric_params%derivative_method .EQ. derivative_cd3) .OR. &
-           (poisson_params%dielectric_params%derivative_method .EQ. derivative_cd5) .OR. &
-           (poisson_params%dielectric_params%derivative_method .EQ. derivative_cd7))) THEN
+          ((poisson_params%dielectric_params%derivative_method == derivative_cd3) .OR. &
+           (poisson_params%dielectric_params%derivative_method == derivative_cd5) .OR. &
+           (poisson_params%dielectric_params%derivative_method == derivative_cd7))) THEN
 
          SELECT CASE (poisson_params%ps_implicit_params%boundary_condition)
          CASE (NEUMANN_BC, MIXED_BC)
@@ -572,7 +574,7 @@ CONTAINS
       ALLOCATE (rs_grids(ngrid_level))
 
       ALLOCATE (pw_env%cube_info(ngrid_level))
-      higher_grid_layout = (/-1, -1, -1/)
+      higher_grid_layout = [-1, -1, -1]
 
       DO igrid_level = 1, ngrid_level
          pw_grid => pw_pools(igrid_level)%pool%pw_grid
@@ -650,7 +652,7 @@ CONTAINS
                WRITE (UNIT=iounit, FMT="(T2,A,T51,A30)") &
                   "POISSON| Boundary Condition", "PERIODIC"
             CASE (NEUMANN_BC, MIXED_BC)
-               IF (boundary_condition .EQ. NEUMANN_BC) THEN
+               IF (boundary_condition == NEUMANN_BC) THEN
                   WRITE (UNIT=iounit, FMT="(T2,A,T51,A30)") &
                      "POISSON| Boundary Condition", "NEUMANN"
                ELSE
@@ -692,7 +694,7 @@ CONTAINS
                "POISSON| Maximum number of iterations", poisson_params%ps_implicit_params%max_iter
             WRITE (UNIT=iounit, FMT="(T2,A,T51,ES30.2)") &
                "POISSON| Convergence threshold", poisson_params%ps_implicit_params%tol
-            IF (poisson_params%dielectric_params%dielec_functiontype .EQ. rho_dependent) THEN
+            IF (poisson_params%dielectric_params%dielec_functiontype == rho_dependent) THEN
                WRITE (UNIT=iounit, FMT="(T2,A,T51,F30.2)") &
                   "POISSON| Dielectric Constant", poisson_params%dielectric_params%eps0
             ELSE
@@ -778,10 +780,10 @@ CONTAINS
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
       CHARACTER(len=*), PARAMETER :: routineN = 'compute_max_radius'
-      CHARACTER(LEN=8), DIMENSION(4), PARAMETER :: &
-         pbas = (/"ORB     ", "AUX_FIT ", "MAO     ", "HARRIS  "/)
-      CHARACTER(LEN=8), DIMENSION(9), PARAMETER :: sbas = (/"ORB     ", "AUX     ", "RI_AUX  ", &
-         "MAO     ", "HARRIS  ", "RI_HXC  ", "RI_K    ", "LRI_AUX ", "RHOIN   "/)
+      CHARACTER(LEN=8), DIMENSION(10), PARAMETER :: sbas = ["ORB     ", "AUX     ", "RI_AUX  ", &
+         "MAO     ", "HARRIS  ", "RI_HXC  ", "RI_K    ", "LRI_AUX ", "RHOIN   ", "NUC     "]
+      CHARACTER(LEN=8), DIMENSION(5), PARAMETER :: &
+         pbas = ["ORB     ", "AUX_FIT ", "MAO     ", "HARRIS  ", "NUC     "]
       REAL(KIND=dp), PARAMETER                           :: safety_factor = 1.015_dp
 
       INTEGER :: handle, ibasis_set_type, igrid_level, igrid_zet0_s, ikind, ipgf, iset, ishell, &
@@ -791,6 +793,7 @@ CONTAINS
       REAL(KIND=dp)                                      :: alpha, core_charge, eps_gvg, eps_rho, &
                                                             max_rpgf0_s, maxradius, zet0_h, zetp
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: zeta, zetb
+      TYPE(cneo_potential_type), POINTER                 :: cneo_potential
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(gto_basis_set_type), POINTER                  :: orb_basis_set
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
@@ -838,9 +841,12 @@ CONTAINS
          ! this should, at a give point be changed
          ! so that also for the core a multigrid is used
          DO ikind = 1, nkind
+            NULLIFY (cneo_potential)
+            CALL get_qs_kind(qs_kind_set(ikind), cneo_potential=cneo_potential)
+            IF (ASSOCIATED(cneo_potential)) CYCLE
             CALL get_qs_kind(qs_kind_set(ikind), &
                              alpha_core_charge=alpha, ccore_charge=core_charge)
-            IF (alpha > 0.0_dp .AND. core_charge .NE. 0.0_dp) THEN
+            IF (alpha > 0.0_dp .AND. core_charge /= 0.0_dp) THEN
                maxradius = MAX(maxradius, exp_radius(0, alpha, eps_rho, core_charge, rlow=maxradius))
                ! forces
                maxradius = MAX(maxradius, exp_radius(1, alpha, eps_rho, core_charge, rlow=maxradius))
@@ -864,7 +870,7 @@ CONTAINS
                         zetp = zeta(ipgf, iset)
                         la = lshella(ishell, iset)
                         lgrid_level = gaussian_gridlevel(pw_env%gridlevel_info, zetp)
-                        IF (lgrid_level .EQ. igrid_level) THEN
+                        IF (lgrid_level == igrid_level) THEN
                            maxradius = MAX(maxradius, exp_radius(la, zetp, eps_rho, 1.0_dp, rlow=maxradius))
                         END IF
                      END DO
@@ -900,7 +906,7 @@ CONTAINS
                         zetp = zeta(ipgf, iset) + zetb(jpgf, jset)
                         lb = lshellb(jshell, jset) + la
                         lgrid_level = gaussian_gridlevel(pw_env%gridlevel_info, zetp)
-                        IF (lgrid_level .EQ. igrid_level) THEN
+                        IF (lgrid_level == igrid_level) THEN
                            ! density (scale is at most 2)
                            maxradius = MAX(maxradius, exp_radius(lb, zetp, eps_rho, 2.0_dp, rlow=maxradius))
                            ! tau, properties?
@@ -939,7 +945,7 @@ CONTAINS
 !> \param spherical ...
 !> \param cell_ref ...
 !> \param para_env ...
-!> \param input ...
+!> \param poisson_section ...
 !> \param my_ncommensurate ...
 !> \param uf_grid ...
 !> \param print_section ...
@@ -949,7 +955,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE setup_super_ref_grid(super_ref_pw_grid, mt_super_ref_pw_grid, &
                                    xc_super_ref_pw_grid, cutilev, grid_span, spherical, &
-                                   cell_ref, para_env, input, my_ncommensurate, uf_grid, print_section)
+                                   cell_ref, para_env, poisson_section, my_ncommensurate, uf_grid, print_section)
       TYPE(pw_grid_type), POINTER                        :: super_ref_pw_grid, mt_super_ref_pw_grid, &
                                                             xc_super_ref_pw_grid
       REAL(KIND=dp), INTENT(IN)                          :: cutilev
@@ -957,7 +963,7 @@ CONTAINS
       LOGICAL, INTENT(in)                                :: spherical
       TYPE(cell_type), POINTER                           :: cell_ref
       TYPE(mp_para_env_type), POINTER                    :: para_env
-      TYPE(section_vals_type), POINTER                   :: input
+      TYPE(section_vals_type), POINTER                   :: poisson_section
       INTEGER, INTENT(IN)                                :: my_ncommensurate
       LOGICAL, INTENT(in)                                :: uf_grid
       TYPE(section_vals_type), POINTER                   :: print_section
@@ -966,13 +972,10 @@ CONTAINS
       LOGICAL                                            :: mt_s_grid
       REAL(KIND=dp)                                      :: mt_rel_cutoff, my_cutilev
       TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(section_vals_type), POINTER                   :: poisson_section
 
-      NULLIFY (poisson_section)
       CPASSERT(.NOT. ASSOCIATED(mt_super_ref_pw_grid))
       CPASSERT(.NOT. ASSOCIATED(xc_super_ref_pw_grid))
       CPASSERT(.NOT. ASSOCIATED(super_ref_pw_grid))
-      poisson_section => section_vals_get_subs_vals(input, "DFT%POISSON")
       CALL section_vals_val_get(poisson_section, "POISSON_SOLVER", i_val=my_val)
       !
       ! Check if grids will be the same... In this case we don't use a super-reference grid
@@ -992,7 +995,7 @@ CONTAINS
          CALL pw_grid_create(xc_super_ref_pw_grid, para_env, cell_ref%hmat, grid_span=grid_span, &
                              cutoff=4._dp*cutilev, spherical=spherical, odd=.FALSE., fft_usage=.TRUE., &
                              ncommensurate=my_ncommensurate, icommensurate=1, &
-                             blocked=do_pw_grid_blocked_false, rs_dims=(/para_env%num_pe, 1/), &
+                             blocked=do_pw_grid_blocked_false, rs_dims=[para_env%num_pe, 1], &
                              iounit=iounit)
          super_ref_pw_grid => xc_super_ref_pw_grid
       END IF
@@ -1011,7 +1014,7 @@ CONTAINS
             CPASSERT(ALL(nn > no))
             CALL pw_grid_create(mt_super_ref_pw_grid, para_env, cell_ref%hmat, &
                                 cutoff=my_cutilev, spherical=spherical, fft_usage=.TRUE., &
-                                blocked=do_pw_grid_blocked_false, rs_dims=(/para_env%num_pe, 1/), &
+                                blocked=do_pw_grid_blocked_false, rs_dims=[para_env%num_pe, 1], &
                                 iounit=iounit)
             super_ref_pw_grid => mt_super_ref_pw_grid
          END IF
@@ -1058,7 +1061,7 @@ CONTAINS
          border_points = 3
       END SELECT
       CALL init_input_type(input_settings, 2*border_points + 1, rs_grid_section, &
-                           1, (/-1, -1, -1/))
+                           1, [-1, -1, -1])
       CALL rs_grid_create_descriptor(rs_desc, pw_grid, input_settings, &
                                      border_points=border_points)
       ALLOCATE (diel_rs_grid)
@@ -1070,4 +1073,3 @@ CONTAINS
    END SUBROUTINE setup_diel_rs_grid
 
 END MODULE pw_env_methods
-

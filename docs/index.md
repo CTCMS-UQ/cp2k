@@ -46,6 +46,8 @@ titlesonly:
 maxdepth: 1
 ---
 technologies/eigensolvers/index
+technologies/accelerators/index
+technologies/libraries
 ```
 
 % TODO: `{toctree} % :caption: How-to guides % % dummy % `
@@ -70,7 +72,7 @@ caption: Release Versions
 titlesonly:
 maxdepth: 1
 ---
-2024.2/3 <https://manual.cp2k.org/cp2k-2024_2-branch/index.html>
-2024.1 <https://manual.cp2k.org/cp2k-2024_1-branch/index.html>
+2026.1 <https://manual.cp2k.org/cp2k-2026_1-branch/index.html>
+2025.2 <https://manual.cp2k.org/cp2k-2025_2-branch/index.html>
 All versions <versions>
 ```

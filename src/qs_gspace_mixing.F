@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -10,6 +10,8 @@ MODULE qs_gspace_mixing
 
    USE cp_control_types,                ONLY: dft_control_type
    USE kinds,                           ONLY: dp
+   USE mathconstants,                   ONLY: z_one,&
+                                              z_zero
    USE mathlib,                         ONLY: invert_matrix
    USE message_passing,                 ONLY: mp_para_env_type
    USE pw_env_types,                    ONLY: pw_env_get,&
@@ -291,7 +293,7 @@ CONTAINS
                                                             inv_err, norm, norm_c_inv, res_norm, &
                                                             vol
       REAL(dp), ALLOCATABLE, DIMENSION(:)                :: alpha_c, ev
-      REAL(dp), ALLOCATABLE, DIMENSION(:, :)             :: a, b, c, c_inv, cpc_h_mix, cpc_s_mix
+      REAL(dp), ALLOCATABLE, DIMENSION(:, :)             :: b, c, c_inv, cpc_h_mix, cpc_s_mix
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(pw_c1d_gs_type), DIMENSION(:), POINTER        :: rho_g
       TYPE(rho_atom_type), DIMENSION(:), POINTER         :: rho_atom
@@ -365,17 +367,20 @@ CONTAINS
             mixing_store%ncall_p(ispin) = mixing_store%ncall_p(ispin) - 1
          ELSE
             nb1 = nb + 1
-            ALLOCATE (a(nb1, nb1))
-            a = 0.0_dp
+            IF (ALLOCATED(b)) DEALLOCATE (b)
             ALLOCATE (b(nb1, nb1))
             b = 0.0_dp
+            IF (ALLOCATED(c)) DEALLOCATE (c)
             ALLOCATE (c(nb, nb))
             c = 0.0_dp
+            IF (ALLOCATED(c_inv)) DEALLOCATE (c_inv)
             ALLOCATE (c_inv(nb, nb))
             c_inv = 0.0_dp
+            IF (ALLOCATED(alpha_c)) DEALLOCATE (alpha_c)
             ALLOCATE (alpha_c(nb))
             alpha_c = 0.0_dp
             norm_c_inv = 0.0_dp
+            IF (ALLOCATED(ev)) DEALLOCATE (ev)
             ALLOCATE (ev(nb1))
             ev = 0.0_dp
 
@@ -505,7 +510,6 @@ CONTAINS
          END IF ! nb==1
 
          IF (res_norm > 1.E-14_dp) THEN
-            DEALLOCATE (a)
             DEALLOCATE (b)
             DEALLOCATE (ev)
             DEALLOCATE (c, c_inv, alpha_c)
@@ -631,7 +635,7 @@ CONTAINS
       END IF
 
       DO ispin = 1, nspin
-         res_rho = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+         res_rho = z_zero
          DO ig = 1, ng
             res_rho(ig) = rho_g(ispin)%array(ig) - mixing_store%rhoin(ispin)%cc(ig)
          END DO
@@ -788,7 +792,7 @@ CONTAINS
             END IF
 
             DO ig = 1, ng
-               cc_mix = CMPLX(0.0_dp, 0.0_dp, kind=dp)
+               cc_mix = z_zero
                DO jb = 1, nb
                   cc_mix = cc_mix - G(jb)*mixing_store%drho_buffer(jb, ispin)%cc(ig)
                END DO
@@ -1000,7 +1004,7 @@ CONTAINS
       DO ispin = 1, nspin
          ! generate the global vector with the present residual
          gn => mixing_store%res_buffer(ib, ispin)%cc
-         gn_global = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+         gn_global = z_zero
          DO ig = 1, ng
             ig_global = mixing_store%ig_global_index(ig)
             gn_global(ig_global) = gn(ig)
@@ -1091,9 +1095,9 @@ CONTAINS
          CALL invert_matrix(b_matrix, binv_matrix, inv_err)
 
          ! A = Binv Ynorm^t
-         a_matrix = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+         a_matrix = z_zero
          DO kb = 1, nb
-            res_matrix_global = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+            res_matrix_global = z_zero
             DO ig = 1, ng
                ig_global = mixing_store%ig_global_index(ig)
                res_matrix_global(ig_global) = res_matrix(ig, kb)
@@ -1122,7 +1126,7 @@ CONTAINS
                        a_matrix(1, 1), nb, czero, ya(1, 1), ng)
             DO ig = 1, ng
                ig_global = mixing_store%ig_global_index(ig)
-               ya(ig, ig_global) = ya(ig, ig_global) + CMPLX(1.0_dp, 0.0_dp, KIND=dp)
+               ya(ig, ig_global) = ya(ig, ig_global) + z_one
             END DO
 
             CALL zgemv("N", ng, ng_global, cone, sa(1, 1), &
@@ -1155,14 +1159,14 @@ CONTAINS
 
          ELSE
             DO ig = 1, ng
-               pgn(ig) = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
-               ugn(ig) = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+               pgn(ig) = z_zero
+               ugn(ig) = z_zero
                ig_global = mixing_store%ig_global_index(ig)
                DO iig = 1, ng_global
-                  saa = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
-                  yaa = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+                  saa = z_zero
+                  yaa = z_zero
 
-                  IF (ig_global == iig) yaa = CMPLX(1.0_dp, 0.0_dp, KIND=dp)
+                  IF (ig_global == iig) yaa = z_one
 
                   DO jb = 1, nb
                      saa = saa - step_matrix(ig, jb)*a_matrix(jb, iig)

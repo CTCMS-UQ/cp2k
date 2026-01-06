@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -45,12 +45,12 @@ MODULE dm_ls_scf_types
       INTEGER, DIMENSION(:), ALLOCATABLE :: atom_to_molecule
       TYPE(dbcsr_type)                :: matrix_A = dbcsr_type()
       TYPE(dbcsr_type)                :: matrix_B = dbcsr_type()
-   END TYPE
+   END TYPE ls_mstruct_type
 
    TYPE ls_mat_history_type
       INTEGER :: istore = 0, nstore = 0
       TYPE(dbcsr_type), DIMENSION(:, :), ALLOCATABLE :: matrix
-   END TYPE
+   END TYPE ls_mat_history_type
 
    TYPE ls_scf_curvy_type
       TYPE(dbcsr_type), DIMENSION(:), ALLOCATABLE :: matrix_dp
@@ -73,7 +73,7 @@ MODULE dm_ls_scf_types
       REAL(KIND=dp)                                    :: filter_factor = 0.0_dp
       REAL(KIND=dp)                                    :: min_shift = 0.0_dp
       REAL(KIND=dp)                                    :: min_filter = 0.0_dp
-   END TYPE
+   END TYPE ls_scf_curvy_type
 
    TYPE chebyshev_type
       LOGICAL :: compute_chebyshev = .FALSE.
@@ -83,7 +83,7 @@ MODULE dm_ls_scf_types
       REAL(KIND=dp), DIMENSION(:), POINTER :: max_energy => NULL()
       TYPE(section_vals_type), POINTER :: print_key_dos => NULL()
       TYPE(section_vals_type), POINTER :: print_key_cube => NULL()
-   END TYPE
+   END TYPE chebyshev_type
 
    TYPE ls_scf_env_type
       INTEGER               :: nspins = 0, natoms = 0
@@ -158,7 +158,7 @@ MODULE dm_ls_scf_types
 
       LOGICAL :: calculate_forces = .FALSE.
 
-#if defined(__LIBPEXSI)
+#if defined(__PEXSI)
       TYPE(lib_pexsi_env) :: pexsi
 #else
       TYPE(lib_pexsi_env) :: pexsi = lib_pexsi_env()

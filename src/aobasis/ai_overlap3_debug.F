@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -84,8 +84,8 @@ CONTAINS
       INTEGER, DIMENSION(3)                              :: an, cn, bn
       REAL(dp)                                           :: IACB
 
-      INTEGER, DIMENSION(3), PARAMETER                   :: i1 = (/1, 0, 0/), i2 = (/0, 1, 0/), &
-                                                            i3 = (/0, 0, 1/)
+      INTEGER, DIMENSION(3), PARAMETER                   :: i1 = [1, 0, 0], i2 = [0, 1, 0], &
+                                                            i3 = [0, 0, 1]
 
       IACB = 0._dp
       IF (ANY(an < 0)) RETURN
