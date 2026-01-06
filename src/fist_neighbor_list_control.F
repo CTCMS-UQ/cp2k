@@ -200,7 +200,7 @@ CONTAINS
       END IF
       ! Force Update
       IF (PRESENT(force_update)) THEN
-        IF (force_update) update_neighbor_lists = .TRUE.
+         IF (force_update) update_neighbor_lists = .TRUE.
       END IF
 
 

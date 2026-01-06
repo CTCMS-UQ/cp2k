@@ -472,7 +472,7 @@ CONTAINS
       END IF
 
       CALL allocate_tmp(md_env, tmp, nparticle, nshell, shell_adiabatic)
-      
+
       ! Apply thermostat over the full set of shells if required
       IF (shell_adiabatic) THEN
          CALL apply_thermostat_shells(thermostat_shell, atomic_kind_set, particle_set, &
@@ -516,9 +516,8 @@ CONTAINS
          CALL half_cell_SLLOD(cell, dt, sllodvar)
          CALL half_cell_SLLOD(cell, dt, sllodvar)
          CALL remap_cell_SLLOD(cell, sllodvar)
-      ! Update the inverse
+         ! Update the inverse
          CALL init_cell(cell)
-
       END IF
 
       ! Broadcast the new particle positions and deallocate pos part of temporary
@@ -808,7 +807,7 @@ CONTAINS
       dt = simpar%dt
 
       CALL force_env_get(force_env=force_env, subsys=subsys, cell=cell)
-      
+
       ! Do some checks on coordinates and box
       CALL apply_qmmm_walls_reflective(force_env)
 
@@ -869,7 +868,7 @@ CONTAINS
 
       IF (simpar%constraint) CALL getold(gci, local_molecules, molecule_set, &
                                          molecule_kind_set, particle_set, cell)
-      
+
       !    *** Velocity Verlet for Langeving *** v(t)--> v(t+1/2)
       IF (ASSOCIATED(force_env%meta_env)) THEN
          IF (force_env%meta_env%langevin) THEN
@@ -879,7 +878,7 @@ CONTAINS
             CALL metadyn_velocities_colvar(force_env, rand)
          END IF
       END IF
-      
+
       ! Velocity Verlet (first part)
       CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                     core_particle_set, shell_particle_set, nparticle_kind, shell_adiabatic, dt)
@@ -891,7 +890,7 @@ CONTAINS
       IF(simpar%do_SLLOD) CALL vv_first_SLLOD(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,sllodvar)
-       
+
       IF (simpar%variable_dt) CALL variable_timestep(md_env, tmp, dt, simpar, para_env, atomic_kind_set, &
                                                      local_particles, particle_set, core_particle_set, shell_particle_set, &
                                                      nparticle_kind, shell_adiabatic)
@@ -1041,7 +1040,6 @@ CONTAINS
                          particles=particles, local_molecules=local_molecules, molecules=molecules, &
                          molecule_kinds=molecule_kinds, gci=gci, virial=virial)
 
-
       nparticle_kind = atomic_kinds%n_els
       atomic_kind_set => atomic_kinds%els
       molecule_kind_set => molecule_kinds%els
@@ -1134,12 +1132,11 @@ CONTAINS
          CALL half_cell_SLLOD(cell, dt, sllodvar)
          CALL half_cell_SLLOD(cell, dt, sllodvar)
          CALL remap_cell_SLLOD(cell, sllodvar)
-      ! Update the inverse
+         ! Update the inverse
          CALL init_cell(cell)
-
       END IF
-     
-            ! Broadcast the new particle positions and deallocate pos components of temporary
+
+      ! Broadcast the new particle positions and deallocate pos components of temporary
       CALL update_dealloc_tmp(tmp, particle_set, shell_particle_set, &
                               core_particle_set, para_env, shell_adiabatic, pos=.TRUE.)
 
@@ -1233,7 +1230,6 @@ CONTAINS
          END IF
       END IF
 
-     
       ! Update constraint virial
       IF (simpar%constraint) CALL pv_constraint(gci, local_molecules, &
                                                 molecule_set, molecule_kind_set, particle_set, virial, para_env)
@@ -1971,7 +1967,7 @@ CONTAINS
          CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                        core_particle_set, shell_particle_set, nparticle_kind, &
                        shell_adiabatic, dt)
-          
+
           IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
@@ -2243,9 +2239,10 @@ CONTAINS
                                                         roll_tol, iroll, vector_r, vector_v, para_env, cell=cell, &
                                                         local_particles=local_particles)
       END DO SR
+
       ! Update h_mat
       cell%hmat(1, 1) = cell%hmat(1, 1)*tmp%scale_r(1)*tmp%scale_r(1)
-      
+
       ! Update the inverse
       CALL init_cell(cell)
 
@@ -2500,7 +2497,7 @@ CONTAINS
          CALL vv_first(tmp, atomic_kind_set, local_particles, particle_set, &
                        core_particle_set, shell_particle_set, nparticle_kind, &
                        shell_adiabatic, dt, u=tmp%u)
-         
+
          IF(simpar%do_NEforce) CALL vv_first_NE(tmp, atomic_kind_set, &
                                  local_particles, particle_set, &
                                  nparticle_kind, dt,nevar)
@@ -2523,7 +2520,7 @@ CONTAINS
                                                         para_env, u=tmp%u, cell=cell, &
                                                         local_particles=local_particles)
       END DO SR
-      
+
       IF(simpar%do_SLLOD) CALL half_cell_SLLOD(cell, dt, sllodvar)
 
       ! Update h_mat
