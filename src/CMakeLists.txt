@@ -1155,6 +1155,7 @@ list(
   motion/neb_opt_utils.F
   motion/neb_types.F
   motion/neb_utils.F
+  motion/nonequilibrium_types.F
   motion/pint_gle.F
   motion/pint_io.F
   motion/pint_methods.F
@@ -1173,6 +1174,7 @@ list(
   motion/simpar_methods.F
   motion/space_groups.F
   motion/space_groups_types.F
+  motion/sllod_types.F
   motion/thermal_region_types.F
   motion/thermal_region_utils.F
   motion/thermostat/al_system_dynamics.F
